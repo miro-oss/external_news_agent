@@ -38,6 +38,22 @@ class ReportChangesControllerTest {
         verify(comparisons).get(101);
     }
 
+    @Test void runComparisonCarriesFrozenPeriodsAndNullableNumericSampleWithoutChangingEnvelope() throws Exception {
+        var result = new ReportChanges(201, null, 200L, null, ReportChanges.Status.READY,
+                ReportChanges.Status.READY.message, false, List.of(), List.of(),
+                new ReportChanges.Periods("RUN", "2026-10-19 09:00 실행", "2026-10-26 09:00 실행"),
+                new ReportChanges.KeywordChanges(ReportChanges.KeywordStatus.AVAILABLE, null, "같은 조건의 관측 비중입니다.",
+                        10, 20, false, List.of(new ReportChanges.KeywordChange("HBM", 0, 5, 0.0, 25.0, 25.0))));
+        when(comparisons.get(201)).thenReturn(result);
+        mvc.perform(get("/api/news/reports/201/changes"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.result.reportDate").isEmpty())
+                .andExpect(jsonPath("$.result.periods.basis").value("RUN"))
+                .andExpect(jsonPath("$.result.periods.previousLabel").value("2026-10-19 09:00 실행"))
+                .andExpect(jsonPath("$.result.keywordChanges.items[0].previousIssueCount").value(0))
+                .andExpect(jsonPath("$.result.keywordChanges.items[0].changePercentagePoints").value(25.0));
+    }
+
     @Test void nonexistentHiddenOrPendingReportUsesSpecified404() throws Exception {
         when(comparisons.get(101)).thenThrow(new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
         mvc.perform(get("/api/news/reports/101/changes"))

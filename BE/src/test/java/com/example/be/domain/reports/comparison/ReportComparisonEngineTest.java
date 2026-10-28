@@ -28,6 +28,22 @@ class ReportComparisonEngineTest {
         assertTrue(plan.result().notes().getFirst().contains("2026-09-07"));
     }
 
+    @Test void runReportsHaveNullCalendarDatesAndWeeklyCadenceIsNotADateGap() {
+        var before = snapshot(side(1, 10, "하반기 양산"));
+        var after = snapshot(side(1, 20, "하반기 양산"));
+        var run = new ComparisonWork(101, null, 100, null, before, after, List.of());
+        assertEquals(ReportChanges.Type.UNCHANGED, engine.prepare(run).result().items().getFirst().type());
+        assertTrue(engine.prepare(run).result().notes().isEmpty());
+        var monday = LocalDate.of(2026, 10, 19);
+        after = new ReportComparisonSnapshot(after.version(), after.issues(), after.scopes(),
+                new ReportComparisonSnapshot.Period(com.example.be.domain.reports.entity.ReportScope.WEEKLY, null,
+                        monday.plusWeeks(1), monday.plusWeeks(1).plusDays(6), 7, null, null, List.of()), List.of());
+        var weekly = new ComparisonWork(101, monday.plusWeeks(1), 100, monday, before, after, List.of());
+        assertTrue(engine.prepare(weekly).result().notes().isEmpty());
+        var gap = new ComparisonWork(101, monday.plusWeeks(2), 100, monday, before, after, List.of());
+        assertTrue(engine.prepare(gap).result().notes().getFirst().contains("공백"));
+    }
+
     @Test void provenMergePreservesOriginalIdentityWhileAmbiguousAncestryIsNotCompared() {
         var before = snapshot(side(1, 10, "하반기 양산"));
         var after = snapshot(side(2, 20, "10월 양산"));

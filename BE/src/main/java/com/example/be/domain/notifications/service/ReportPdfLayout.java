@@ -116,6 +116,27 @@ final class ReportPdfLayout implements AutoCloseable {
         gap(10);
     }
 
+    void keywordComparison(String label, String amount, double previous, double current) throws IOException {
+        float height = readingTextHeight(label, bold, 10.5f, 17) + readingTextHeight(amount, regular, 8.5f, 13) + 40;
+        ensure(Math.min(height, TOP - BOTTOM));
+        textBlock(label, 10.5f, 17, bold, INK, 0);
+        muted(amount);
+        ensure(28);
+        for (int index = 0; index < 2; index++) {
+            double share = index == 0 ? previous : current;
+            stream.setNonStrokingColor(RULE);
+            stream.addRect(MARGIN, y - 5, WIDTH, 5);
+            stream.fill();
+            if (share > 0) {
+                stream.setNonStrokingColor(index == 0 ? new Color(148, 163, 184) : BLUE);
+                stream.addRect(MARGIN, y - 5, WIDTH * (float) (Math.min(100, share) / 100), 5);
+                stream.fill();
+            }
+            gap(9);
+        }
+        gap(12);
+    }
+
     void anchor(String name) {
         if (destinations.containsKey(name)) throw new IllegalArgumentException("중복된 PDF 이동 대상입니다.");
         PDPageXYZDestination destination = new PDPageXYZDestination();

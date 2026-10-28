@@ -60,7 +60,7 @@ test('weekly list and initial selection use the newest aggregation period while 
   assert.match(linked.split('class="report-detail-shell"')[1], /2026-08-31 ~ 2026-09-06 주간 통합 뉴스 보고서/)
 })
 
-test('weekly deep links select the weekly tab and render source coverage without requesting comparisons', () => {
+test('weekly deep links select the weekly tab and render source coverage with their own comparison', () => {
   const report = weeklyReportFixture(fixture.report)
   const { html, changesQueries } = renderPage(report)
   assert.match(html, /aria-pressed="true"[^>]*>주간 보고서/)
@@ -70,8 +70,22 @@ test('weekly deep links select the weekly tab and render source coverage without
   assert.match(html, /href="#\/reports\?reportId=116"/)
   assert.match(html, /href="#\/reports\?reportId=117"/)
   assert.match(html, /선택한 기간과 겹치는 주간 보고서/)
-  assert.doesNotMatch(html, /지난 보고서와 달라진 점|report-changes-panel/)
-  assert.equal(changesQueries.length, 0)
+  assert.match(html, /지난 보고서와 달라진 점/)
+  assert.equal(changesQueries.length, 1)
+  assert.deepEqual(changesQueries[0].queryKey, ['reports', report.id, 'changes'])
+})
+
+test('RUN and topic WEEKLY reports mount their comparison outside the collapsed report detail', () => {
+  for (const report of [
+    { ...fixture.report, id: 917, reportScope: 'RUN', reportDate: null },
+    { ...weeklyReportFixture(fixture.report), id: 918, topicId: 29, topicName: 'HBM', sourceReportIds: [], sourceReportDates: [] },
+  ]) {
+    report.briefing = { version: 'report-briefing.v1', items: [], watchItems: [], omittedItemCount: 0 }
+    const { html, changesQueries } = renderPage(report)
+    assert.equal(changesQueries.length, 1)
+    assert.deepEqual(changesQueries[0].queryKey, ['reports', report.id, 'changes'])
+    assert.ok(html.indexOf('class="report-changes-panel"') < html.indexOf('이슈와 근거 자세히 보기'))
+  }
 })
 
 test('weekly findings preserve saved titles and distinct findings even when live issue IDs merged', () => {

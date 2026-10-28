@@ -10,9 +10,7 @@ export async function refreshReportReading(
   // The list and comparison panel show their own fetch errors; the report read stays successful.
   await Promise.all([
     client.invalidateQueries({ queryKey: ['reports', 'list'] }),
-    report.reportScope === 'DAILY'
-      ? client.invalidateQueries({ queryKey: ['reports', report.id, 'changes'], exact: true })
-      : Promise.resolve(),
+    client.invalidateQueries({ queryKey: ['reports', report.id, 'changes'], exact: true }),
   ])
   return result
 }

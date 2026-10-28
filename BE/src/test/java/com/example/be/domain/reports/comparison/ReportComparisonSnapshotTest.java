@@ -46,4 +46,45 @@ class ReportComparisonSnapshotTest {
         assertFalse(original.withScopes(List.of()).hasKnownScopes());
         assertEquals(2, original.issues().size());
     }
+
+    @Test void periodsKeepCalendarWindowsAndDoNotTreatRunDurationAsCollectionDuration() {
+        var day = java.time.LocalDate.of(2026, 10, 29);
+        var run = CollectionRun.builder().id(10L).startedAt(day.atTime(9, 0)).finishedAt(day.atTime(9, 5)).build();
+        var report = com.example.be.domain.reports.entity.NewsReport.builder().run(run)
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.RUN).build();
+        var period = ReportComparisonSnapshot.Period.from(report);
+        assertEquals(day, period.from());
+        assertNull(period.durationDays());
+        assertEquals(day.atTime(9, 0), period.runStartedAt());
+        var weekly = com.example.be.domain.reports.entity.NewsReport.builder()
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.WEEKLY).topicId(1L)
+                .reportDate(day).reportEndDate(day.plusDays(6)).missingReportDates(List.of(day.plusDays(1))).build();
+        assertEquals(7, ReportComparisonSnapshot.Period.from(weekly).durationDays());
+        assertEquals(List.of(day.plusDays(1)), ReportComparisonSnapshot.Period.from(weekly).missingDates());
+    }
+
+    @Test void legacySnapshotJsonHasUnknownConditionsWhileNewMetadataSurvivesProjection() {
+        var original = ComparisonFixtures.snapshot(ComparisonFixtures.side(1, 10, "근거"));
+        var json = new tools.jackson.databind.ObjectMapper();
+        var legacy = json.readValue("{\"version\":1,\"issues\":[],\"scopes\":[]}", ReportComparisonSnapshot.class);
+        assertNull(legacy.period());
+        assertNull(legacy.sourceConditions());
+        var period = new ReportComparisonSnapshot.Period(com.example.be.domain.reports.entity.ReportScope.DAILY,
+                null, java.time.LocalDate.of(2026, 10, 29), java.time.LocalDate.of(2026, 10, 29), 1, null, null, List.of());
+        var captured = new ReportComparisonSnapshot(1, original.issues(), original.scopes(), period,
+                List.of(new ReportComparisonSnapshot.SourceCondition(1L, 1L, 1L, "saved-fingerprint", true)));
+        var restored = json.readValue(json.writeValueAsString(captured), ReportComparisonSnapshot.class).reflected(List.of(10L));
+        assertEquals(period, restored.period());
+        assertEquals(captured.sourceConditions(), restored.sourceConditions());
+    }
+
+    @Test void changingDartCompanyMakesSavedTopicConditionsDifferent() {
+        var original = ComparisonFixtures.snapshot(ComparisonFixtures.side(1, 10, "근거"));
+        var topic = original.scopes().getFirst().topics().getFirst();
+        var changed = new com.example.be.domain.collection.entity.CollectionTopicSnapshot(topic.topicId(), topic.topicName(),
+                topic.queryText(), topic.requiredKeywords(), topic.optionalKeywords(), topic.excludedKeywords(),
+                topic.batchSize(), topic.intervalMinutes(), new com.example.be.domain.dart.model.DartModels.Company("001", "회사", null));
+        var updated = original.withScopes(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(1L, List.of(changed))));
+        assertNotEquals(original.scopesByTopic(), updated.scopesByTopic());
+    }
 }

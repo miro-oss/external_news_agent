@@ -42,7 +42,8 @@ public class ReportCreationService {
         var suppressed = candidates.stream().map(Finding::getId).filter(id -> !retained.contains(id)).collect(java.util.stream.Collectors.toSet());
         var selected = findings.stream().filter(finding -> !suppressed.contains(finding.getId())).toList();
         persistenceService.freezeCompanySelection(reservation.reportId(), selected.stream().map(Finding::getId).toList(),
-                suppressed.stream().sorted().toList(), null, selection.applications(), generatedAt);
+                suppressed.stream().sorted().toList(), null, selection.applications(), java.util.Set.of(),
+                selection.comparisonScopeKnown(), generatedAt);
         ReportDocument document = reportOrchestrator.generate(run, selected, generatedAt);
         return persistenceService.complete(reservation.reportId(), document, LocalDateTime.now(ApiTimeZone.ZONE));
     }

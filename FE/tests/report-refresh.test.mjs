@@ -68,7 +68,7 @@ test('a comparison failure stays visible as a comparison error while the success
   assert.equal(observer.getCurrentResult().error, failure)
 })
 
-test('RUN and WEEKLY refreshes never fetch or invalidate daily comparisons', async t => {
+test('RUN and WEEKLY refreshes also replace their active comparison after filtering changes', async t => {
   const client = new QueryClient()
   t.after(() => client.clear())
   client.setQueryData(key, ready)
@@ -77,9 +77,9 @@ test('RUN and WEEKLY refreshes never fetch or invalidate daily comparisons', asy
   for (const reportScope of ['RUN', 'WEEKLY']) {
     assert.equal(await refreshReportReading(client, { id: 17, reportScope }, async () => reportScope), reportScope)
   }
-  assert.equal(comparisonReads, 0)
+  assert.equal(comparisonReads, 2)
   assert.equal(client.getQueryState(key).isInvalidated, false)
-  assert.deepEqual(client.getQueryData(key), ready)
+  assert.deepEqual(client.getQueryData(key), unavailable)
 })
 
 test('failed main report refresh keeps its error and does not silently replace the comparison', async t => {

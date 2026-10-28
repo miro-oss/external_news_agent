@@ -56,7 +56,7 @@ class WeeklyReportCreationServiceTest {
         when(agent.generate(eq(1L), eq(selected), any())).thenReturn(new ReportDocument("주간", "내용", "model"));
         service.generate(monday);
         var ordering = inOrder(persistence, agent);
-        ordering.verify(persistence).freezeCompanySelection(eq(1L), eq(List.of(102L)), eq(List.of(101L)), eq(selected), eq(List.of()), eq(java.util.Set.of()), any());
+        ordering.verify(persistence).freezeCompanySelection(eq(1L), eq(List.of(102L)), eq(List.of(101L)), eq(selected), eq(List.of()), eq(java.util.Set.of()), eq(false), any());
         ordering.verify(agent).generate(eq(1L), eq(selected), any());
     }
 
@@ -68,7 +68,7 @@ class WeeklyReportCreationServiceTest {
         when(agent.generate(eq(1L), eq(input), any())).thenReturn(new ReportDocument("주간", "내용", "model"));
         service.generate(monday);
         verify(interests).selectWeekly(input, topics);
-        verify(persistence).freezeCompanySelection(eq(1L), eq(List.of()), eq(List.of()), same(input), eq(List.of()), eq(java.util.Set.of(2L)), any());
+        verify(persistence).freezeCompanySelection(eq(1L), eq(List.of()), eq(List.of()), same(input), eq(List.of()), eq(java.util.Set.of(2L)), eq(false), any());
     }
 
     @Test

@@ -31,7 +31,7 @@ public class WeeklyReportCreationService {
         // Weekly company selection removes complete compound events; there is no ranking limit here.
         var suppressed = reservation.input().sourceFindingIds().stream().filter(id -> !retained.contains(id)).toList();
         persistence.freezeCompanySelection(reservation.reportId(), selection.input().sourceFindingIds(), suppressed, selection.input(),
-                selection.applications(), selection.criterionTopicIds(), now);
+                selection.applications(), selection.criterionTopicIds(), selection.comparisonScopeKnown(), now);
         ReportDocument document;
         try {
             document = orchestrator.generate(reservation.reportId(), selection.input(), now);

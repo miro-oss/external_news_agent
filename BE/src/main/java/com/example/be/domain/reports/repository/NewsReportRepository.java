@@ -43,6 +43,17 @@ public interface NewsReportRepository
     Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
             ReportScope scope, LocalDate before, ReportStatus status);
 
+    @Query("""
+            SELECT report FROM NewsReport report
+            WHERE report.reportScope = :scope AND report.reportDate < :before
+              AND ((:topicId IS NULL AND report.topicId IS NULL) OR report.topicId = :topicId)
+              AND report.reportStatus <> com.example.be.domain.reports.entity.ReportStatus.PENDING
+              AND report.deletedAt IS NULL
+            ORDER BY report.reportDate DESC, report.id DESC
+            """)
+    List<NewsReport> findPreviousComparisonReports(@Param("scope") ReportScope scope,
+            @Param("topicId") Long topicId, @Param("before") LocalDate before, Pageable pageable);
+
     List<NewsReport> findByReportScopeAndReportDateBetweenOrderByReportDateAsc(
             ReportScope scope, LocalDate from, LocalDate through);
 

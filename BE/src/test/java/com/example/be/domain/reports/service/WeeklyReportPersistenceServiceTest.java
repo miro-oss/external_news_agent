@@ -31,7 +31,7 @@ class WeeklyReportPersistenceServiceTest {
     private final ReportEventFeedbackProjection feedbackProjection = mock(ReportEventFeedbackProjection.class);
     private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
     private final WeeklyReportPersistenceService service = new WeeklyReportPersistenceService(
-            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
+            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
     private final LocalDate monday = LocalDate.of(2026, 9, 7);
     private final LocalDateTime now = monday.plusWeeks(1).atTime(0, 5);
 
@@ -62,7 +62,7 @@ class WeeklyReportPersistenceServiceTest {
         assertEquals(monday.plusDays(1).datesUntil(monday.plusDays(6)).toList(), saved.getMissingReportDates());
         assertEquals(2, saved.getSourceReportCount());
         assertEquals(List.of(100L), saved.getSourceRunIds());
-        assertFalse(saved.isComparisonInputUsable());
+        assertTrue(saved.isComparisonInputUsable());
         assertEquals("2026-09-07 ~ 2026-09-13 주간 통합 뉴스 보고서", saved.getTitle());
     }
 

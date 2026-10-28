@@ -106,4 +106,63 @@ class ReportComparisonPersistenceTest {
         persistence.finish(101, result);
         verify(comparisons, times(2)).finish(eq(101L), argThat(value -> value.status() == ReportChanges.Status.UNAVAILABLE && value.items().isEmpty()), any());
     }
+
+    @Test void runDoesNotSkipImmediateSameTopicExecutionWithoutReport() {
+        var started = date.atTime(9, 0);
+        var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();
+        var current = NewsReport.builder().id(101L).run(run).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(20L)).build();
+        var input = snapshot(side(1, 20, "현재"));
+        input = new ReportComparisonSnapshot(input.version(), input.issues(), input.scopes(),
+                ReportComparisonSnapshot.Period.from(current), List.of());
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(comparisons.findInput(101L)).thenReturn(Optional.of(input));
+        when(comparisons.previousRuns(started, 90L)).thenReturn(List.of(
+                new ReportComparisonRepository.RunCandidate(89L, null, started.minusWeeks(1), java.util.Set.of(1L), java.util.Set.of(1L), true),
+                new ReportComparisonRepository.RunCandidate(88L, 98L, started.minusWeeks(2), java.util.Set.of(1L), java.util.Set.of(1L), true)));
+        persistence.enqueue(101L);
+        verify(comparisons).insert(argThat(result -> result.status() == ReportChanges.Status.NO_BASELINE
+                && result.reportDate() == null && result.baseReportId() == null), isNull(), any());
+        verify(reports, never()).findById(98L);
+    }
+
+    @Test void runUsesPreviousSavedTopicSetRatherThanAdjacentDifferentTopic() {
+        var started = date.atTime(9, 0);
+        var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();
+        var current = NewsReport.builder().id(101L).run(run).reportScope(ReportScope.RUN).generatedAt(started.plusMinutes(5))
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(20L)).build();
+        var baseRun = com.example.be.domain.collection.entity.CollectionRun.builder().id(88L).startedAt(started.minusWeeks(1)).build();
+        var base = NewsReport.builder().id(100L).run(baseRun).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(10L)).build();
+        var input = snapshot(side(1, 20, "현재"));
+        input = new ReportComparisonSnapshot(input.version(), input.issues(), input.scopes(),
+                ReportComparisonSnapshot.Period.from(current), List.of());
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(reports.findById(100L)).thenReturn(Optional.of(base));
+        when(comparisons.findInput(101L)).thenReturn(Optional.of(input));
+        when(comparisons.findInput(100L)).thenReturn(Optional.of(snapshot(side(1, 10, "이전"))));
+        when(comparisons.previousRuns(started, 90L)).thenReturn(List.of(
+                new ReportComparisonRepository.RunCandidate(89L, 99L, started.minusDays(1), java.util.Set.of(2L), java.util.Set.of(2L), true),
+                new ReportComparisonRepository.RunCandidate(88L, 100L, started.minusWeeks(1), java.util.Set.of(1L), java.util.Set.of(1L), true)));
+        persistence.enqueue(101L);
+        verify(comparisons).insert(argThat(result -> result.status() == ReportChanges.Status.PENDING
+                && result.baseReportId().equals(100L) && result.reportDate() == null && result.baseReportDate() == null), any(), any());
+        verify(reports, never()).findById(99L);
+    }
+
+    @Test void topicWeeklyBaselineCannotUseIntegratedWeeklyAndDeduplicatesOnlyFinalInputs() {
+        var current = NewsReport.builder().id(101L).reportScope(ReportScope.WEEKLY).topicId(1L).reportDate(date)
+                .reportEndDate(date.plusDays(6)).generatedAt(date.plusWeeks(1).atStartOfDay())
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(20L, 30L)).build();
+        var base = NewsReport.builder().id(100L).reportScope(ReportScope.WEEKLY).topicId(1L).reportDate(date.minusWeeks(1))
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(10L)).build();
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(reports.findPreviousComparisonReports(eq(ReportScope.WEEKLY), eq(1L), eq(date), any())).thenReturn(List.of(base));
+        when(comparisons.findInput(101L)).thenReturn(Optional.of(snapshot(side(1, 20, "초반"), side(1, 30, "최종"), side(1, 40, "미반영"))));
+        when(comparisons.findInput(100L)).thenReturn(Optional.of(snapshot(side(1, 10, "전주"))));
+        persistence.enqueue(101L);
+        var work = ArgumentCaptor.forClass(ComparisonWork.class);
+        verify(comparisons).insert(any(), work.capture(), any());
+        assertEquals(List.of(30L), work.getValue().current().issues().stream().map(ReportComparisonSnapshot.Issue::findingId).toList());
+    }
 }

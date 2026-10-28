@@ -6,6 +6,9 @@
 .report-changes-dates time { padding: .3rem .55rem; border-radius: var(--radius-xs); background: var(--surface-sunken); font-variant-numeric: tabular-nums; }
 .report-changes-dates a { color: var(--primary-strong); text-decoration: none; }
 .report-changes-dates a:hover { text-decoration: underline; }
+.report-changes-period { display: grid; gap: .3rem; min-width: 0; padding: .6rem .8rem; border-radius: var(--radius-sm); background: var(--surface-sunken); overflow-wrap: anywhere; }
+.report-changes-period small { color: var(--fg-3); }
+.report-changes-period strong { font-size: .8rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .report-changes-counts { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0; padding: 0; list-style: none; }
 .report-change-badge { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .6rem; border-radius: 999px; color: var(--fg-2); background: var(--surface-sunken); font-size: .74rem; font-weight: 650; line-height: 1.5; }
 .report-change-badge[data-type="NEWLY_INCLUDED"] { color: var(--success-strong); background: var(--success-weak); }
@@ -45,9 +48,36 @@
 .report-changes-unchanged { margin-top: 1rem; }
 .report-changes-unchanged > summary { color: var(--fg-2); }
 .report-changes-footnote { margin: 1rem 0 0; color: var(--fg-3); font-size: .75rem; line-height: 1.7; }
+.report-change-full-summary { margin: .8rem 0; color: var(--fg-2); font-size: .85rem; line-height: 1.8; white-space: pre-wrap; }
+.report-keyword-changes { margin-top: 1.3rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.report-keyword-changes h4 { margin: 0; font-size: .94rem; }
+.report-keyword-changes-description,
+.report-keyword-changes-unavailable { margin: .55rem 0; color: var(--fg-3); font-size: .78rem; line-height: 1.8; }
+.report-keyword-changes-description strong { color: var(--fg-2); font-weight: 600; }
+.report-keyword-change-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: 1rem 0 .65rem; color: var(--fg-3); font-size: .7rem; }
+.report-keyword-change-legend [data-period] { display: inline-flex; align-items: center; gap: .3rem; }
+.report-keyword-change-legend [data-period]::before { content: ''; display: block; width: .65rem; height: .4rem; border-radius: 2px; background: var(--fg-3); }
+.report-keyword-change-legend [data-period="current"]::before { background: var(--primary); }
+.report-keyword-changes-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; padding: 0; margin: 0; list-style: none; }
+.report-keyword-change { min-width: 0; padding: .85rem; background: var(--surface-sunken); border-radius: var(--radius-sm); }
+.report-keyword-change-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .3rem .8rem; font-size: .8rem; }
+.report-keyword-change-heading > strong { overflow-wrap: anywhere; }
+.report-keyword-change-delta { color: var(--fg-2); font-size: .76rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.report-keyword-change-delta[data-direction="up"] { color: var(--primary-strong); }
+.report-keyword-change-delta[data-direction="down"] { color: var(--fg-2); }
+.report-keyword-change-delta[data-direction="unknown"] { color: var(--fg-3); font-weight: 400; }
+.report-keyword-change-bars { display: grid; gap: .35rem; margin-top: .75rem; }
+.report-keyword-change-bar-row { display: grid; grid-template-columns: 1.8rem minmax(0, 1fr) 3.8rem; align-items: center; gap: .5rem; color: var(--fg-3); font-size: .71rem; }
+.report-keyword-change-track { height: .4rem; border-radius: 3px; overflow: hidden; background: var(--surface); }
+.report-keyword-change-track > span { display: block; height: 100%; border-radius: inherit; background: var(--fg-3); }
+.report-keyword-change-bar-row[data-period="current"] .report-keyword-change-track > span { background: var(--primary); }
+.report-keyword-change-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.report-keyword-change-count { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin: .6rem 0 0; color: var(--fg-3); font-size: .7rem; }
+.report-keyword-change-new { padding: .12rem .35rem; border-radius: 4px; color: var(--primary-strong); background: var(--primary-weak); }
 @media (max-width: 760px) {
   .report-changes-panel { padding: 1rem; }
   .report-change-sides { grid-template-columns: minmax(0, 1fr); }
   .report-change-item { padding: .9rem; }
   .report-change-side { padding: .85rem; }
+  .report-keyword-changes-list { grid-template-columns: minmax(0, 1fr); }
 }

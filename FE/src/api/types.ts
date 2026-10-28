@@ -401,6 +401,27 @@ export interface ReportChanges {
   scopeChanged: boolean
   notes: string[]
   items: ReportChangeItem[]
+  periods?: { basis: ReportScope; previousLabel: string | null; currentLabel: string } | null
+  keywordChanges?: ReportKeywordChanges | null
+}
+
+export interface ReportKeywordChange {
+  keyword: string
+  previousIssueCount: number
+  currentIssueCount: number
+  previousSharePercent: number | null
+  currentSharePercent: number | null
+  changePercentagePoints: number | null
+}
+
+export interface ReportKeywordChanges {
+  status: 'AVAILABLE' | 'UNAVAILABLE'
+  reason: string | null
+  message: string
+  previousDenominatorIssueCount: number | null
+  currentDenominatorIssueCount: number | null
+  lowSample: boolean
+  items: ReportKeywordChange[]
 }
 
 export type ReportScope = 'RUN' | 'DAILY' | 'WEEKLY'

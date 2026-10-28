@@ -1,4 +1,4 @@
-import type { ReportChangeItem, ReportChangesStatus, ReportChangeType } from '../../api/types'
+import type { ReportChangeItem, ReportChangesStatus, ReportChangeType, ReportKeywordChanges } from '../../api/types'
 
 export const REPORT_CHANGE_TYPES: readonly ReportChangeType[] = ['NEWLY_INCLUDED', 'UPDATED', 'REFUTATION', 'UNCHANGED', 'UNDETERMINED']
 export const REPORT_CHANGE_LABELS: Record<ReportChangeType, string> = {
@@ -10,7 +10,7 @@ export const REPORT_CHANGES_MESSAGES: Record<ReportChangesStatus, string> = {
   RUNNING: '지난 보고서와 달라진 점을 확인하고 있습니다.',
   READY: '지난 보고서와의 비교가 완료되었습니다.',
   FAILED: '변화 비교를 완료하지 못했습니다. 보고서 본문은 확인할 수 있습니다.',
-  NO_BASELINE: '비교할 이전 일일 보고서가 없습니다.',
+  NO_BASELINE: '비교할 이전 보고서가 없습니다.',
   UNAVAILABLE: '비교 시점의 저장 자료가 없어 변화 비교를 제공할 수 없습니다.',
   NOT_APPLICABLE: '일일 통합 보고서에서 변화 비교를 제공합니다.',
 }
@@ -19,6 +19,38 @@ export function groupReportChanges(items: ReportChangeItem[]) {
   const counts = Object.fromEntries(REPORT_CHANGE_TYPES.map(type => [type, 0])) as Record<ReportChangeType, number>
   for (const item of items) counts[item.type]++
   return { counts, visible: items.filter(item => item.type !== 'UNCHANGED'), unchanged: items.filter(item => item.type === 'UNCHANGED') }
+}
+
+// Keep saved order within each type. Uncertain matches must not displace verified updates.
+export function prioritizeReportChanges(items: ReportChangeItem[]) {
+  const priority: Record<ReportChangeType, number> = { REFUTATION: 0, UPDATED: 1, NEWLY_INCLUDED: 2, UNDETERMINED: 3, UNCHANGED: 4 }
+  return [...items].sort((first, second) => priority[first.type] - priority[second.type])
+}
+
+export function keywordChangesMessage(changes: ReportKeywordChanges) {
+  if (changes.message) return changes.message
+  const messages: Record<string, string> = {
+    CONDITIONS_UNVERIFIED: '수집 당시 조건을 확인할 수 없어 키워드 증감을 비교하지 않습니다.',
+    CONDITIONS_CHANGED: '수집 조건이 달라 키워드 증감을 비교하지 않습니다.',
+    INCOMPLETE_PERIOD: '양쪽 기간의 수집 자료가 완전하지 않아 키워드 증감을 비교하지 않습니다.',
+    NO_BASELINE: '비교할 이전 보고서가 없습니다.',
+    NO_SNAPSHOT: '비교 시점의 키워드 집계 자료가 없습니다.',
+    PERSONALIZATION_UNVERIFIED: '양쪽 자료에 개인 기준을 적용했는지 확인할 수 없어 비교하지 않습니다.',
+    FILTERED_INPUT: '표시에서 제외된 자료가 있어 키워드 증감을 비교하지 않습니다.',
+    COMPARISON_NOT_READY: '보고서 변화 비교가 준비되면 키워드 증감을 확인할 수 있습니다.',
+    EMPTY_SAMPLE: '비교할 이슈가 없는 기간이 있어 비중 차이를 계산하지 않습니다.',
+  }
+  return messages[changes.reason ?? ''] ?? '키워드 증감을 비교할 수 없습니다.'
+}
+
+export function changeShare(value: number | null) {
+  return value !== null && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
+}
+
+export function percentagePointLabel(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return '비중 차이 계산 불가'
+  const rounded = Math.round(value * 10) / 10
+  return `${rounded > 0 ? '+' : ''}${Object.is(rounded, -0) ? 0 : rounded}%p`
 }
 
 export function reportDateGap(previous: string | null, current: string | null): number | null {

@@ -25,7 +25,7 @@ class DailyReportPersistenceCoverageTest {
         var interests = mock(CompanyInterestSelection.class);
         var service = new DailyReportPersistenceService(mock(DailyReportJdbcRepository.class), reports,
                 mock(CollectionRunRepository.class), mock(ReportComparisonRepository.class), interests,
-                mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
+                mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
         var report = NewsReport.builder().id(9L).reportScope(ReportScope.DAILY).reportStatus(ReportStatus.PENDING).build();
         when(reports.findByIdForUpdate(9L)).thenReturn(Optional.of(report));
         var selected = Finding.builder().id(102L).build();

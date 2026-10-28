@@ -1,6 +1,10 @@
 package com.example.be.domain.reports.comparison;
 
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -23,7 +27,7 @@ public class ReportComparisonRepository {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     public void captureInput(NewsReport report, ReportComparisonSnapshot snapshot, LocalDateTime now) {
-        String json = JSON.writeValueAsString(snapshot.withScopes(report.getCollectionContexts()));
+        String json = JSON.writeValueAsString(snapshot.withReportContext(report));
         jdbc.update(connection -> {
             var statement = connection.prepareStatement("""
                     INSERT INTO news_report_comparison_inputs
@@ -80,14 +84,61 @@ public class ReportComparisonRepository {
         });
     }
 
+    public Optional<LocalDateTime> inputCapturedAt(long reportId) {
+        return jdbc.query("SELECT captured_at FROM news_report_comparison_inputs WHERE report_id = ?",
+                (rs, row) -> rs.getTimestamp(1).toLocalDateTime(), reportId).stream().findFirst();
+    }
+
+    /** Includes runs without findings/reports: their failed or skipped inputs still affect comparability. */
+    public List<Long> periodRunIds(LocalDateTime from, LocalDateTime before) {
+        return jdbc.query("""
+                SELECT id FROM news_collection_runs WHERE started_at >= ? AND started_at < ?
+                ORDER BY started_at, id
+                """, (rs, row) -> rs.getLong(1), Timestamp.valueOf(from), Timestamp.valueOf(before));
+    }
+
+    /** Page executions, not reports, so a reportless immediate run can never be silently skipped. */
+    public List<RunCandidate> previousRuns(LocalDateTime before, long beforeId) {
+        var rows = jdbc.query("""
+                SELECT run.id, run.report_id, run.started_at, item.topic_id, item.topic_snapshot
+                FROM (SELECT id, report_id, started_at FROM news_collection_runs
+                      WHERE started_at < ? OR (started_at = ? AND id < ?)
+                      ORDER BY started_at DESC, id DESC FETCH FIRST 64 ROWS ONLY) run
+                LEFT JOIN news_collection_run_items item ON item.run_id = run.id
+                ORDER BY run.started_at DESC, run.id DESC, item.id
+                """, (rs, row) -> {
+            String saved = rs.getString("topic_snapshot");
+            Long topic = null;
+            try { if (saved != null) topic = JSON.readValue(saved, CollectionTopicSnapshot.class).topicId(); }
+            catch (RuntimeException ignored) { /* Unknown historical identities must not be reconstructed. */ }
+            return new RunRow(rs.getLong("id"), rs.getObject("report_id") == null ? null : rs.getLong("report_id"),
+                    rs.getTimestamp("started_at").toLocalDateTime(),
+                    rs.getObject("topic_id") == null ? null : rs.getLong("topic_id"), topic);
+        }, Timestamp.valueOf(before), Timestamp.valueOf(before), beforeId);
+        var grouped = new LinkedHashMap<Long, List<RunRow>>();
+        rows.forEach(row -> grouped.computeIfAbsent(row.runId(), ignored -> new java.util.ArrayList<>()).add(row));
+        return grouped.values().stream().map(group -> {
+            var first = group.getFirst();
+            Set<Long> saved = new LinkedHashSet<>();
+            Set<Long> live = new LinkedHashSet<>();
+            group.forEach(row -> { if (row.savedTopicId() != null) saved.add(row.savedTopicId());
+                if (row.topicId() != null) live.add(row.topicId()); });
+            return new RunCandidate(first.runId(), first.reportId(), first.startedAt(), Set.copyOf(saved), Set.copyOf(live),
+                    group.stream().allMatch(row -> row.savedTopicId() != null));
+        }).toList();
+    }
+    private record RunRow(long runId, Long reportId, LocalDateTime startedAt, Long topicId, Long savedTopicId) { }
+    public record RunCandidate(long runId, Long reportId, LocalDateTime startedAt, Set<Long> savedTopicIds,
+                               Set<Long> topicIds, boolean known) { }
+
     public List<Long> missingJobs() {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
                 JOIN news_report_comparison_inputs input ON input.report_id = report.id
-                WHERE report.report_scope = 'DAILY' AND report.report_status <> 'PENDING'
+                WHERE report.report_scope IN ('RUN', 'DAILY', 'WEEKLY') AND report.report_status <> 'PENDING'
                   AND report.deleted_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM news_report_comparisons job WHERE job.report_id = report.id)
-                ORDER BY report.report_date, report.id FETCH FIRST 10 ROWS ONLY
+                ORDER BY report.generated_at, report.id FETCH FIRST 10 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1));
     }
 

@@ -53,8 +53,30 @@ public class CollectionRunItem {
     @Column(name = "topic_snapshot")
     private CollectionTopicSnapshot topicSnapshot;
 
+    /** Only a digest is retained; historical runs without it cannot prove equal source settings. */
+    @Column(name = "comparison_source_fingerprint", length = 64)
+    private String comparisonSourceFingerprint;
+
     public void captureTopicSnapshot() {
         if (topicSnapshot == null) topicSnapshot = CollectionTopicSnapshot.capture(topic);
+        if (comparisonSourceFingerprint == null) comparisonSourceFingerprint = sourceFingerprint();
+    }
+
+    public boolean hasComparableSourceConfiguration() {
+        return comparisonSourceFingerprint != null && comparisonSourceFingerprint.equals(sourceFingerprint());
+    }
+
+    private String sourceFingerprint() {
+        if (source == null || source.getId() == null) return null;
+        var values = java.util.Arrays.asList(source.getId(), source.getSourceKind(), source.getUrlTemplate(),
+                source.getCountry(), source.getLanguage(), source.getCrawlPolicy(), source.getReliabilityScore(), source.isActive());
+        String json = new tools.jackson.databind.ObjectMapper().writeValueAsString(values);
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     /** 대기 중 설정을 수정해도 접수한 조건으로 수집한다. 원본 Topic을 변경하지 않는다. */
