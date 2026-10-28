@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.reports.coverage.ReportCoverageCapture;
 
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -48,7 +49,7 @@ class ReportPersistenceServiceTest {
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    events, CompanyInterestSelectionTestSupport.passThrough());
+                    events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class));
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
@@ -159,7 +160,7 @@ class ReportPersistenceServiceTest {
 
     private void prepareReservation(CollectionRun run) {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
-        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).build());
+        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
         when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
     }
 
@@ -182,7 +183,7 @@ class ReportPersistenceServiceTest {
         LocalDateTime generatedAt = LocalDateTime.of(2026, 8, 21, 9, 0);
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.findByRunId(42L)).thenReturn(Optional.empty());
-        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).build());
+        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
         when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
 
         ReportPersistenceService.Reservation reservation = service.reserve(42L, generatedAt);

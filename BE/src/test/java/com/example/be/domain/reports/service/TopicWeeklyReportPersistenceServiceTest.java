@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.reports.coverage.ReportCoverageCapture;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.collection.entity.*;
@@ -24,7 +25,7 @@ class TopicWeeklyReportPersistenceServiceTest {
     private final NewsReportRepository reports = mock(NewsReportRepository.class);
     private final TopicRepository topics = mock(TopicRepository.class);
     private final TopicWeeklyReportSelector selector = mock(TopicWeeklyReportSelector.class);
-    private final TopicWeeklyReportPersistenceService service = new TopicWeeklyReportPersistenceService(lock, weekly, reports, topics, selector);
+    private final TopicWeeklyReportPersistenceService service = new TopicWeeklyReportPersistenceService(lock, weekly, reports, topics, selector, mock(ReportCoverageCapture.class));
     private final LocalDate monday = LocalDate.of(2026, 9, 21);
 
     @BeforeEach void setup() {

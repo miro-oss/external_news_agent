@@ -18,6 +18,7 @@ import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.dart.ReportDartEligibility;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -71,6 +72,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final CollectionRunArticleRepository runArticleRepository;
     private final TopicRelevancePolicy relevancePolicy;
     private final ReportEventFeedbackProjection feedbackProjection;
+    private final ReportCoverageService coverageService;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -189,7 +191,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Long runId = report.getRunId();
         boolean aggregate = report.getReportScope() != ReportScope.RUN;
         var reviews = feedbackProjection.reviews(report.getId());
-        boolean loadFindings = includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
+        boolean loadFindings = report.getReportCoverageSnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
                 || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
                 || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
         ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
@@ -235,6 +237,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .collectionContexts(report.getCollectionContexts())
                 .dartCompanies(ReportDartEligibility.companies(report))
                 .articleStats(articleStats(report))
+                .coverage(includeFindings ? coverageService.project(report, view)
+                        : coverageService.project(report, view).withoutFindings())
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {
                             Long issueId = issueIdsByFinding.get(finding.getId());

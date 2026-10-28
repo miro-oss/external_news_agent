@@ -56,17 +56,17 @@ class NotificationRendererTest {
     private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy, projection, dartSummary);
 
     @Test
-    void emailPlacesCompanySummaryBetweenTitleAndNewsDigestForPreviewAndPersonalizedDelivery() {
+    void emailPlacesCompanySummaryAfterNewsDigestForPreviewAndPersonalizedDelivery() {
         NewsReport report = report("");
         org.springframework.test.util.ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example/");
         String reportUrl = "https://news.example/#/reports?reportId=17";
-        when(dartSummary.render(report, reportUrl)).thenReturn("<p>회사 실적 · 공시 · 매출 100억원</p>");
+        when(dartSummary.render(eq(report), eq(reportUrl), any(), any())).thenReturn("<p>회사 실적 · 공시 · 매출 100억원</p>");
         for (String body : List.of(
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst(),
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                         view(report, List.of(), false), "https://news.example/#/feedback?token=test").chunks().getFirst())) {
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("회사 실적 · 공시") < body.indexOf("핵심 요약"));
+            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
             assertTrue(body.contains(reportUrl));
             assertEquals(1, org.jsoup.Jsoup.parse(body).select("p:contains(회사 실적 · 공시)").size());
         }
@@ -84,7 +84,7 @@ class NotificationRendererTest {
         org.springframework.test.util.ReflectionTestUtils.setField(actualRenderer, "publicBaseUrl", "https://news.example/");
         String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst();
         var personalContent = new ReportContent(List.of("수신자에게 허용된 요약"), List.of(), List.of(), List.of());
-        var personalView = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent("", personalContent), true);
+        var personalView = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent("", personalContent), false);
         String feedbackUrl = "https://news.example/#/feedback?token=test";
         String personal = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                 personalView, feedbackUrl).chunks().getFirst();
@@ -92,7 +92,7 @@ class NotificationRendererTest {
         for (String body : List.of(preview, personal)) {
             var document = org.jsoup.Jsoup.parse(body);
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("회사 실적 · 공시") < body.indexOf("핵심 요약"));
+            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
             assertEquals(1, document.select("h2:containsOwn(회사 실적 · 공시)").size());
             assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
             assertTrue(document.select("a").eachAttr("href").contains(StoredReportDartFixture.FILING_URL));

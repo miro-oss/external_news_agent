@@ -46,6 +46,21 @@ class WeeklyReportCreationServiceTest {
     }
 
     @Test
+    void freezesCompanyRemovedSourcesBeforeGeneratingAWeeklyReport() {
+        var first = new WeeklyReportInput.DailySource(10L, monday, "첫날", "", null, List.of(101L));
+        var second = new WeeklyReportInput.DailySource(11L, monday.plusDays(1), "다음날", "", null, List.of(102L));
+        var original = new WeeklyReportInput(monday, monday.plusDays(6), List.of(first, second), List.of());
+        var selected = new WeeklyReportInput(monday, monday.plusDays(6), List.of(second), List.of());
+        when(reservations.reserve(eq(monday), any())).thenReturn(new WeeklyReportPersistenceService.Reservation(1L, true, original));
+        when(interests.selectWeekly(original)).thenReturn(new CompanyInterestSelection.WeeklyResult(selected, List.of()));
+        when(agent.generate(eq(1L), eq(selected), any())).thenReturn(new ReportDocument("주간", "내용", "model"));
+        service.generate(monday);
+        var ordering = inOrder(persistence, agent);
+        ordering.verify(persistence).freezeCompanySelection(eq(1L), eq(List.of(102L)), eq(List.of(101L)), eq(selected), eq(List.of()), any());
+        ordering.verify(agent).generate(eq(1L), eq(selected), any());
+    }
+
+    @Test
     void recoveryUsesOnlyStoredWeeklyInputAndNeverRecallsAgent() {
         var before = monday.plusWeeks(1).atStartOfDay();
         var pending = NewsReport.builder().id(1L).reportScope(ReportScope.WEEKLY)

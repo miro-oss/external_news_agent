@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.reports.coverage.ReportCoverageCapture;
 import com.example.be.domain.companyinterest.CompanyInterestSelection;
 
 import com.example.be.domain.analysis.entity.Finding;
@@ -55,7 +56,7 @@ class ReportCreationServiceTest {
         var observations = mock(CollectionRunArticleRepository.class);
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
-        var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests);
+        var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests, mock(ReportCoverageCapture.class));
         var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
@@ -198,7 +199,7 @@ class ReportCreationServiceTest {
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
         var persistence = new ReportPersistenceService(
-                runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough());
+                runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class));
         var creation = new ReportCreationService(
                 runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));

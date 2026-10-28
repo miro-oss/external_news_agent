@@ -22,6 +22,22 @@ class ReportEventFeedbackProjectionTest {
     private final DailyReportFeedbackExclusions dailyExclusions = mock(DailyReportFeedbackExclusions.class);
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(store, snapshots, dailyExclusions);
 
+    @Test void inheritedSourceAbsentFromFinalTopNStillReachesCoverageProjection() {
+        var content = new ReportContent(List.of("유효 요약"), List.of(event("유효 이슈", "유효 요약", 12L)), List.of(), List.of());
+        var report = report(content);
+        when(dailyExclusions.forReport(report)).thenReturn(Set.of(11L));
+        when(dailyExclusions.forDelivery(report)).thenReturn(Set.of(11L));
+        var publicView = projection.project(report, visible(12L), List.of());
+        var deliveryView = projection.projectForDelivery(report, visible(12L), List.of());
+        assertEquals(Set.of(11L), publicView.excludedEvidenceFindingIds());
+        assertEquals(Set.of(11L), deliveryView.excludedEvidenceFindingIds());
+        assertSame(content, publicView.readingContent().structuredContent());
+        assertFalse(publicView.excludedEvents(), "the event remains; its shared coverage is filtered separately");
+        var legacy = report(null);
+        when(dailyExclusions.forReport(legacy)).thenReturn(Set.of(11L));
+        assertEquals(Set.of(11L), projection.project(legacy, visible(12L), List.of()).excludedEvidenceFindingIds());
+    }
+
     @Test void inheritedDailyErrorsAndLocalReviewsRemoveWeeklyEventsWithoutRebindingSurvivors() {
         var inherited = event("다시 요약된 오류 이슈", "오류 주간 요약", 11L, 14L);
         var good = event("남길 사건", "남길 요약", 12L);

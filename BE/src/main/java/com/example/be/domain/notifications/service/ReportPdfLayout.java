@@ -4,9 +4,15 @@ import com.example.be.domain.dart.model.DartModels.Quarter;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDDestinationNameTreeNode;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
+import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDNamedDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageXYZDestination;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary;
 
@@ -37,6 +43,9 @@ final class ReportPdfLayout implements AutoCloseable {
     private final PDType0Font regular;
     private final PDType0Font bold;
     private final Map<Integer, String> glyphs = new HashMap<>();
+    private final Map<String, PDPageDestination> destinations = new java.util.TreeMap<>();
+    private final Map<String, Integer> destinationPages = new HashMap<>();
+    private final List<InternalLink> internalLinks = new ArrayList<>();
     private PDPage page;
     private PDPageContentStream stream;
     private float y;
@@ -82,6 +91,36 @@ final class ReportPdfLayout implements AutoCloseable {
     void keyValue(String key, String value) throws IOException { paragraph(key + " · " + nullable(value)); }
     void gap(float amount) { y -= amount; }
     void reserve(float amount) throws IOException { ensure(amount); }
+
+    void pageBreak() throws IOException { newPage(); }
+
+    void anchor(String name) {
+        if (destinations.containsKey(name)) throw new IllegalArgumentException("중복된 PDF 이동 대상입니다.");
+        PDPageXYZDestination destination = new PDPageXYZDestination();
+        destination.setPage(page);
+        destination.setTop(Math.round(y + 10));
+        destination.setLeft(Math.round(MARGIN));
+        destination.setZoom(0);
+        destinations.put(name, destination);
+        destinationPages.put(name, document.getNumberOfPages());
+    }
+
+    Integer destinationPage(String name) { return destinationPages.get(name); }
+
+    /** Forward links reserve their page label, which is resolved after all appendix pages exist. */
+    void internalLink(String label, String destination) throws IOException {
+        List<String> lines = wrap(label, regular, 9, WIDTH - 68);
+        for (int index = 0; index < lines.size(); index++) {
+            ensure(16);
+            String line = lines.get(index);
+            draw(line, MARGIN, y, regular, 9, BLUE);
+            internalLinks.add(new InternalLink(page, y, destination, index == lines.size() - 1));
+            y -= 16;
+        }
+        gap(4);
+    }
+
+    private record InternalLink(PDPage page, float baseline, String destination, boolean showPage) { }
 
     record ReadingField(String label, String text) { }
     record ReadingItem(String label, String title, List<ReadingField> fields) { }
@@ -442,6 +481,36 @@ final class ReportPdfLayout implements AutoCloseable {
 
     byte[] save() throws IOException {
         close();
+        PDDestinationNameTreeNode tree = new PDDestinationNameTreeNode();
+        tree.setNames(destinations);
+        PDDocumentNameDictionary names = new PDDocumentNameDictionary(document.getDocumentCatalog());
+        names.setDests(tree);
+        document.getDocumentCatalog().setNames(names);
+        for (InternalLink pending : internalLinks) {
+            Integer targetPage = destinationPages.get(pending.destination());
+            if (targetPage == null) throw new IOException("PDF 이동 대상을 찾을 수 없습니다.");
+            PDAnnotationLink annotation = new PDAnnotationLink();
+            annotation.setRectangle(new PDRectangle(MARGIN, pending.baseline() - 3, WIDTH, 14));
+            PDBorderStyleDictionary border = new PDBorderStyleDictionary();
+            border.setWidth(0);
+            annotation.setBorderStyle(border);
+            PDActionGoTo action = new PDActionGoTo();
+            action.setDestination(new PDNamedDestination(pending.destination()));
+            annotation.setAction(action);
+            pending.page().getAnnotations().add(annotation);
+            if (pending.showPage()) {
+                try (PDPageContentStream label = new PDPageContentStream(document, pending.page(),
+                        PDPageContentStream.AppendMode.APPEND, true, true)) {
+                    String text = "p. " + targetPage;
+                    label.beginText();
+                    label.setFont(regular, 9);
+                    label.setNonStrokingColor(BLUE);
+                    label.newLineAtOffset(MARGIN + WIDTH - width(text, regular, 9), pending.baseline());
+                    label.showText(text);
+                    label.endText();
+                }
+            }
+        }
         int count = document.getNumberOfPages();
         for (int index = 0; index < count; index++) {
             try (PDPageContentStream footer = new PDPageContentStream(document, document.getPage(index),

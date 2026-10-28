@@ -35,7 +35,8 @@ public class TopicWeeklyReportCreationService {
             var sourceDates = sources.stream().map(WeeklyReportInput.DailySource::reportDate).toList();
             List<LocalDate> missing = monday.datesUntil(monday.plusWeeks(1)).filter(date -> !sourceDates.contains(date)).toList();
             input = new WeeklyReportInput(monday, monday.plusDays(6), sources, missing, topicId, input.topicName());
-            persistence.freezeCompanySelection(reservation.reportId(), input.sourceFindingIds(), input, selection.applications(), now);
+            persistence.freezeCompanySelection(reservation.reportId(), input.sourceFindingIds(),
+                    selection.companySuppressedFindingIds(), input, selection.applications(), now);
         }
         ReportDocument document;
         try {

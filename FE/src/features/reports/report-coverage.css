@@ -1,0 +1,16 @@
+.report-coverage-period { margin: .8rem 0 0; color: var(--fg-3); font-size: .78rem; line-height: 1.6; }
+.report-coverage-period > span { margin-right: .55rem; color: var(--fg-2); font-weight: 600; }
+.report-event-card .report-coverage-summary,
+.issue-card .report-coverage-summary { margin: -.2rem 0 .65rem; color: var(--fg-3); font-size: .78rem; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.report-coverage-sources { margin-top: .9rem; }
+.report-source-label { display: block; margin-bottom: .3rem; color: var(--fg-3); font-size: .72rem; font-weight: 600; }
+.report-reading-content .report-coverage-sources ul,
+.report-coverage-sources ul { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.report-reading-content .report-coverage-sources li,
+.report-coverage-sources li { display: grid; gap: .12rem; min-width: 0; font-size: .8rem; line-height: 1.6; }
+.report-coverage-sources a,
+.report-coverage-source-title { overflow-wrap: anywhere; }
+.report-coverage-sources a { color: var(--primary); text-decoration: none; }
+.report-coverage-sources a:hover { text-decoration: underline; }
+.report-coverage-source-meta { color: var(--fg-3); font-size: .73rem; }
+.issue-card > .report-coverage-sources { margin: 0; padding: 0 1.25rem 1.1rem; }

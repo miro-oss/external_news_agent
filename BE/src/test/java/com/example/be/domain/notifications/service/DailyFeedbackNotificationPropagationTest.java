@@ -79,7 +79,7 @@ class DailyFeedbackNotificationPropagationTest {
 
     @BeforeEach
     void configure() {
-        when(pdfRenderer.render(any(), any(), any())).thenReturn(new byte[]{'%', 'P', 'D', 'F'});
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
         when(relevance.filterTopicFindings(eq(TOPIC_ID), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
         when(jdbc.queryForList(anyString(), eq(Long.class), anyLong(), anyLong())).thenReturn(List.of(TOPIC_ID));
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
@@ -178,7 +178,7 @@ class DailyFeedbackNotificationPropagationTest {
             return List.of();
         }
         var views = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
-        verify(pdfRenderer, times(2)).render(eq(report), views.capture(), isNull());
+        verify(pdfRenderer, times(2)).renderDetailed(eq(report), views.capture(), isNull(), any());
         return views.getAllValues();
     }
 

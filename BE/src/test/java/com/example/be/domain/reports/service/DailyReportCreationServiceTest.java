@@ -54,7 +54,7 @@ class DailyReportCreationServiceTest {
 
         when(reports.findByReportScopeAndReportDate(ReportScope.DAILY, date)).thenReturn(Optional.empty());
         when(daily.findDueDates(date, date.plusDays(1))).thenReturn(List.of(date));
-        when(reservation.reserveWithSnapshot(eq(date), anyList(), anyList(), any(), isNull()))
+        when(reservation.reserveWithSnapshot(eq(date), anyList(), anyList(), any(), isNull(), any(DailyReportSelector.Prepared.class)))
                 .thenReturn(new ReportPersistenceService.Reservation(77L, false));
         assertEquals(77L, service.generate(date));
         verifyNoInteractions(orchestrator);
@@ -75,7 +75,7 @@ class DailyReportCreationServiceTest {
         when(daily.findDueDates(date, date.plusDays(1))).thenReturn(List.of(date));
         when(daily.findSourceRunIds(date)).thenReturn(List.of(1L, 2L));
         when(daily.sourceStats(date)).thenReturn(ReportSourceStats.empty());
-        when(reservation.reserveWithSnapshot(eq(date), eq(List.of(1L, 2L)), anyList(), any(), isNull()))
+        when(reservation.reserveWithSnapshot(eq(date), eq(List.of(1L, 2L)), anyList(), any(), isNull(), any(DailyReportSelector.Prepared.class)))
                 .thenReturn(new ReportPersistenceService.Reservation(77L, true));
         when(orchestrator.generateDaily(eq(77L), eq(date), anyList(), any(), any()))
                 .thenThrow(new IllegalStateException("provider unavailable"));

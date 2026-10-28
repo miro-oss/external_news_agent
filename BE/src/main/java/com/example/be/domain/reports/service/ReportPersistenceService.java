@@ -34,6 +34,7 @@ public class ReportPersistenceService {
     private final CollectionRunArticleRepository observationRepository;
     private final ApplicationEventPublisher events;
     private final CompanyInterestSelection companyInterests;
+    private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
 
     @Transactional
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
@@ -74,6 +75,7 @@ public class ReportPersistenceService {
                 .reportStatus(ReportStatus.PENDING)
                 .generatedAt(generatedAt)
                 .build());
+        report.freezeReportCoverageSnapshot(reportCoverage.captureRun(report, generatedAt));
         run.attachReport(report.getId());
         return new Reservation(report.getId(), true);
     }

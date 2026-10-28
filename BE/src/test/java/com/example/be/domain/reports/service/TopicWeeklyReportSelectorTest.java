@@ -38,14 +38,36 @@ class TopicWeeklyReportSelectorTest {
         ReflectionTestUtils.setField(selecting, "maxIssues", 1);
         Finding high = finding(1, 1L, 1);
         Finding replacement = finding(2, 1L, 1);
-        inputs(List.of(high, replacement), List.of(link(high, 10, 1L, 100), link(replacement, 20, 1L, 10)));
+        Finding belowLimit = finding(3, 1L, 1);
+        inputs(List.of(high, replacement, belowLimit), List.of(link(high, 10, 1L, 100),
+                link(replacement, 20, 1L, 10), link(belowLimit, 30, 1L, 1)));
         var prepared = selecting.prepare(1L, "AI", date);
         assertEquals(List.of(high), selecting.preview(prepared).findings());
         verifyNoInteractions(interests);
-        when(interests.select(anyList(), eq(1L))).thenReturn(new CompanyInterestSelection.Result(List.of(replacement), List.of()));
+        when(interests.select(anyList(), eq(1L))).thenReturn(new CompanyInterestSelection.Result(List.of(replacement, belowLimit), List.of()));
         var selected = selecting.selectWeek(List.of(prepared));
         assertEquals(List.of(replacement), selected.selections().getFirst().findings());
-        verify(interests).select(argThat(values -> values.size() == 2), eq(1L));
+        assertEquals(List.of(high.getId()), selected.companySuppressedFindingIds());
+        assertFalse(selected.companySuppressedFindingIds().contains(belowLimit.getId()));
+        verify(interests).select(argThat(values -> values.size() == 3), eq(1L));
+    }
+
+    @Test
+    void retainsExplicitSuppressionWhenAnotherDayKeepsTheSameFrozenIssue() {
+        var interests = mock(CompanyInterestSelection.class);
+        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests);
+        Finding first = finding(1, 1L, 1);
+        Finding second = finding(2, 1L, 2);
+        var sharedIssue = link(first, 10, 1L, 100).getIssue();
+        var firstDay = new TopicWeeklyReportSelector.Prepared(1L, "AI", date, List.of(first), java.util.Map.of(1L, sharedIssue));
+        var secondDay = new TopicWeeklyReportSelector.Prepared(1L, "AI", date.plusDays(1), List.of(second), java.util.Map.of(2L, sharedIssue));
+        when(interests.select(List.of(first, second), 1L)).thenReturn(new CompanyInterestSelection.Result(List.of(second), List.of()));
+
+        var selected = selecting.selectWeek(List.of(firstDay, secondDay));
+
+        assertEquals(List.of(1L), selected.companySuppressedFindingIds());
+        assertTrue(selected.selections().getFirst().findings().isEmpty());
+        assertEquals(List.of(second), selected.selections().getLast().findings());
     }
 
     @Test

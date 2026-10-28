@@ -209,7 +209,7 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void topicWeeklyPdfIncludesStoredFinancialsAndRecentFilingsBeforeNewsWithoutPreparingData() throws Exception {
+    void topicWeeklyPdfIncludesStoredFinancialsAndRecentFilingsAfterNewsWithoutPreparingData() throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
         var stored = new StoredReportDartFixture();
         stored.ready(report);
@@ -223,11 +223,11 @@ class ReportPdfRendererTests {
             for (String expected : List.of("회사 실적", "SK하이닉스", "000660", "연결재무제표", "2026년 1분기", "2026년 2분기",
                     "차트 단위: 억원", "표 금액 단위: 억원", "1,234.57", "-12.35", "주간 뉴스 요약", "저장한 뉴스 내용"))
                 assertTrue(text.contains(expected), expected + "\n" + text);
-            assertTrue(text.indexOf("회사 실적") < text.indexOf("핵심 요약"));
+            assertTrue(text.indexOf("핵심 요약") < text.indexOf("회사 실적"));
             assertFalse(text.contains("표시하지 않는 추가 분석"));
             for (String expected : List.of("회사 실적 · 공시", "최근 공시", "[정정]", "반기보고서 (가상 검증 자료)",
                     "2026-08-14", "이전 공시 (가상 검증 자료)", "2026-05-15")) assertTrue(text.contains(expected), expected);
-            assertTrue(text.indexOf("최근 공시") < text.indexOf("핵심 요약"));
+            assertTrue(text.indexOf("핵심 요약") < text.indexOf("최근 공시"));
             for (var filing : StoredReportDartFixture.financials().disclosures()) assertTrue(urls(document).contains(filing.url()));
             assertTrue(urls(document).contains("https://example.com/article-1"));
             assertWithinPageBounds(document);

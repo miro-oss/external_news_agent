@@ -34,16 +34,21 @@ class DailyReportSelectorTest {
         var selecting = new DailyReportSelector(findings, memberships, relevancePolicy, interests);
         Finding high = finding(1, 1, "grounded");
         Finding replacement = finding(2, 1, "grounded");
+        Finding belowLimit = finding(3, 1, "grounded");
         LocalDate date = LocalDate.of(2026, 9, 3);
-        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay())).thenReturn(List.of(high, replacement));
-        when(memberships.findByArticleIds(List.of(1L, 2L))).thenReturn(List.of(link(high, issue(10, 100)), link(replacement, issue(20, 10))));
+        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay())).thenReturn(List.of(high, replacement, belowLimit));
+        when(memberships.findByArticleIds(List.of(1L, 2L, 3L))).thenReturn(List.of(link(high, issue(10, 100)),
+                link(replacement, issue(20, 10)), link(belowLimit, issue(30, 1))));
         var prepared = selecting.prepare(date, 1);
         assertEquals(List.of(high), selecting.preview(prepared).findings());
         verifyNoInteractions(interests);
         when(interests.select(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new CompanyInterestSelection.Result(List.of(replacement), List.of()));
-        assertEquals(List.of(replacement), selecting.selectPrepared(prepared).findings());
-        verify(interests).select(org.mockito.ArgumentMatchers.argThat(values -> values.size() == 2), org.mockito.ArgumentMatchers.isNull());
+                .thenReturn(new CompanyInterestSelection.Result(List.of(replacement, belowLimit), List.of()));
+        var selected = selecting.selectPrepared(prepared);
+        assertEquals(List.of(replacement), selected.findings());
+        assertEquals(List.of(high.getId()), selected.companySuppressedFindingIds());
+        assertFalse(selected.companySuppressedFindingIds().contains(belowLimit.getId()), "ranking omission is not company suppression");
+        verify(interests).select(org.mockito.ArgumentMatchers.argThat(values -> values.size() == 3), org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

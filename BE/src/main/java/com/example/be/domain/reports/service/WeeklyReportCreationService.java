@@ -27,7 +27,10 @@ public class WeeklyReportCreationService {
         var reservation = reservationService.reserve(monday, now);
         if (!reservation.owner()) return reservation.reportId();
         var selection = companyInterests.selectWeekly(reservation.input());
-        persistence.freezeCompanySelection(reservation.reportId(), selection.input().sourceFindingIds(), selection.input(),
+        var retained = java.util.Set.copyOf(selection.input().sourceFindingIds());
+        // Weekly company selection removes complete compound events; there is no ranking limit here.
+        var suppressed = reservation.input().sourceFindingIds().stream().filter(id -> !retained.contains(id)).toList();
+        persistence.freezeCompanySelection(reservation.reportId(), selection.input().sourceFindingIds(), suppressed, selection.input(),
                 selection.applications(), now);
         ReportDocument document;
         try {
