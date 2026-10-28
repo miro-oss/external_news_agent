@@ -151,6 +151,60 @@ class CompanyInterestSelectionTest {
         verify(store, never()).activeForTopics(anySet());
     }
 
+    @Test void weeklyReadsCriteriaForUnselectedKeywordTopicsWithoutAddingAnyAiEvaluationItem() {
+        var otherCriterion = new ActiveCriterion(6, 2, "다른 주제", "다른 기준", 1);
+        var input = weeklySingleFinding();
+        when(store.activeForTopics(Set.of(1L, 2L))).thenReturn(List.of(otherCriterion));
+        var result = selection.selectWeekly(input, Set.of(2L));
+        assertEquals(Set.of(2L), result.criterionTopicIds());
+        assertEquals(input, result.input());
+        assertTrue(result.applications().isEmpty());
+        verify(store).activeForTopics(Set.of(1L, 2L));
+        verifyNoInteractions(agent);
+    }
+
+    @Test void weeklyCriterionProvenanceSurvivesUncertainAndFailedEvaluation() {
+        var input = weeklySingleFinding();
+        when(agent.evaluate(any(), any(), any())).thenAnswer(call -> response(call.getArgument(2), Map.of(1L, "UNCERTAIN"), false));
+        var uncertain = selection.selectWeekly(input, Set.of(1L, 2L));
+        assertEquals(Set.of(1L), uncertain.criterionTopicIds());
+        assertTrue(uncertain.applications().isEmpty());
+        assertEquals(input, uncertain.input());
+        doThrow(new IllegalStateException("unavailable")).when(agent).evaluate(any(), any(), any());
+        var failed = selection.selectWeekly(input, Set.of(1L, 2L));
+        assertEquals(Set.of(1L), failed.criterionTopicIds());
+        assertTrue(failed.applications().isEmpty());
+        assertEquals(input, failed.input());
+    }
+
+    @Test void weeklyCriterionReadFailureMarksTheEntireRequestedTopicScopeUnverified() {
+        var input = weeklySingleFinding();
+        when(store.activeForTopics(Set.of(1L, 2L))).thenThrow(new IllegalStateException("unavailable"));
+        var result = selection.selectWeekly(input, Set.of(2L));
+        assertEquals(Set.of(1L, 2L), result.criterionTopicIds());
+        assertTrue(result.applications().isEmpty());
+        assertEquals(input, result.input());
+        verifyNoInteractions(agent);
+    }
+
+    @Test void emptyWeeklyTextStillChecksAnExistingKeywordUniverseWithoutCallingAi() {
+        var date = LocalDate.of(2026, 9, 21);
+        var input = new WeeklyReportInput(date, date.plusDays(6), List.of(), List.of());
+        var result = selection.selectWeekly(input, Set.of(1L));
+        assertEquals(Set.of(1L), result.criterionTopicIds());
+        assertEquals(input, result.input());
+        verify(store).activeForTopics(Set.of(1L));
+        verifyNoInteractions(agent, findings);
+    }
+
+    private WeeklyReportInput weeklySingleFinding() {
+        when(findings.findForReportByIdIn(List.of(1L))).thenReturn(List.of(finding(1, "저장된 기사 원문")));
+        var date = LocalDate.of(2026, 9, 21);
+        var source = new WeeklyReportInput.DailySource(40L, date, "일일", "본문", null, List.of(1L),
+                new ReportComparisonSnapshot(1, List.of(issue(1)), List.of()));
+        return new WeeklyReportInput(date, date.plusDays(6), List.of(source), List.of());
+    }
+
     private Finding finding(long id, String content) {
         return Finding.builder().id(id).sections(List.of(new FindingSection(0, content)))
                 .article(Article.builder().id(id).title("현재 제목 " + id).body("나중에 바뀐 기사 본문")

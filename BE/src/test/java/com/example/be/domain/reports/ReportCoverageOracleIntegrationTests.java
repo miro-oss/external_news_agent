@@ -54,6 +54,13 @@ class ReportCoverageOracleIntegrationTests {
         var stored = reports.findById(reservation.reportId()).orElseThrow();
         var original = stored.getReportCoverageSnapshot();
         assertNotNull(original);
+        var keywordInput = stored.getReportKeywordSnapshot();
+        assertNotNull(keywordInput, "V77 CLOB must persist the separately frozen candidate universe");
+        assertNull(keywordInput.unavailableReason());
+        assertEquals(ZoneOffset.ofHours(9), keywordInput.capturedAt().getOffset());
+        assertEquals(List.of("집계", "확인한"), keywordInput.candidates().getFirst().matchedKeywordKeys());
+        assertEquals(fixture.issue().getId(), keywordInput.candidates().getFirst().issueId());
+        assertEquals(1, keywordInput.candidates().size(), "an unanalysed member adds coverage but not a candidate issue");
         assertEquals(ZoneOffset.ofHours(9), original.capturedAt().getOffset());
         assertEquals(2, original.observations().size());
         assertEquals(2, queries.getReport(stored.getId(), true).getCoverage().events().getFirst().articleCount());
@@ -73,6 +80,9 @@ class ReportCoverageOracleIntegrationTests {
         assertEquals(original, reports.findById(stored.getId()).orElseThrow().getReportCoverageSnapshot());
         assertEquals(2, queries.getReport(stored.getId(), true).getCoverage().events().getFirst().articleCount());
         assertFalse(persistence.reserve(run.getId(), NOW.plusHours(1)).owner());
+        em.flush(); em.clear();
+        assertEquals(keywordInput, reports.findById(stored.getId()).orElseThrow().getReportKeywordSnapshot(),
+                "retry and later membership changes must preserve the original keyword evidence");
 
         em.find(Article.class, fixture.second().getId()).applyFullText(null, FetchStatus.METADATA_ONLY, NOW);
         em.flush(); em.clear();
@@ -109,15 +119,28 @@ class ReportCoverageOracleIntegrationTests {
         assertEquals(3, queries.getReport(topicStored.getId(), true).getCoverage().events().getFirst().articleCount(), "repeat article is a union");
         assertEquals(2, queries.getReport(weeklyReservation.reportId(), true).getCoverage().events().getFirst().articleCount(), "global week copies DAILY scope");
         assertEquals(ReportCoverageDTO.Status.AVAILABLE, queries.getReport(weeklyReservation.reportId(), true).getCoverage().events().getFirst().status());
+        for (Long reportId : List.of(dailyReservation.reportId(), weeklyReservation.reportId(), topicReservation.reportId())) {
+            var keywords = reports.findById(reportId).orElseThrow().getReportKeywordSnapshot();
+            assertNotNull(keywords);
+            assertNull(keywords.unavailableReason());
+            assertEquals(1, keywords.candidates().size());
+            assertEquals(List.of("집계", "확인한"), keywords.candidates().getFirst().matchedKeywordKeys());
+            assertEquals(fixture.finding().getId(), keywords.candidates().getFirst().findingId());
+        }
     }
 
     private Fixture fixture() {
         String suffix = UUID.randomUUID().toString();
         Source source = Source.builder().sourceKind(Source.KIND_FEED).name("coverage source " + suffix)
                 .urlTemplate("https://example.com/" + suffix + ".xml").language("ko").active(true).build();
-        Topic topic = Topic.builder().name("coverage topic " + suffix).batchSize(10).intervalMinutes(60).active(true).build();
+        Topic topic = Topic.builder().name("coverage topic " + suffix).requiredKeywords(List.of("집계"))
+                .optionalKeywords(List.of("확인한")).batchSize(10).intervalMinutes(60).active(true).build();
         em.persist(source); em.persist(topic);
         CollectionRun run = run(MONDAY.atTime(10, 0));
+        var item = CollectionRunItem.builder().topic(topic).source(source).status(RunItemStatus.SUCCESS)
+                .topicSnapshot(CollectionTopicSnapshot.capture(topic)).build();
+        run.addItem(item);
+        em.persist(item);
         NewsIssue issue = issue(topic, "집계 이슈");
         Article first = article(topic, source, run, suffix + "/1", "매체 A");
         Article second = article(topic, source, run, suffix + "/2", "매체 B");

@@ -8,6 +8,7 @@ import { ReportKeywordText } from './ReportKeywordText'
 import { ReportCoverageSources, ReportCoverageSummary } from './ReportCoverage'
 import { eventCoverage } from './reportCoverageDisplay'
 import { ReportBriefing } from './ReportBriefing'
+import { ReportKeywordStats } from './ReportKeywordStats'
 import { hasWeeklyAnalysisChronology, reportEventElementId } from './reportBriefingDisplay'
 
 export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice, afterBriefing }: {
@@ -21,7 +22,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
   const weekly = report.reportScope === 'WEEKLY'
-  if (!content) return <><LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />{afterBriefing}</>
+  if (!content) return <><LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />{afterBriefing}<ReportKeywordStats stats={report.keywordStats} /></>
   const eventKeys = importantEventKeys(report.id, content.importantEvents)
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
@@ -79,10 +80,11 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       {notes.length > 0 && <ReadingDisclosure title="수집 상태"><ul>{notes.map((note, index) => <li key={index}><ReportKeywordText text={note} terms={terms} /></li>)}</ul></ReadingDisclosure>}
     </div>
   )
-  if (!report.briefing) return <>{reading}{afterBriefing}</>
+  if (!report.briefing) return <>{reading}{afterBriefing}<ReportKeywordStats stats={report.keywordStats} /></>
   return <div className="report-reading-content">
     <ReportBriefing report={report} terms={terms} />
     {afterBriefing}
+    <ReportKeywordStats stats={report.keywordStats} />
     <details className="report-reading-details"><summary>이슈와 근거 자세히 보기</summary>{reading}</details>
   </div>
 }

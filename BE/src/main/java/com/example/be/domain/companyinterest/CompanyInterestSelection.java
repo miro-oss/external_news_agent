@@ -45,8 +45,14 @@ public class CompanyInterestSelection {
 
     /** Read frozen analysis sentences and frozen topic/title identities, never generate new WEEKLY claims. */
     public WeeklyResult selectWeekly(WeeklyReportInput input) {
-        if (input.sourceFindingIds().isEmpty()) return new WeeklyResult(input, List.of());
-        Map<Long, Finding> byId = findings.findForReportByIdIn(input.sourceFindingIds()).stream()
+        return selectWeekly(input, Set.of());
+    }
+
+    /** Extra topics check the keyword universe's criterion scope; they never add AI evaluation items. */
+    public WeeklyResult selectWeekly(WeeklyReportInput input, Set<Long> keywordTopicIds) {
+        if (input.sourceFindingIds().isEmpty() && keywordTopicIds.isEmpty()) return new WeeklyResult(input, List.of());
+        Map<Long, Finding> byId = (input.sourceFindingIds().isEmpty() ? List.<Finding>of()
+                : findings.findForReportByIdIn(input.sourceFindingIds())).stream()
                 .collect(Collectors.toMap(Finding::getId, f -> f));
         Map<Long, Set<Long>> assessedTopics = relevance.relevantTopicIdsByFinding(List.copyOf(byId.values()));
         Map<Long, Candidate> candidates = new LinkedHashMap<>();
@@ -65,18 +71,24 @@ public class CompanyInterestSelection {
                         issue.side().title(), body(finding), "", Set.copyOf(topics)));
             });
         });
-        Evaluation evaluation = evaluate(List.copyOf(candidates.values()));
-        return new WeeklyResult(WeeklyReportSelection.withoutFindings(input, evaluation.excluded()), evaluation.applications());
+        Evaluation evaluation = evaluate(List.copyOf(candidates.values()), keywordTopicIds);
+        return new WeeklyResult(WeeklyReportSelection.withoutFindings(input, evaluation.excluded()),
+                evaluation.applications(), evaluation.criterionTopicIds());
     }
 
     private Evaluation evaluate(List<Candidate> candidates) {
-        if (candidates.isEmpty()) return new Evaluation(Set.of(), List.of());
+        return evaluate(candidates, Set.of());
+    }
+
+    private Evaluation evaluate(List<Candidate> candidates, Set<Long> additionalTopicIds) {
+        if (candidates.isEmpty() && additionalTopicIds.isEmpty()) return new Evaluation(Set.of(), List.of(), Set.of());
         Set<Long> topicIds = candidates.stream().flatMap(candidate -> candidate.topicIds().stream()).collect(Collectors.toSet());
+        topicIds.addAll(additionalTopicIds);
         List<ActiveCriterion> active;
         try { active = List.copyOf(store.activeForTopics(topicIds)); }
         catch (RuntimeException unavailable) {
             log.warn("회사 관심 기준을 읽지 못해 보고서 후보를 유지합니다.");
-            return new Evaluation(Set.of(), List.of());
+            return new Evaluation(Set.of(), List.of(), Set.copyOf(topicIds));
         }
         Map<Long, List<ActiveCriterion>> byTopic = active.stream().collect(Collectors.groupingBy(ActiveCriterion::topicId));
         Map<Long, Set<Long>> suppressedTopics = new HashMap<>();
@@ -101,7 +113,8 @@ public class CompanyInterestSelection {
         List<Application> applications = evaluated.entrySet().stream().map(entry -> new Application(entry.getKey(),
                 entry.getValue(), (int) cited.getOrDefault(entry.getKey(), Set.of()).stream()
                 .filter(excluded::contains).count())).toList();
-        return new Evaluation(Set.copyOf(excluded), applications);
+        return new Evaluation(Set.copyOf(excluded), applications,
+                active.stream().map(ActiveCriterion::topicId).collect(Collectors.toSet()));
     }
 
     private TopicEvaluation evaluateTopic(List<Candidate> candidates, List<ActiveCriterion> criteria) {
@@ -185,8 +198,13 @@ public class CompanyInterestSelection {
     public record Result(List<Finding> findings, List<Application> applications) {
         public Result { findings = List.copyOf(findings); applications = List.copyOf(applications); }
     }
-    public record WeeklyResult(WeeklyReportInput input, List<Application> applications) { }
-    private record Evaluation(Set<Long> excluded, List<Application> applications) { }
+    public record WeeklyResult(WeeklyReportInput input, List<Application> applications, Set<Long> criterionTopicIds) {
+        public WeeklyResult { applications = List.copyOf(applications); criterionTopicIds = Set.copyOf(criterionTopicIds); }
+        public WeeklyResult(WeeklyReportInput input, List<Application> applications) {
+            this(input, applications, applications.stream().map(application -> application.criterion().topicId()).collect(Collectors.toSet()));
+        }
+    }
+    private record Evaluation(Set<Long> excluded, List<Application> applications, Set<Long> criterionTopicIds) { }
     private record TopicEvaluation(Map<ActiveCriterion, Set<Long>> evaluated, Map<ActiveCriterion, Set<Long>> suppressed) { }
     private record Candidate(long findingId, long articleId, String title, String content, String url, Set<Long> topicIds) {
         boolean bounded() { return title != null && !title.isBlank() && title.length() <= 1000

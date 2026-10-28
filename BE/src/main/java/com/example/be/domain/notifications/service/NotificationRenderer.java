@@ -10,6 +10,8 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
 import com.example.be.domain.reports.coverage.ReportCoverageService;
+import com.example.be.domain.reports.keyword.ReportKeywordDTO;
+import com.example.be.domain.reports.keyword.ReportKeywordService;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportFindings;
@@ -47,6 +49,16 @@ public class NotificationRenderer {
     private ReportCoverageService coverageService;
     @org.springframework.beans.factory.annotation.Autowired
     public void setCoverageService(ReportCoverageService coverageService) { this.coverageService = coverageService; }
+    private ReportKeywordService keywordService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setKeywordService(ReportKeywordService keywordService) { this.keywordService = keywordService; }
+
+    ReportKeywordDTO.View projectKeywords(NewsReport report, ReportEventFeedbackProjection.View view,
+                                          boolean personalPolicyActive) {
+        if (keywordService == null) return null;
+        return personalPolicyActive ? keywordService.unavailable(report, "PERSONALIZATION_UNVERIFIED")
+                : keywordService.projectForDelivery(report, view);
+    }
 
     ReportCoverageDTO.View projectCoverage(NewsReport report, ReportEventFeedbackProjection.View view) {
         return coverageService == null ? null : coverageService.project(report, view);
@@ -101,13 +113,22 @@ public class NotificationRenderer {
                                        ReportEventFeedbackProjection.View view, String feedbackUrl,
                                        ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
                                        ReportCoverageDTO.View coverage, Audience unavailableAudience) {
+        return render(report, channel, view, feedbackUrl, insight, companyPages, coverage, unavailableAudience,
+                channel.getChannelType() == ChannelType.EMAIL ? projectKeywords(report, view, false) : null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
+                                       ReportCoverageDTO.View coverage, Audience unavailableAudience,
+                                       ReportKeywordDTO.View keywords) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience);
+            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience, keywords);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -148,7 +169,8 @@ public class NotificationRenderer {
 
     private RenderedNotification renderEmail(NewsReport report, ReportEventFeedbackProjection.View view,
                                              ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
-                                             ReportCoverageDTO.View coverage, Audience unavailableAudience) {
+                                             ReportCoverageDTO.View coverage, Audience unavailableAudience,
+                                             ReportKeywordDTO.View keywords) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
@@ -161,6 +183,7 @@ public class NotificationRenderer {
         if (unavailableAudience != null)
             NotificationBriefingSection.field(html, "관점 준비 상태", NotificationBriefingSection.unavailable(unavailableAudience));
         NotificationBriefingSection.emailInsight(html, insight, view);
+        NotificationKeywordSection.email(html, keywords);
         List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);

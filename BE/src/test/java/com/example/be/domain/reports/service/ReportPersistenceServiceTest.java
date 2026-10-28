@@ -49,7 +49,7 @@ class ReportPersistenceServiceTest {
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class));
+                    events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
@@ -162,6 +162,76 @@ class ReportPersistenceServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
         when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
+    }
+
+    @Test
+    void criterionActivatedAfterWeeklyReservationInvalidatesUnassessedKeywordCandidates() {
+        var report = keywordWeek(null, List.of(1L));
+        var original = report.getReportKeywordSnapshot();
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        var criterion = new com.example.be.domain.companyinterest.CompanyInterestModels.ActiveCriterion(5L, 2L, "미선정 주제", "새 기준", 1L);
+        var application = new com.example.be.domain.companyinterest.CompanyInterestSelection.Application(criterion, 1, 0);
+        service.freezeCompanySelection(17L, List.of(1L), List.of(), report.getWeeklyInput(), List.of(application), LocalDateTime.now());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", report.getReportKeywordSnapshot().unavailableReason());
+        assertEquals(original.candidates(), report.getReportKeywordSnapshot().candidates());
+        assertEquals(original.definitions(), report.getReportKeywordSnapshot().definitions());
+        assertEquals(original.capturedAt(), report.getReportKeywordSnapshot().capturedAt());
+        assertTrue(report.isCompanySelectionRecorded());
+    }
+
+    @Test
+    void actualCriterionScopeInvalidatesKeywordsEvenWithoutSuccessfulApplications() {
+        var report = keywordWeek(null, List.of(1L));
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        service.freezeCompanySelection(17L, List.of(1L), List.of(), report.getWeeklyInput(), List.of(), java.util.Set.of(2L), LocalDateTime.now());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", report.getReportKeywordSnapshot().unavailableReason());
+    }
+
+    @Test
+    void knownInactiveUnselectedTopicAndFullyAssessedUniverseKeepTheirFrozenKeywordEvidence() {
+        for (var inputIds : List.of(List.of(1L), List.of(1L, 2L))) {
+            var report = keywordWeek(null, inputIds);
+            var original = report.getReportKeywordSnapshot();
+            when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+            var active = inputIds.size() == 1 ? java.util.Set.of(1L) : java.util.Set.of(1L, 2L);
+            service.freezeCompanySelection(17L, inputIds, List.of(), report.getWeeklyInput(), List.of(), active, LocalDateTime.now());
+            assertEquals(original, report.getReportKeywordSnapshot());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ReportScope.class)
+    void completeCandidateAssessmentScopesDoNotInvalidateRunDailyOrTopicWeeklyKeywords(ReportScope scope) {
+        var base = keywordWeek(scope == ReportScope.WEEKLY ? 2L : null, List.of(1L));
+        var report = NewsReport.builder().id(17L).reportScope(scope).topicId(base.getTopicId()).reportStatus(ReportStatus.PENDING)
+                .reportKeywordSnapshot(base.getReportKeywordSnapshot()).weeklyInput(base.getWeeklyInput()).build();
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        service.freezeCompanySelection(17L, List.of(1L), List.of(), report.getWeeklyInput(), List.of(), java.util.Set.of(2L), LocalDateTime.now());
+        assertEquals(base.getReportKeywordSnapshot(), report.getReportKeywordSnapshot());
+    }
+
+    @Test
+    void recoveryBeforeCompanySelectionCannotPublishTheUnverifiedLargerWeeklyUniverse() {
+        var report = keywordWeek(null, List.of(1L));
+        var original = report.getReportKeywordSnapshot();
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        service.complete(17L, new ReportDocument("주간", "저장된 내용", "fallback"), LocalDateTime.now());
+        assertEquals(ReportStatus.FALLBACK, report.getReportStatus());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", report.getReportKeywordSnapshot().unavailableReason());
+        assertEquals(original.candidates(), report.getReportKeywordSnapshot().candidates());
+    }
+
+    private NewsReport keywordWeek(Long topicId, List<Long> inputIds) {
+        var date = java.time.LocalDate.of(2026, 10, 19);
+        var input = new com.example.be.domain.reports.entity.WeeklyReportInput(date, date.plusDays(6), List.of(
+                new com.example.be.domain.reports.entity.WeeklyReportInput.DailySource(10L, date, "일일", "본문", null, inputIds)), List.of());
+        var snapshot = new com.example.be.domain.reports.keyword.ReportKeywordSnapshot("report-keywords.v1",
+                date.atTime(9, 0).atOffset(java.time.ZoneOffset.ofHours(9)), "주간 수집 기준", null,
+                List.of(new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Definition("ai", "AI")), List.of(
+                new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate(1L, 11L, 1L, 1L, 101L, List.of("ai")),
+                new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate(2L, 12L, 2L, 2L, 102L, List.of("ai"))));
+        return NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(topicId).reportStatus(ReportStatus.PENDING)
+                .reportDate(date).reportEndDate(date.plusDays(6)).weeklyInput(input).reportKeywordSnapshot(snapshot).build();
     }
 
     @Test

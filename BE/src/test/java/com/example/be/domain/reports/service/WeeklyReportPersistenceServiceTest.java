@@ -31,7 +31,7 @@ class WeeklyReportPersistenceServiceTest {
     private final ReportEventFeedbackProjection feedbackProjection = mock(ReportEventFeedbackProjection.class);
     private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
     private final WeeklyReportPersistenceService service = new WeeklyReportPersistenceService(
-            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions, mock(ReportCoverageCapture.class));
+            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
     private final LocalDate monday = LocalDate.of(2026, 9, 7);
     private final LocalDateTime now = monday.plusWeeks(1).atTime(0, 5);
 

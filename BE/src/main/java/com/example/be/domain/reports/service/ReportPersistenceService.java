@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +36,7 @@ public class ReportPersistenceService {
     private final ApplicationEventPublisher events;
     private final CompanyInterestSelection companyInterests;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
+    private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
 
     @Transactional
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
@@ -46,10 +48,28 @@ public class ReportPersistenceService {
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
                                        WeeklyReportInput weeklyInput,
                                        List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
+        freezeCompanySelection(reportId, findingIds, suppressedFindingIds, weeklyInput, applications, Set.of(), now);
+    }
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput weeklyInput, List<CompanyInterestSelection.Application> applications,
+                                       Set<Long> criterionTopicIds, LocalDateTime now) {
         NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
+        Set<Long> activeTopics = new java.util.HashSet<>(criterionTopicIds);
+        applications.forEach(application -> activeTopics.add(application.criterion().topicId()));
+        if (hasUnassessedWeeklyKeywordCandidates(report, activeTopics)) report.markKeywordCompanyScopeUnverified();
         report.freezeCompanySelection(findingIds, suppressedFindingIds, weeklyInput);
         companyInterests.record(reportId, applications, now);
+    }
+
+    private boolean hasUnassessedWeeklyKeywordCandidates(NewsReport report, Set<Long> criterionTopics) {
+        if (report.getReportScope() != com.example.be.domain.reports.entity.ReportScope.WEEKLY || report.getTopicId() != null
+                || report.getReportKeywordSnapshot() == null || report.getReportKeywordSnapshot().unavailableReason() != null) return false;
+        Set<Long> input = report.getWeeklyInput() == null ? Set.of() : Set.copyOf(report.getWeeklyInput().sourceFindingIds());
+        return report.getReportKeywordSnapshot().candidates().stream().anyMatch(candidate -> !input.contains(candidate.findingId())
+                && (criterionTopics == null || criterionTopics.contains(candidate.topicId())));
     }
 
     @Transactional
@@ -76,6 +96,7 @@ public class ReportPersistenceService {
                 .generatedAt(generatedAt)
                 .build());
         report.freezeReportCoverageSnapshot(reportCoverage.captureRun(report, generatedAt));
+        report.freezeReportKeywordSnapshot(reportKeywords.captureRun(report, generatedAt));
         run.attachReport(report.getId());
         return new Reservation(report.getId(), true);
     }
@@ -134,6 +155,9 @@ public class ReportPersistenceService {
         if (report.getReportStatus() != ReportStatus.PENDING) {
             return report.getId();
         }
+        // Recovery before company selection has no final criterion provenance for the larger keyword universe.
+        if (!report.isCompanySelectionRecorded() && hasUnassessedWeeklyKeywordCandidates(report, null))
+            report.markKeywordCompanyScopeUnverified();
         String title = ReportTitles.forReport(report, document.title(), generatedAt);
         report.complete(
                 title,

@@ -81,13 +81,16 @@ class ReportQueryServiceImplTest {
     private final DailyReportFeedbackExclusions dailyExclusions = mock(DailyReportFeedbackExclusions.class);
     private final ReportEventFeedbackProjection feedbackProjection =
             new ReportEventFeedbackProjection(feedbackStore, eventSnapshots, dailyExclusions);
+    private final com.example.be.domain.collection.repository.ArticleRepository keywordArticles =
+            mock(com.example.be.domain.collection.repository.ArticleRepository.class);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
             investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class), relevancePolicy,
             feedbackProjection, new com.example.be.domain.reports.coverage.ReportCoverageService(
-                    mock(com.example.be.domain.collection.repository.ArticleRepository.class), relevancePolicy));
+                    mock(com.example.be.domain.collection.repository.ArticleRepository.class), relevancePolicy),
+            new com.example.be.domain.reports.keyword.ReportKeywordService(keywordArticles, relevancePolicy, dailyExclusions));
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -770,6 +773,33 @@ class ReportQueryServiceImplTest {
         assertNull(without.getFindings());
         assertEquals(1, without.getSummaryStats().getFindingCount());
         assertEquals("report-coverage.v1", latest.getCoverage().ruleVersion());
+    }
+
+    @Test
+    void keywordDenominatorRetainsUnselectedCandidatesInDetailAndLatestWithoutFindings() {
+        var selected = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        var article = Article.builder().id(1001L).fetchStatus(FetchStatus.FULLTEXT).body("원문").build();
+        var snapshot = new com.example.be.domain.reports.keyword.ReportKeywordSnapshot("report-keywords.v1",
+                OffsetDateTime.parse("2026-10-29T09:00:00+09:00"), "2026-10-28 수집 기준", null,
+                List.of(new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Definition("hbm", "HBM")),
+                List.of(new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate(1L, 1001L, 42L, 7L, 88L, List.of("hbm")),
+                        new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate(2L, 1001L, 42L, 7L, 89L, List.of())));
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.DAILY).reportDate(LocalDate.of(2026, 10, 28))
+                .reflectedFindingIds(List.of(1L)).reportKeywordSnapshot(snapshot)
+                .generatedAt(LocalDateTime.of(2026, 10, 29, 9, 0)).build();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(List.of(selected));
+        when(keywordArticles.findAllById(any())).thenReturn(List.of(article));
+
+        var detail = service.getReport(17L, false);
+        assertEquals(2, detail.getKeywordStats().denominatorIssueCount());
+        assertEquals(50.0, detail.getKeywordStats().items().getFirst().sharePercent());
+        assertEquals(detail.getKeywordStats(), service.getLatest(false).getKeywordStats());
+        assertNull(detail.getFindings());
+        assertEquals(1, detail.getSummaryStats().getFindingCount());
+        assertEquals(snapshot, report.getReportKeywordSnapshot());
     }
 
     @Test

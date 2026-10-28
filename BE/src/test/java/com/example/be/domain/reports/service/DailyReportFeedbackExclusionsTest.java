@@ -228,6 +228,45 @@ class DailyReportFeedbackExclusionsTest {
         verifyNoInteractions(reports, feedback, findings, relevance, snapshots, comparisons);
     }
 
+    @Test void keywordCandidatesInheritDailyIdentityEvenWhenTheWeeklyTopSelectionOmitsThem() {
+        NewsReport daily = reviewedDaily(10, monday, 11);
+        org.springframework.test.util.ReflectionTestUtils.setField(daily, "reportKeywordSnapshot",
+                keywordSnapshot(keywordCandidate(11, 100, 1)));
+        when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(confirmed(10, "current")));
+        var target = weekly(20L, null, monday, List.of(22L), null);
+        var candidates = keywordSnapshot(keywordCandidate(21, 100, 1), keywordCandidate(22, 101, 1),
+                keywordCandidate(23, 100, 2));
+
+        assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, candidates, false));
+        assertEquals(List.of(22L), target.getReflectedFindingIds());
+        assertTrue(exclusions.forReport(target).isEmpty());
+    }
+
+    @Test void keywordCandidatesUseAllSubmittedDailyOpinionsOnlyForDelivery() {
+        NewsReport daily = reviewedDaily(10, monday, 11);
+        org.springframework.test.util.ReflectionTestUtils.setField(daily, "reportKeywordSnapshot",
+                keywordSnapshot(keywordCandidate(11, 100, 1)));
+        when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
+        when(feedback.eventFeedback(10L)).thenReturn(List.of(review(10, "current", Category.PREFERENCE, Status.PENDING,
+                null, null, null, null)));
+        var target = weekly(20L, 1L, monday, List.of(), null);
+        var candidates = keywordSnapshot(keywordCandidate(21, 100, 1), keywordCandidate(22, 101, 1));
+
+        assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, candidates, true));
+        assertTrue(exclusions.forKeywordCandidates(target, candidates, false).isEmpty());
+    }
+
+    private com.example.be.domain.reports.keyword.ReportKeywordSnapshot keywordSnapshot(
+            com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate... candidates) {
+        return new com.example.be.domain.reports.keyword.ReportKeywordSnapshot("report-keywords.v1",
+                java.time.OffsetDateTime.parse("2026-09-28T09:00:00+09:00"), "주간 수집 기준", null, List.of(), List.of(candidates));
+    }
+
+    private com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate keywordCandidate(long finding, long issue, long topic) {
+        return new com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate(finding, finding + 1000, 1L, topic, issue, List.of());
+    }
+
     private NewsReport reviewedDaily(long id, LocalDate date, long findingId) {
         NewsReport report = daily(id, date, ReportStatus.GENERATED, List.of(findingId));
         Article article = mock(Article.class);

@@ -31,6 +31,7 @@ public class DailyReportPersistenceService {
     private final ReportComparisonRepository comparisons;
     private final CompanyInterestSelection companyInterests;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
+    private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
 
     @Transactional
     public void freezeSelection(Long reportId, DailyReportSelector.Selection selection, LocalDateTime now) {
@@ -78,6 +79,7 @@ public class DailyReportPersistenceService {
                 .markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
         report.freezeReportCoverageSnapshot(reportCoverage.captureDaily(report, prepared, now));
+        report.freezeReportKeywordSnapshot(reportKeywords.captureDaily(report, prepared, now));
         if (snapshot != null) {
             try {
                 comparisons.captureInput(report, snapshot, now);

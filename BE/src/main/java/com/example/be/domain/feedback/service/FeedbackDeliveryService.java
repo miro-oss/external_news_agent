@@ -30,6 +30,12 @@ public class FeedbackDeliveryService {
     @Value("${news.feedback.enabled:true}") private boolean enabled=true;
     @Value("${news.scheduling.enabled:true}") private boolean schedulingEnabled=true;
 
+    /** Existing personal evaluations cover selected report findings, not the full keyword denominator. */
+    @Transactional(readOnly = true)
+    public boolean hasActivePersonalPolicies(long recipientId) {
+        return enabled && store.policies(recipientId).stream().anyMatch(policy -> "ACTIVE".equals(policy.status()));
+    }
+
     /** No provider calls: prepares a capability over exactly the remaining delivered source units. */
     @Transactional
     public DeliveryFeedback prepare(NewsReport report,long recipientId,List<Finding> visibleFindings) {

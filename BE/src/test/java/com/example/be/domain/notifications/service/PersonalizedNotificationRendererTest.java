@@ -65,7 +65,7 @@ class PersonalizedNotificationRendererTest {
 
     @BeforeEach
     void configurePublicLinks() {
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
         ReflectionTestUtils.setField(personalized, "publicBaseUrl", "https://news.example.com");
     }
@@ -249,7 +249,7 @@ class PersonalizedNotificationRendererTest {
         assertEquals("application/pdf", attachment.contentType());
         assertArrayEquals(new byte[]{'%', 'P', 'D', 'F'}, attachment.content());
         var view = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
-        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any());
+        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any(), any(), any());
         assertEquals(List.of("정상 사건 제목"), eventTitles(view.getValue()));
         assertEquals(List.of(12L, 13L), view.getValue().findings().stream().map(Finding::getId).toList());
         assertTrue(view.getValue().excludedEvidenceFindingIds().containsAll(Set.of(11L, 12L, 14L)));
@@ -303,6 +303,7 @@ class PersonalizedNotificationRendererTest {
             assertTrue(links.contains("https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515001234"));
         }
         verify(feedback).prepare(eq(report), eq(RECIPIENT_ID), any(ReportEventFeedbackProjection.View.class));
+        verify(feedback).hasActivePersonalPolicies(RECIPIENT_ID);
         verify(reports, times(queuedDelivery ? 1 : 0)).findById(report.getId());
         verifyNoMoreInteractions(reports, feedback);
         verifyNoInteractions(pdfRenderer, findings, snapshots);
@@ -315,7 +316,7 @@ class PersonalizedNotificationRendererTest {
         prepare(fixture, List.of(), Set.of());
         var channel = NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL).maxLength(3500).active(true).build();
         var failure = new IllegalStateException("synthetic PDF preparation failure");
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any())).thenThrow(failure);
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any())).thenThrow(failure);
 
         assertSame(failure, assertThrows(IllegalStateException.class,
                 () -> personalized.render(fixture.report(), channel, RECIPIENT_ID)));
@@ -362,6 +363,39 @@ class PersonalizedNotificationRendererTest {
         when(snapshots.capture(eq(fixture.report()), any())).thenReturn(fixture.items());
         when(feedback.prepare(eq(fixture.report()), eq(RECIPIENT_ID), any(ReportEventFeedbackProjection.View.class)))
                 .thenReturn(new DeliveryFeedback(suppressed, "synthetic-test-token"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void keywordProjectionIsSharedWithPdfAndActivePersonalPolicyCannotExposeUnassessedCandidates(boolean active) throws Exception {
+        var fixture = fixture(false);
+        prepare(fixture, List.of(), Set.of());
+        var keywords = mock(com.example.be.domain.reports.keyword.ReportKeywordService.class);
+        renderer.setKeywordService(keywords);
+        var stats = active ? new com.example.be.domain.reports.keyword.ReportKeywordDTO.View(
+                com.example.be.domain.reports.keyword.ReportKeywordDTO.Status.UNAVAILABLE, "PERSONALIZATION_UNVERIFIED",
+                "report-keywords.v1", null, "해당 실행 수집 기준", null, List.of(), 0)
+                : new com.example.be.domain.reports.keyword.ReportKeywordDTO.View(
+                com.example.be.domain.reports.keyword.ReportKeywordDTO.Status.AVAILABLE, null, "report-keywords.v1", null,
+                "해당 실행 수집 기준", 10, List.of(new com.example.be.domain.reports.keyword.ReportKeywordDTO.Item("HBM", 4, 40.0, List.of())), 0);
+        when(feedback.hasActivePersonalPolicies(RECIPIENT_ID)).thenReturn(active);
+        when(keywords.projectForDelivery(eq(fixture.report()), any())).thenReturn(stats);
+        when(keywords.unavailable(fixture.report(), "PERSONALIZATION_UNVERIFIED")).thenReturn(stats);
+        var actual = new PersonalizedNotificationRenderer(reports, findings, relevance, feedback, renderer, projection,
+                new ReportPdfRenderer(mock(com.example.be.domain.reports.dart.ReportDartService.class)));
+        var result = actual.render(fixture.report(), NotificationChannel.builder().channelType(ChannelType.EMAIL)
+                .maxLength(3500).build(), RECIPIENT_ID);
+        try (var document = Loader.loadPDF(result.attachments().getFirst().content())) {
+            String pdfText = new PDFTextStripper().getText(document);
+            for (var text : List.of(org.jsoup.Jsoup.parse(result.chunks().getFirst()).text(), pdfText)) {
+                if (active) {
+                    assertTrue(text.replaceAll("\\s", "").contains("개인수신기준을전체후보에확인할수없어"));
+                    assertFalse(text.contains("HBM"));
+                } else assertTrue(text.replaceAll("\\s", "").contains("4건/전체10건·40%"));
+            }
+        }
+        if (active) verify(keywords, never()).projectForDelivery(any(), any());
+        else verify(keywords, times(1)).projectForDelivery(eq(fixture.report()), any());
     }
 
     private List<ReportEventFeedbackProjection.View> preparedViews(NewsReport report, int count) {
