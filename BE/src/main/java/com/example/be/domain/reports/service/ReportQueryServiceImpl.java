@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.reports.briefing.ReportBriefing;
+
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
 import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
@@ -191,7 +193,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Long runId = report.getRunId();
         boolean aggregate = report.getReportScope() != ReportScope.RUN;
         var reviews = feedbackProjection.reviews(report.getId());
-        boolean loadFindings = report.getReportCoverageSnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
+        boolean loadFindings = report.getStructuredContent() != null || report.getReportCoverageSnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
                 || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
                 || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
         ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
@@ -234,6 +236,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .summaryStats(summaryStats)
                 .structuredContent(readingContent.structuredContent())
+                .briefing(ReportBriefing.from(view))
                 .collectionContexts(report.getCollectionContexts())
                 .dartCompanies(ReportDartEligibility.companies(report))
                 .articleStats(articleStats(report))

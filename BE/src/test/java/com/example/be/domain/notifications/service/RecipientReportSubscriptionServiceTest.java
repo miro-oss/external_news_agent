@@ -1,6 +1,8 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.notifications.entity.NotificationRecipient;
+import com.example.be.domain.notifications.entity.RecipientInsightAudience;
+import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -25,6 +27,41 @@ class RecipientReportSubscriptionServiceTest {
     void existingRecipientAndTopic() {
         when(management.findRecipient(2L)).thenReturn(NotificationRecipient.builder().id(2L).active(true).build());
         when(topics.findById(1L)).thenReturn(Optional.of(Topic.builder().id(1L).name("주제").build()));
+    }
+
+    @Test
+    void onlyAudienceCanChangeAndNullPreservesWhileNoneClears() {
+        assertThat(service.get(2L).autoInsightAudience()).isEqualTo(RecipientInsightAudience.NONE);
+        var selected = service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(null, null, null, "EQUIPMENT_MAKER"));
+        assertThat(selected.autoInsightAudience()).isEqualTo(RecipientInsightAudience.EQUIPMENT_MAKER);
+        assertThat(selected.aggregates().daily()).isFalse();
+        assertThat(selected.aggregates().weekly()).isFalse();
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+
+        var preserved = service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(true, null, null, null));
+        assertThat(preserved.autoInsightAudience()).isEqualTo(RecipientInsightAudience.EQUIPMENT_MAKER);
+        var cleared = service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(null, null, null, "NONE"));
+        assertThat(cleared.autoInsightAudience()).isEqualTo(RecipientInsightAudience.NONE);
+    }
+
+    @Test
+    void invalidAudienceCannotPartiallySaveOtherSettings() {
+        for (String value : List.of("", " ", "UNKNOWN", "none", "EQUIPMENT_MAKER,IT_INFRA")) {
+            assertThatThrownBy(() -> service.update(2L,
+                    new RecipientReportSubscriptionService.SettingsUpdate(true, true, null, value)))
+                    .isInstanceOf(AudienceException.class).hasMessage("지원하지 않는 관점입니다.");
+        }
+        verifyNoInteractions(jdbc);
+        assertThat(management.findRecipient(2L).getAutoInsightAudience()).isEqualTo(RecipientInsightAudience.NONE);
+    }
+
+    @Test
+    void invalidTopicDoesNotChangeAudience() {
+        assertThatThrownBy(() -> service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(null, null,
+                List.of(new RecipientReportSubscriptionService.TopicChoice(999L, true)), "IT_INFRA")))
+                .isInstanceOf(GeneralException.class).hasMessage("수집 주제를 찾을 수 없습니다.");
+        verifyNoInteractions(jdbc);
+        assertThat(management.findRecipient(2L).getAutoInsightAudience()).isEqualTo(RecipientInsightAudience.NONE);
     }
 
     @Test

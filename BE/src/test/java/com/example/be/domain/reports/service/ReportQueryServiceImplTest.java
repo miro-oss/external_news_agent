@@ -772,6 +772,31 @@ class ReportQueryServiceImplTest {
         assertEquals("report-coverage.v1", latest.getCoverage().ruleVersion());
     }
 
+    @Test
+    void briefingUsesFinalSourcesEvenWithoutFindingsAndWithoutCoverageSnapshot() {
+        var finding = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        var content = new ReportContent(List.of("원문 연결 없는 자유 요약"),
+                List.of(new ReportContent.ImportantEvent("일정", "목표 일정이며 실행 확정은 아닙니다.", "", List.of(1L)),
+                        new ReportContent.ImportantEvent("알 수 없는 근거", "잘못 연결된 내용", "", List.of(99L))), List.of(), List.of());
+        var report = NewsReport.builder().id(17L).run(CollectionRun.builder().id(42L).build())
+                .structuredContent(content).generatedAt(LocalDateTime.of(2026, 10, 29, 9, 0)).build();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
+
+        var with = service.getReport(17L, true);
+        var without = service.getReport(17L, false);
+        assertEquals(with.getBriefing(), without.getBriefing());
+        assertEquals(without.getBriefing(), service.getLatest(false).getBriefing());
+        assertEquals(List.of(1L), without.getBriefing().items().getFirst().sourceFindingIds());
+        assertEquals(1, without.getBriefing().items().size());
+        assertEquals(0, without.getBriefing().omittedItemCount());
+        assertNull(without.getFindings());
+        assertEquals(content, report.getStructuredContent());
+        assertEquals(content, without.getStructuredContent());
+    }
+
     private Finding finding(Long id, SensitivityLevel sensitivityLevel, Relevance relevance) {
         Article article = Article.builder()
                 .id(id + 100)

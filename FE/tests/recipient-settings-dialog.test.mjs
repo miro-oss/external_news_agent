@@ -110,3 +110,18 @@ test('stored topic names remain text inside subscription controls', context => {
   assert.doesNotMatch(markup, /<img/)
   assert.match(markup, /&lt;img/)
 })
+
+test('automatic audience defaults to neutral and retains an explicitly stored perspective without selecting extra reports', context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const neutral = render(client, Settings)
+  assert.match(neutral, /<legend>자동 보고서 관점<\/legend>/)
+  assert.match(neutral, /<option value="NONE" selected="">중립 브리핑만 받기/)
+  assert.match(neutral, /준비되지 않았으면 기본 보고서와 준비 상태/)
+  assert.match(neutral, /완료 후 다시 보내지는 않습니다/)
+  const selected = render(client, Settings, { settings: { ...settings, autoInsightAudience: 'EQUIPMENT_MAKER',
+    topics: [], aggregates: { daily: false, weekly: false, channelTypes: [] } } })
+  assert.match(selected, /<option value="EQUIPMENT_MAKER" selected="">/)
+  assert.doesNotMatch(selected, /type="checkbox" checked/)
+  assert.match(selected, /class="primary-button" disabled="">저장/)
+})

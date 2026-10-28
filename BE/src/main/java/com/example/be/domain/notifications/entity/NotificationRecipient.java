@@ -5,6 +5,8 @@ import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -19,6 +21,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
@@ -27,6 +30,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "notification_recipients")
+@DynamicUpdate
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
@@ -58,6 +62,11 @@ public class NotificationRecipient {
     private LocalDateTime deletedAt;
 
     @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auto_insight_audience", nullable = false, length = 30)
+    private RecipientInsightAudience autoInsightAudience = RecipientInsightAudience.NONE;
+
+    @Builder.Default
     @BatchSize(size = 100)
     @OneToMany(mappedBy = "recipient", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<RecipientDestination> destinations = new ArrayList<>();
@@ -81,6 +90,10 @@ public class NotificationRecipient {
             destination.assignRecipient(this);
             destinations.add(destination);
         });
+    }
+
+    public void updateAutoInsightAudience(RecipientInsightAudience audience) {
+        this.autoInsightAudience = java.util.Objects.requireNonNull(audience);
     }
 
     public void softDelete(LocalDateTime deletedAt) {

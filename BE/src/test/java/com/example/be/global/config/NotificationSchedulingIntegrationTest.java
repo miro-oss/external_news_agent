@@ -9,6 +9,7 @@ import com.example.be.domain.notifications.repository.NotificationChannelReposit
 import com.example.be.domain.notifications.service.ReportDeliveryOutboxStore;
 import com.example.be.domain.notifications.service.ReportDeliveryWorker;
 import com.example.be.domain.notifications.service.PersonalizedNotificationRenderer;
+import com.example.be.domain.notifications.service.AutomaticNotificationInsightService;
 import com.example.be.domain.notifications.service.RenderedNotification;
 import com.example.be.domain.notifications.service.TelegramConnectionPoller;
 import com.example.be.domain.notifications.service.TelegramConnectionService;
@@ -56,7 +57,9 @@ class NotificationSchedulingIntegrationTest {
         var senders = mock(NotificationSenderRegistry.class);
         var sender = mock(NotificationSender.class);
         var personalized = mock(PersonalizedNotificationRenderer.class);
-        when(personalized.render(any(Long.class),any(),any())).thenReturn(
+        var automaticInsights = mock(AutomaticNotificationInsightService.class);
+        when(automaticInsights.resolve(any(), any())).thenReturn(AutomaticNotificationInsightService.Selection.neutral());
+        when(personalized.renderAutomatic(any(Long.class),any(),any(),any())).thenReturn(
                 new RenderedNotification("개인 제목",null,List.of("개인 본문")));
         var deliverySession = mock(NotificationSender.DeliverySession.class);
         var claimed = new AtomicBoolean();
@@ -95,6 +98,7 @@ class NotificationSchedulingIntegrationTest {
                 .withBean(NotificationChannelRepository.class, () -> channels)
                 .withBean(NotificationSenderRegistry.class, () -> senders)
                 .withBean(PersonalizedNotificationRenderer.class, () -> personalized)
+                .withBean(AutomaticNotificationInsightService.class, () -> automaticInsights)
                 .withBean(TelegramConnectionAdapter.class, () -> telegram)
                 .withBean(TelegramConnectionService.class, () -> connections)
                 .withPropertyValues("news.scheduling.enabled=true", "news.reports.daily.enabled=true",

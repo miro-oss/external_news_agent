@@ -4,6 +4,7 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationGroup;
 import com.example.be.domain.notifications.entity.NotificationRecipient;
 import com.example.be.domain.notifications.entity.RecipientDestination;
+import com.example.be.domain.notifications.entity.RecipientInsightAudience;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -31,9 +32,14 @@ public class RecipientReportSubscriptionService {
     private static final String INVALID_SCOPES = "제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
     private static final String INVALID_INCLUSIONS = "추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
 
-    public record Subscriptions(Long recipientId, List<TopicSubscription> topics, Aggregates aggregates) {
+    public record Subscriptions(Long recipientId, List<TopicSubscription> topics, Aggregates aggregates,
+                                @Schema(description = "자동 전달 관점. NONE은 중립 브리핑", allowableValues = {"NONE", "CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"})
+                                RecipientInsightAudience autoInsightAudience) {
         public Subscriptions(Long recipientId, List<TopicSubscription> topics) {
-            this(recipientId, topics, new Aggregates(false, false, List.of()));
+            this(recipientId, topics, new Aggregates(false, false, List.of()), RecipientInsightAudience.NONE);
+        }
+        public Subscriptions(Long recipientId, List<TopicSubscription> topics, Aggregates aggregates) {
+            this(recipientId, topics, aggregates, RecipientInsightAudience.NONE);
         }
     }
 
@@ -41,7 +47,13 @@ public class RecipientReportSubscriptionService {
     public record TopicChoice(Long topicId, Boolean subscribed) { }
     public record SettingsUpdate(@Schema(description = "일일 통합 수신. 생략/null은 유지") Boolean daily,
                                  @Schema(description = "주간 통합 수신. 생략/null은 유지") Boolean weekly,
-                                 @Schema(description = "변경할 주제의 RUN 수신 선택만 전달") List<TopicChoice> topics) { }
+                                 @Schema(description = "변경할 주제의 RUN 수신 선택만 전달") List<TopicChoice> topics,
+                                 @Schema(description = "자동 전달 관점. 생략/null은 유지, NONE은 관점 해제. 설정만으로 재발송하지 않음", allowableValues = {"NONE", "CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"})
+                                 String autoInsightAudience) {
+        public SettingsUpdate(Boolean daily, Boolean weekly, List<TopicChoice> topics) {
+            this(daily, weekly, topics, null);
+        }
+    }
 
     public record TopicSubscription(Long topicId, String topicName,
                                     @Schema(description = "저장된 주제 정책의 활성 여부") boolean enabled,
@@ -71,15 +83,17 @@ public class RecipientReportSubscriptionService {
                 .filter(row -> row.direct() || !row.groupNames().isEmpty() || !row.excludedScopes().isEmpty() || !row.includedScopes().isEmpty())
                 .toList();
         return new Subscriptions(recipientId, rows, new Aggregates(aggregateChoice(recipientId, "DAILY", rows),
-                aggregateChoice(recipientId, "WEEKLY", rows), usableChannels(recipient)));
+                aggregateChoice(recipientId, "WEEKLY", rows), usableChannels(recipient)), recipient.getAutoInsightAudience());
     }
 
     @Transactional
     public Subscriptions update(Long recipientId, SettingsUpdate request) {
-        management.findRecipient(recipientId);
+        NotificationRecipient recipient = management.findRecipient(recipientId);
         if (request == null || (request.daily() == null && request.weekly() == null
-                && (request.topics() == null || request.topics().isEmpty())))
+                && (request.topics() == null || request.topics().isEmpty()) && request.autoInsightAudience() == null))
             throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "변경할 알림 설정을 선택해 주세요.");
+        RecipientInsightAudience audience = request.autoInsightAudience() == null ? null
+                : RecipientInsightAudience.fromApiValue(request.autoInsightAudience());
         List<TopicChoice> choices = request.topics() == null ? List.of() : request.topics();
         if (choices.stream().anyMatch(choice -> choice == null || choice.topicId() == null || choice.topicId() <= 0 || choice.subscribed() == null)
                 || choices.stream().map(TopicChoice::topicId).distinct().count() != choices.size())
@@ -89,6 +103,7 @@ public class RecipientReportSubscriptionService {
         jdbc.queryForObject("SELECT id FROM notification_recipients WHERE id=? FOR UPDATE", Long.class, recipientId);
         saveAggregate(recipientId, "DAILY", request.daily());
         saveAggregate(recipientId, "WEEKLY", request.weekly());
+        if (audience != null) recipient.updateAutoInsightAudience(audience);
         var current = get(recipientId).topics().stream().collect(Collectors.toMap(TopicSubscription::topicId, row -> row));
         for (TopicChoice choice : choices) {
             TopicSubscription row = current.get(choice.topicId());

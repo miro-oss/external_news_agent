@@ -63,7 +63,7 @@ class ReportPdfRendererTests {
             String text = new PDFTextStripper().getText(document);
             for (String expected : List.of("핵심 요약", "네 번째 전체 요약", "중요 이벤트", "중요 사건 7", "사건 전체 내용 7",
                     "관찰 항목", "후속 확인할 조건")) assertTrue(text.contains(expected), expected);
-            for (String absent : List.of("주목할 이유", "기타 분석", "기사 분석 9", "수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
+            for (String absent : List.of("기타 분석", "기사 분석 9", "수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
                 assertFalse(text.contains(absent), absent);
             assertFalse(urls(document).contains("https://example.com/article-9"));
             assertFalse(text.contains("https://example.com/article-9"));
@@ -93,7 +93,7 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             String text = new PDFTextStripper().getText(document);
             assertTrue(text.replaceAll("\\s", "").contains(summary.replaceAll("\\s", "")), text);
-            assertEquals(1, text.split("논의하고 있다\\.", -1).length - 1, text);
+            assertEquals(2, text.split("논의하고 있다\\.", -1).length - 1, text); // Brief plus full event; dated chronology stays hidden.
             for (String omitted : List.of("주제별 분석 결과", "[전망]", "소식통", "근거 제한", "스타트업", "먼저 살펴볼 이슈"))
                 assertFalse(text.contains(omitted), omitted);
             assertTrue(urls(document).contains("https://example.com/article-1"));
@@ -156,7 +156,7 @@ class ReportPdfRendererTests {
             String text = new PDFTextStripper().getText(document);
             assertTrue(document.getNumberOfPages() >= 3);
             for (int i = 1; i <= 90; i++) assertTrue(text.contains("완전한 문장 " + i + ":"), "missing prose " + i);
-            assertFalse(text.contains("마지막 중요성도 보존합니다"));
+            assertTrue(text.contains("마지막 중요성도 보존합니다"));
             assertTrue(text.replaceAll("\\s", "").contains(longUrl));
             assertTrue(urls(document).contains(longUrl));
             assertWithinPageBounds(document);
@@ -224,7 +224,7 @@ class ReportPdfRendererTests {
                     "차트 단위: 억원", "표 금액 단위: 억원", "1,234.57", "-12.35", "주간 뉴스 요약", "저장한 뉴스 내용"))
                 assertTrue(text.contains(expected), expected + "\n" + text);
             assertTrue(text.indexOf("핵심 요약") < text.indexOf("회사 실적"));
-            assertFalse(text.contains("표시하지 않는 추가 분석"));
+            assertTrue(text.contains("표시하지 않는 추가 분석"));
             for (String expected : List.of("회사 실적 · 공시", "최근 공시", "[정정]", "반기보고서 (가상 검증 자료)",
                     "2026-08-14", "이전 공시 (가상 검증 자료)", "2026-05-15")) assertTrue(text.contains(expected), expected);
             assertTrue(text.indexOf("핵심 요약") < text.indexOf("최근 공시"));

@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError, notificationGet, notificationPatch, notificationPut } from './client.ts'
-import type { NotificationChannelType, ReportScope } from './types'
+import type { Audience, NotificationChannelType, ReportScope } from './types'
 
 export type RecipientReportSubscription = {
   topicId: number
@@ -14,8 +14,19 @@ export type RecipientReportSubscription = {
   groupNames: string[]
 }
 export type AggregateSubscriptions = { daily: boolean; weekly: boolean; channelTypes: NotificationChannelType[] }
-export type RecipientReportSubscriptions = { recipientId: number; topics: RecipientReportSubscription[]; aggregates: AggregateSubscriptions }
-export type RecipientSettingsUpdate = { daily?: boolean; weekly?: boolean; topics?: { topicId: number; subscribed: boolean }[] }
+export type AutoInsightAudience = 'NONE' | Audience
+export type RecipientReportSubscriptions = {
+  recipientId: number
+  topics: RecipientReportSubscription[]
+  aggregates: AggregateSubscriptions
+  autoInsightAudience?: AutoInsightAudience
+}
+export type RecipientSettingsUpdate = {
+  daily?: boolean
+  weekly?: boolean
+  topics?: { topicId: number; subscribed: boolean }[]
+  autoInsightAudience?: AutoInsightAudience
+}
 export type RecipientReportChoices = Pick<RecipientReportSubscription, 'includedScopes' | 'excludedScopes'>
 export const reportSubscriptionsKey = ['notifications', 'report-subscriptions'] as const
 
@@ -30,6 +41,8 @@ export function saveRecipientSettingsOptions(client: QueryClient, recipientId: n
     mutationFn: async (changes: RecipientSettingsUpdate) => {
       const result = await notificationPatch<RecipientReportSubscriptions>(`/recipients/${recipientId}/report-subscriptions`, changes)
       if (!result.aggregates) throw new ApiError('SERVER_UPDATE_REQUIRED', '알림 설정을 저장하려면 서버 업데이트가 필요합니다. 잠시 후 다시 시도해 주세요.')
+      if (changes.autoInsightAudience !== undefined && result.autoInsightAudience !== changes.autoInsightAudience)
+        throw new ApiError('SERVER_UPDATE_REQUIRED', '관점 설정을 저장한 결과를 확인하지 못했습니다. 서버 업데이트 후 다시 시도해 주세요.')
       return result
     },
     retry: false,

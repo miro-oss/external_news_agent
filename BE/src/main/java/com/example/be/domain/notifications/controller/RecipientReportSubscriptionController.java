@@ -19,7 +19,7 @@ public class RecipientReportSubscriptionController {
     private final RecipientReportSubscriptionService subscriptions;
 
     @GetMapping
-    @Operation(summary = "수신자 보고서 알림 조회", description = "aggregates는 주제와 별개인 일일·주간 통합 수신과 사용 가능한 전달 방식입니다. 아직 직접 저장하지 않은 통합 종류는 기존 수신 경로를 유지합니다. topics는 직접/그룹 대상 및 개인 선택을 주제명, ID 순으로 반환하며 주제 체크는 RUN 수신에 사용합니다.")
+    @Operation(summary = "수신자 보고서 알림 조회", description = "aggregates는 주제와 별개인 일일·주간 통합 수신과 사용 가능한 전달 방식입니다. 아직 직접 저장하지 않은 통합 종류는 기존 수신 경로를 유지합니다. topics는 직접/그룹 대상 및 개인 선택을 주제명, ID 순으로 반환하며 주제 체크는 RUN 수신에 사용합니다. autoInsightAudience는 자동 전달에 포함할 저장 관점이며 기본 NONE은 중립 브리핑입니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "RECIPIENT404 / 수신자를 찾을 수 없습니다.")
@@ -29,10 +29,13 @@ public class RecipientReportSubscriptionController {
     }
 
     @PatchMapping
-    @Operation(summary = "수신자 통합 보고서 및 주제 수신 설정", description = "변경한 daily/weekly와 topics[{topicId,subscribed}]만 원자적으로 저장합니다. 통합 수신은 주제와 독립적이며 명시적으로 저장한 종류는 기존 자동 전달 경로보다 우선합니다. 주제 선택은 RUN만 바꾸며 다른 수신자·공통 정책은 유지합니다. 저장 자체로 재발송하지 않습니다.")
+    @Operation(summary = "수신자 통합 보고서 및 주제 수신 설정", description = "변경한 daily/weekly와 topics[{topicId,subscribed}], autoInsightAudience를 원자적으로 저장합니다. autoInsightAudience는 NONE 또는 네 관점 중 하나이며 생략/null은 유지, NONE은 해제입니다. 관점만 변경할 수 있으며 준비된 저장 분석이 없으면 기본 보고서를 전달하고 안내합니다. 통합 수신은 주제와 독립적이며 명시적으로 저장한 종류는 기존 자동 전달 경로보다 우선합니다. 주제 선택은 RUN만 바꾸며 다른 수신자·공통 정책은 유지합니다. 관점 설정은 새 수신 동의나 AI 호출·과거 보고서 재발송을 만들지 않습니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "변경할 알림 설정을 선택해 주세요. / 주제 수신 설정이 올바르지 않습니다."),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "COMMON400 변경할 알림 설정을 선택해 주세요. / 주제 수신 설정이 올바르지 않습니다. / AUDIENCE400 지원하지 않는 관점입니다.",
+                    content = @Content(examples = @ExampleObject(name = "autoInsightAudience", value = """
+                            {"isSuccess":false,"code":"AUDIENCE400","message":"지원하지 않는 관점입니다.","result":{}}
+                            """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "RECIPIENT404 수신자 없음 / COMMON404 수집 주제 없음")
     })
     public ApiResponse<RecipientReportSubscriptionService.Subscriptions> update(@PathVariable Long recipientId,

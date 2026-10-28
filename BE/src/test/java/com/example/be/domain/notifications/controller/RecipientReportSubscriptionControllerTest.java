@@ -2,6 +2,8 @@ package com.example.be.domain.notifications.controller;
 
 import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.notifications.exception.code.NotificationErrorCode;
+import com.example.be.domain.notifications.entity.RecipientInsightAudience;
+import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.domain.notifications.service.RecipientReportSubscriptionService;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -31,6 +33,7 @@ class RecipientReportSubscriptionControllerTest {
         mvc.perform(get("/api/notifications/recipients/2/report-subscriptions"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.recipientId").value(2))
+                .andExpect(jsonPath("$.result.autoInsightAudience").value("NONE"))
                 .andExpect(jsonPath("$.result.topics[0].includedScopes[0]").value("WEEKLY"))
                 .andExpect(jsonPath("$.result.topics[0].excludedScopes[0]").value("DAILY"))
                 .andExpect(jsonPath("$.result.topics[0].channelTypes[0]").value("EMAIL"));
@@ -55,6 +58,30 @@ class RecipientReportSubscriptionControllerTest {
                 .andExpect(jsonPath("$.result.aggregates.weekly").value(false));
         verify(service).update(2L, new RecipientReportSubscriptionService.SettingsUpdate(true, null,
                 List.of(new RecipientReportSubscriptionService.TopicChoice(1L, false))));
+    }
+
+    @Test
+    void patchesAndReadsAudienceWithoutRequiringSubscriptionChanges() throws Exception {
+        when(service.update(eq(2L), any())).thenReturn(new RecipientReportSubscriptionService.Subscriptions(2L, List.of(),
+                new RecipientReportSubscriptionService.Aggregates(false, false, List.of()), RecipientInsightAudience.EQUIPMENT_MAKER));
+        mvc.perform(patch("/api/notifications/recipients/2/report-subscriptions").contentType("application/json")
+                        .content("{\"autoInsightAudience\":\"EQUIPMENT_MAKER\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.autoInsightAudience").value("EQUIPMENT_MAKER"));
+        verify(service).update(2L, new RecipientReportSubscriptionService.SettingsUpdate(null, null, null, "EQUIPMENT_MAKER"));
+        mvc.perform(patch("/api/notifications/recipients/2/report-subscriptions").contentType("application/json")
+                        .content("{\"daily\":true,\"autoInsightAudience\":null}"))
+                .andExpect(status().isOk());
+        verify(service).update(2L, new RecipientReportSubscriptionService.SettingsUpdate(true, null, null, null));
+    }
+
+    @Test
+    void invalidAudienceKeepsTheDocumentedErrorEnvelope() throws Exception {
+        when(service.update(eq(2L), any())).thenThrow(new AudienceException());
+        mvc.perform(patch("/api/notifications/recipients/2/report-subscriptions").contentType("application/json")
+                        .content("{\"autoInsightAudience\":\"unknown\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("AUDIENCE400"))
+                .andExpect(jsonPath("$.message").value("지원하지 않는 관점입니다."))
+                .andExpect(jsonPath("$.result").isEmpty());
     }
 
     @Test

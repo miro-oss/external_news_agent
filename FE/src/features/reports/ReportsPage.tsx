@@ -442,7 +442,6 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             {keywords.length > 0 && <p><span>키워드</span><span className="report-context-keywords">{keywords.join(' · ')}</span></p>}
           </> : <p className="report-context-unavailable">수집 당시 주제·키워드 기록이 없는 보고서입니다.</p>}
         </div>}
-        <ReportDartPanel report={report} />
         {report.reportScope !== 'RUN' ? <div className="report-daily-summary">
           <span className="report-daily-date">{report.reportDate ?? '집계일 미상'}{report.reportScope === 'WEEKLY' && report.reportEndDate ? ` ~ ${report.reportEndDate}` : ''}</span>
           {report.topicId != null
@@ -459,11 +458,12 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </header>
 
       <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
-        beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined} />
+        beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined}
+        afterBriefing={<ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
+          selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
+          onEvidenceSelect={onEvidenceSelect} />} />
 
-      <ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
-        selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
-        onEvidenceSelect={onEvidenceSelect} />
+      <ReportDartPanel report={report} />
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
