@@ -72,7 +72,7 @@ export function ReportDartCompanyContent({ entry, busy = false, pollExpired = fa
     {entry.status !== 'READY' && <div className="report-dart-state" role={entry.status === 'FAILED' ? 'alert' : 'status'}>
       <p>{entry.message}</p>
       {entry.status === 'PENDING' && <>
-        <p>{pollExpired ? '자동 확인 시간이 지났습니다. 잠시 후 새로고침으로 준비 상태를 확인해 주세요.' : '자료가 준비되면 자동으로 표시합니다. 뉴스 리포트는 아래에서 먼저 확인할 수 있습니다.'}</p>
+        <p>{pollExpired ? '자동 확인 시간이 지났습니다. 잠시 후 새로고침으로 준비 상태를 확인해 주세요.' : '자료가 준비되면 자동으로 표시합니다. 뉴스 리포트는 먼저 확인할 수 있습니다.'}</p>
         <button type="button" className="text-button" disabled={busy} onClick={onRefresh}>공시 자료 새로고침</button>
       </>}
       {(entry.status === 'FAILED' || entry.status === 'DISABLED') && <button type="button" className="text-button" disabled={busy} onClick={onRetry}>

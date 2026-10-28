@@ -500,6 +500,7 @@ export interface ReportDetail {
   generatedAt: string
   summaryStats: ReportSummaryStats
   structuredContent?: ReportContent | null
+  briefing?: ReportBriefing | null
   coverage?: ReportCoverage | null
   dartCompanies?: import('./dart').DartCompany[]
   collectionContexts?: ReportCollectionContext[]
@@ -527,6 +528,13 @@ export interface ReportContent {
   importantEvents: Array<{ title: string; summaryKo: string; significance: string | null; sourceFindingIds: number[] }>
   watchItems: Array<{ topic: string; reason: string; sourceFindingIds: number[] }>
   sourceNotes: string[]
+}
+
+export interface ReportBriefing {
+  version: 'report-briefing.v1'
+  items: Array<{ title: string; summary: string; significance: string | null; sourceFindingIds: number[] }>
+  watchItems: Array<{ topic: string; reason: string; sourceFindingIds: number[] }>
+  omittedItemCount: number
 }
 
 export interface ReportCoverage {

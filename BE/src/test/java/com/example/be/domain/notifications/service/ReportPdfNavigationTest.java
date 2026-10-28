@@ -38,7 +38,7 @@ class ReportPdfNavigationTest {
             assertEquals(Set.of("00000001", "00000002"), result.companyPages().keySet());
             assertTrue(result.companyPages().get("00000002") > result.companyPages().get("00000001"));
             var destinations = document.getDocumentCatalog().getNames().getDests().getNames();
-            assertEquals(Set.of("summary", "company-0", "company-1"), destinations.keySet());
+            assertEquals(Set.of("summary", "report-detail", "company-0", "company-1"), destinations.keySet());
             int links = 0;
             for (var page : document.getPages()) for (var annotation : page.getAnnotations()) {
                 if (annotation instanceof PDAnnotationLink link && link.getAction() instanceof PDActionGoTo action) {
@@ -71,7 +71,7 @@ class ReportPdfNavigationTest {
             String text = new PDFTextStripper().getText(document);
             assertFalse(text.contains("숨긴 기업"));
             assertFalse(text.contains("회사별 부록"));
-            assertEquals(Set.of("summary"), document.getDocumentCatalog().getNames().getDests().getNames().keySet());
+            assertEquals(Set.of("summary", "report-detail"), document.getDocumentCatalog().getNames().getDests().getNames().keySet());
         }
     }
 

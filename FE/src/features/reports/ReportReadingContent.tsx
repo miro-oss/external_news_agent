@@ -7,18 +7,21 @@ import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHi
 import { ReportKeywordText } from './ReportKeywordText'
 import { ReportCoverageSources, ReportCoverageSummary } from './ReportCoverage'
 import { eventCoverage } from './reportCoverageDisplay'
+import { ReportBriefing } from './ReportBriefing'
+import { hasWeeklyAnalysisChronology, reportEventElementId } from './reportBriefingDisplay'
 
-export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice }: {
+export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   beforeOtherAnalysis?: ReactNode
   eventFeedback?: (event: ReportContent['importantEvents'][number], index: number) => ReactNode
   feedbackNotice?: ReactNode
+  afterBriefing?: ReactNode
 }) {
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
   const weekly = report.reportScope === 'WEEKLY'
-  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />
+  if (!content) return <><LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />{afterBriefing}</>
   const eventKeys = importantEventKeys(report.id, content.importantEvents)
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
@@ -33,7 +36,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       </button>
     ))}</div>
   }
-  return (
+  const reading = (
     <div className="report-reading-content">
       <section className="card report-summary-card">
         <h3>핵심 요약</h3>
@@ -45,11 +48,14 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
         <h3>중요 이벤트</h3>
         {feedbackNotice}
         {content.importantEvents.length > 0 ? <div className="report-event-list">
-          {content.importantEvents.map((event, index) => <article className="report-event-card" key={eventKeys[index]}>
+          {content.importantEvents.map((event, index) => <article className="report-event-card" key={eventKeys[index]}
+            id={reportEventElementId(report.id, index)} tabIndex={-1}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
             <ReportCoverageSummary coverage={eventCoverage(report.coverage, event.sourceFindingIds)} />
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
-            {!weekly && event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
+            {event.significance && event.significance !== event.summaryKo
+              && (!weekly || (report.briefing && !hasWeeklyAnalysisChronology(event.significance)))
+              && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
             <ReportCoverageSources coverage={eventCoverage(report.coverage, event.sourceFindingIds)} terms={terms} />
             {references(event.sourceFindingIds)}
             {eventFeedback?.(event, index)}
@@ -73,6 +79,12 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       {notes.length > 0 && <ReadingDisclosure title="수집 상태"><ul>{notes.map((note, index) => <li key={index}><ReportKeywordText text={note} terms={terms} /></li>)}</ul></ReadingDisclosure>}
     </div>
   )
+  if (!report.briefing) return <>{reading}{afterBriefing}</>
+  return <div className="report-reading-content">
+    <ReportBriefing report={report} terms={terms} />
+    {afterBriefing}
+    <details className="report-reading-details"><summary>이슈와 근거 자세히 보기</summary>{reading}</details>
+  </div>
 }
 
 function importantEventKeys(reportId: number, events: ReportContent['importantEvents']) {

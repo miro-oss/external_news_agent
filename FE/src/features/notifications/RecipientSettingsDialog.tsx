@@ -2,8 +2,8 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useIsMutating } from '@tanstack/react-query'
 import { ApiError } from '../../api/client'
 import { useRecipientReportSubscriptions, useSaveRecipientSettings } from '../../api/notificationConnections'
-import { topicReportSelected, type RecipientReportSubscriptions, type RecipientSettingsUpdate } from '../../api/recipientReportSubscriptions'
-import type { NotificationRecipient } from '../../api/types'
+import { topicReportSelected, type AutoInsightAudience, type RecipientReportSubscriptions, type RecipientSettingsUpdate } from '../../api/recipientReportSubscriptions'
+import { AUDIENCE_LABELS, type NotificationRecipient } from '../../api/types'
 import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
 import { TransientStatus } from '../../components/TransientStatus'
 import { RecipientEmailForm } from './RecipientEmailForm'
@@ -86,6 +86,7 @@ export function RecipientSettingsDialog({ recipient, emailChannelId, onDismiss }
 export function RecipientReportSettings({ settings, unavailable = false }: {
   settings: RecipientReportSubscriptions; unavailable?: boolean
 }) {
+  const id = useId()
   const save = useSaveRecipientSettings(settings.recipientId)
   const [draft, setDraft] = useState<RecipientSettingsUpdate>({})
   const [saved, setSaved] = useState(false)
@@ -93,6 +94,8 @@ export function RecipientReportSettings({ settings, unavailable = false }: {
   const changes: RecipientSettingsUpdate = {
     ...(draft.daily !== undefined && draft.daily !== aggregates?.daily ? { daily: draft.daily } : {}),
     ...(draft.weekly !== undefined && draft.weekly !== aggregates?.weekly ? { weekly: draft.weekly } : {}),
+    ...(draft.autoInsightAudience !== undefined && draft.autoInsightAudience !== (settings.autoInsightAudience ?? 'NONE')
+      ? { autoInsightAudience: draft.autoInsightAudience } : {}),
   }
   const topics = (draft.topics ?? []).filter(choice => {
     const topic = settings.topics.find(row => row.topicId === choice.topicId)
@@ -115,6 +118,16 @@ export function RecipientReportSettings({ settings, unavailable = false }: {
     </fieldset>
     <p className="recipient-settings-intro">통합 보고서는 아래 주제 선택과 별도로 받습니다.</p>
     {aggregates.channelTypes.length === 0 && <p className="recipient-subscription-note">이메일·텔레그램 탭에서 전달 방식을 연결해 주세요. 선택한 설정은 유지됩니다.</p>}
+    <fieldset disabled={locked} className="recipient-insight-choice">
+      <legend>자동 보고서 관점</legend>
+      <label htmlFor={`${id}-audience`}>함께 받을 관점 분석</label>
+      <select id={`${id}-audience`} value={draft.autoInsightAudience ?? settings.autoInsightAudience ?? 'NONE'}
+        aria-describedby={`${id}-audience-help`} onChange={event => change({ autoInsightAudience: event.target.value as AutoInsightAudience })}>
+        <option value="NONE">중립 브리핑만 받기</option>
+        {Object.entries(AUDIENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select>
+      <p id={`${id}-audience-help`} className="recipient-settings-intro">선택한 관점의 저장된 분석을 함께 받습니다. 분석이 준비되지 않았으면 기본 보고서와 준비 상태를 보내며, 완료 후 다시 보내지는 않습니다.</p>
+    </fieldset>
     <fieldset disabled={locked} className="recipient-simple-topics"><legend>주제 보고서</legend>
       <p className="recipient-settings-intro">받고 싶은 주제만 체크해 주세요.</p>
       {settings.topics.length === 0 ? <p className="recipient-subscriptions-empty">등록된 주제가 없습니다.</p>

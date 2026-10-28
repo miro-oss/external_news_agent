@@ -28,7 +28,7 @@ class NotificationInsightRenderingTest {
     private final NewsReport report = NewsReport.builder().id(17L).title("뉴스 보고서").build();
 
     @ParameterizedTest @EnumSource(ChannelType.class)
-    void includesOnlyTwoGroundedInterpretationsWithChannelSpecificAssumptions(ChannelType type) {
+    void includesOnlyTwoGroundedInterpretationsAndKeepsTheirAssumptions(ChannelType type) {
         var insight = NotificationInsightTestSupport.insight(List.of(
                 new Overview("장비 <수요> & 해석 😀", List.of("11:0"), "투자가 실제 집행되는 경우 & <전제>"),
                 new Overview("두 번째 판단", List.of("11:0", "12:0"), "전체 조건"),
@@ -37,7 +37,7 @@ class NotificationInsightRenderingTest {
         assertTrue(body.contains("관점 인사이트 · 장비·소재사"));
         assertTrue(body.contains("AI 해석"));
         assertTrue(body.contains("장비 &lt;수요&gt; &amp; 해석 😀"));
-        assertEquals(type == ChannelType.TELEGRAM, body.contains("투자가 실제 집행되는 경우 &amp; &lt;전제&gt;"));
+        assertTrue(body.contains("투자가 실제 집행되는 경우 &amp; &lt;전제&gt;"));
         assertTrue(body.contains("두 번째 판단"));
         assertFalse(body.contains("세 번째 판단"));
         assertFalse(body.contains("숨겨진 헤드라인"));
@@ -53,7 +53,7 @@ class NotificationInsightRenderingTest {
         assertFalse(body.contains("숨겨진"));
         assertFalse(body.contains("알 수 없는 해석"));
         assertTrue(body.contains("허용된 해석"));
-        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
+        assertTrue(body.contains("허용된 전제"));
     }
 
     @ParameterizedTest @EnumSource(ChannelType.class)
@@ -68,7 +68,7 @@ class NotificationInsightRenderingTest {
         assertFalse(body.contains("공유 근거"));
         assertFalse(body.contains("혼합 근거"));
         assertTrue(body.contains("독립 근거 해석"));
-        assertEquals(type == ChannelType.TELEGRAM, body.contains("독립 근거 전제"));
+        assertTrue(body.contains("독립 근거 전제"));
     }
 
     @ParameterizedTest @EnumSource(ChannelType.class)
@@ -85,7 +85,7 @@ class NotificationInsightRenderingTest {
         assertTrue(body.contains("독립 근거 대체 사유"));
     }
 
-    @Test void emailShowsInterpretationWithoutSourceQuotationAssumptionOrMarkdownBreak() {
+    @Test void emailShowsInterpretationAndConditionWithoutSourceQuotationOrMarkdownBreak() {
         String interpretation = "여러 금융사 침해에서 공통 IP와 유사 수법이 확인돼 네트워크 차단·탐지 검토가 필요합니다.";
         String second = "해외 서비스 도입이 확대될 경우 배포·연동 준비가 필요할 수 있습니다.";
         var insight = NotificationInsightTestSupport.insight(List.of(
@@ -100,8 +100,8 @@ class NotificationInsightRenderingTest {
         assertFalse(body.contains("해석:"));
         assertFalse(body.contains("전제:"));
         assertFalse(body.contains("공통 IP가 일부 발견됐다는 원문 문장"));
-        assertFalse(body.contains("동일 공격군"));
-        assertFalse(body.contains("별도로 저장한 조건"));
+        assertTrue(body.contains("동일 공격군"));
+        assertTrue(body.contains("별도로 저장한 조건"));
         assertFalse(body.contains("\\"));
     }
 

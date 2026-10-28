@@ -88,7 +88,7 @@ class PersonalizedNotificationRendererTest {
         assertFalse(body.contains("공용 제외"));
         assertFalse(body.contains("숨겨진 헤드라인"));
         assertTrue(body.contains("허용된 관점 해석"));
-        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
+        assertTrue(body.contains("허용된 전제"));
     }
 
     @ParameterizedTest
@@ -319,6 +319,40 @@ class PersonalizedNotificationRendererTest {
 
         assertSame(failure, assertThrows(IllegalStateException.class,
                 () -> personalized.render(fixture.report(), channel, RECIPIENT_ID)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void automaticAudienceKeepsRecipientExclusionsInBothEmailAndActualPdf(boolean ready) throws Exception {
+        var fixture = fixture(true);
+        prepare(fixture, List.of(confirmed('a')), Set.of(14L));
+        var actual = new PersonalizedNotificationRenderer(reports, findings, relevance, feedback,
+                renderer, projection, new ReportPdfRenderer(mock(com.example.be.domain.reports.dart.ReportDartService.class)));
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview(
+                        "개인 제외 판단", List.of("14:0"), "개인 제외 조건"),
+                new com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview(
+                        "자동 전달에서 허용된 판단", List.of("13:0"), "자동 전달에서 유지할 조건")), List.of());
+        var selection = ready ? AutomaticNotificationInsightService.Selection.ready(insight)
+                : AutomaticNotificationInsightService.Selection.unavailable(com.example.be.domain.analysis.entity.Audience.EQUIPMENT_MAKER);
+        var result = actual.renderAutomatic(17L, NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL)
+                .maxLength(3500).active(true).build(), RECIPIENT_ID, selection);
+        assertEquals(1, result.attachments().size());
+        String html = result.chunks().getFirst();
+        try (var document = Loader.loadPDF(result.attachments().getFirst().content())) {
+            String pdf = new PDFTextStripper().getText(document);
+            for (String text : List.of(html, pdf)) {
+                assertFalse(text.contains("개인 제외"));
+                assertFalse(text.contains("제외할"));
+                assertTrue(text.contains("정상 사건"));
+                if (ready) {
+                    assertTrue(text.contains("자동 전달에서 허용된 판단"));
+                    assertTrue(text.contains("자동 전달에서 유지할 조건"));
+                } else {
+                    assertTrue(text.replaceAll("\\s", "").contains("관점분석이준비되지않아기본보고서만전달합니다."));
+                }
+            }
+        }
     }
 
     private void prepare(Fixture fixture, List<Feedback> reviews, Set<Long> suppressed) {

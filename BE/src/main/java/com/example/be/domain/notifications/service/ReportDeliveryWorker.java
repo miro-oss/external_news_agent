@@ -21,6 +21,7 @@ public class ReportDeliveryWorker {
     private final NotificationChannelRepository channels;
     private final NotificationSenderRegistry senders;
     private final PersonalizedNotificationRenderer personalizedRenderer;
+    private final AutomaticNotificationInsightService automaticInsights;
 
     @Scheduled(fixedDelayString="${news.notifications.delivery-poll-ms:5000}", scheduler="reportDeliveryScheduler")
     public void deliverPending() {
@@ -46,7 +47,8 @@ public class ReportDeliveryWorker {
         }
         final RenderedNotification personalized;
         try {
-            personalized = personalizedRenderer.render(work.reportId(), channel, work.recipientId());
+            var selection = automaticInsights.resolve(work.reportId(), work.recipientId());
+            personalized = personalizedRenderer.renderAutomatic(work.reportId(), channel, work.recipientId(), selection);
         } catch (GeneralException failure) {
             if (failure.getCode() == GeneralErrorCode.CONFLICT) {
                 store.deferPersonalization(work);

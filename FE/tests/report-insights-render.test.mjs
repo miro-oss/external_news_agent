@@ -425,3 +425,53 @@ test('a manually queued perspective shows waiting until admitted, including when
   assert.match(completed, /리포트 중요도 높음/)
   assert.doesNotMatch(completed, /aria-busy="true"|리포트 전체를 분석하고 있습니다|앞선 관점 분석이 끝나기를 기다리고 있습니다/)
 })
+
+test('compact perspective separates source claims, conditional meaning and next check before closed full analysis', () => {
+  const result = reportInsightFixture(report)
+  const insight = result.insights[0]
+  insight.facts[0].claimType = 'FORECAST'
+  insight.facts[1].claimType = 'OPINION'
+  insight.facts[1].attributedTo = '공식 발표자'
+  insight.briefing = { version: 'report-insight-briefing.v1', facts: insight.facts.slice(0, 2),
+    overview: insight.overview, watchItems: insight.watchItems, omittedItemCount: 3 }
+  const before = structuredClone(result)
+  const html = render(result)
+  const brief = html.slice(0, html.indexOf('<details class="report-insights-full"'))
+  for (const value of ['원문에서 확인한 내용', '계획·전망', '의견·발언 · 공식 발표자', '업무상 의미',
+    '해석의 조건', insight.overview[0].assumption, '다음 확인점', insight.watchItems[0].indicator,
+    insight.watchItems[0].trigger, '더 읽을 판단·확인 항목 3개']) assert.ok(brief.includes(value), value)
+  assert.doesNotMatch(brief, /리포트 중요도|먼저 살펴볼 이슈|직접 관련성|조건부 해석|리포트에 저장된 주장/)
+  assert.match(html, /<details class="report-insights-full"><summary>관점 분석과 원문 근거 자세히 보기/)
+  assert.match(html, /영향 경로|판단 변경 조건/)
+  assert.doesNotMatch(html, /<details[^>]* open/)
+  assert.deepEqual(result, before)
+})
+
+test('compact analysis drops an entire mixed-source meaning and watch item when any claim is not currently displayable', () => {
+  const result = reportInsightFixture(report)
+  const insight = result.insights[0]
+  insight.briefing = { version: 'report-insight-briefing.v1', facts: insight.facts.slice(0, 2),
+    overview: insight.overview, watchItems: insight.watchItems, omittedItemCount: 0 }
+  const missingId = insight.facts[0].findingId
+  const html = render(result, report.findings.filter(finding => finding.id !== missingId))
+  const brief = html.slice(0, html.indexOf('<details class="report-insights-full"'))
+  assert.match(brief, /간단히 표시할 관점 분석이 없습니다/)
+  assert.ok(!brief.includes(insight.overview[0].text))
+  assert.ok(!brief.includes(insight.watchItems[0].trigger))
+  assert.ok(!brief.includes(insight.facts[1].text))
+})
+
+test('compact analysis preserves full conditions and escapes text without exposing a free-form headline', () => {
+  const result = reportInsightFixture(report)
+  const insight = result.insights[0]
+  const assumption = '실제 실행으로 확인되는 경우에만 의미가 있으며, 계획이 유지되면 영향은 없다.'
+  insight.briefing = { version: 'report-insight-briefing.v1', facts: insight.facts.slice(0, 2),
+    overview: [{ ...insight.overview[0], text: '<script>untrusted meaning</script>', assumption }],
+    watchItems: [], omittedItemCount: 0 }
+  const html = render(result)
+  const brief = html.slice(0, html.indexOf('<details class="report-insights-full"'))
+  assert.match(brief, /&lt;script&gt;untrusted meaning&lt;\/script&gt;/)
+  assert.ok(brief.includes(assumption))
+  assert.ok(!brief.includes(insight.headline))
+  assert.doesNotMatch(brief, /<script>|\.\.\.|…/)
+})

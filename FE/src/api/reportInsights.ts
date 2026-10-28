@@ -55,9 +55,17 @@ export interface ReportAudienceInsight {
   facts: ReportInsightFact[]
   implications: ReportInsightImplication[]
   watchItems: ReportInsightWatchItem[]
+  briefing?: ReportInsightBriefing | null
   llmProvider: string
   llmModel: string
   createdAt: string
+}
+export interface ReportInsightBriefing {
+  version: 'report-insight-briefing.v1'
+  facts: ReportInsightFact[]
+  overview: ReportInsightOverview[]
+  watchItems: ReportInsightWatchItem[]
+  omittedItemCount: number
 }
 export interface ReportInsightResult {
   cached: boolean

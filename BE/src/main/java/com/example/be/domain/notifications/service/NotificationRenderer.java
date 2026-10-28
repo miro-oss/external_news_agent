@@ -2,6 +2,8 @@ package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
@@ -92,13 +94,20 @@ public class NotificationRenderer {
                                        ReportEventFeedbackProjection.View view, String feedbackUrl,
                                        ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
                                        ReportCoverageDTO.View coverage) {
+        return render(report, channel, view, feedbackUrl, insight, companyPages, coverage, null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
+                                       ReportCoverageDTO.View coverage, Audience unavailableAudience) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, view, brief, companyPages, coverage);
+            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -107,6 +116,12 @@ public class NotificationRenderer {
         }
         String footer = link.isEmpty() ? "" : "\n\n" + link;
         if (footer.length() + 80 >= channel.getMaxLength()) footer = "";
+        String notice = unavailableAudience == null ? "" : "\n\n" + escape(NotificationBriefingSection.unavailable(unavailableAudience));
+        if (footer.length() + notice.length() + 80 > channel.getMaxLength()) {
+            footer = "";
+            if (notice.length() + 80 > channel.getMaxLength()) notice = "";
+        }
+        footer = notice + footer;
         int available = channel.getMaxLength() - footer.length();
         String insightBlock = telegramInsight(brief, Math.max(0, Math.min(1200, available / 2)));
         RenderedNotification rendered = renderTelegram(report, findings, content, available - insightBlock.length());
@@ -132,8 +147,8 @@ public class NotificationRenderer {
     }
 
     private RenderedNotification renderEmail(NewsReport report, ReportEventFeedbackProjection.View view,
-                                             NotificationInsightBrief brief, Map<String, Integer> companyPages,
-                                             ReportCoverageDTO.View coverage) {
+                                             ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
+                                             ReportCoverageDTO.View coverage, Audience unavailableAudience) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
@@ -141,17 +156,11 @@ public class NotificationRenderer {
         html.append("<p style=\"margin:0 0 16px;color:#636c78;font-size:12px\">보도량: ")
                 .append(escape(coverage == null ? ReportCoverageService.periodLabel(report) : coverage.periodLabel()))
                 .append(" · 매체 수는 원문 사이트 기준입니다.</p>");
-        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
-                + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
-                + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:14px;font-weight:700\">핵심 요약</h2>");
-        // Mail clients can override list indentation; use cells to keep summary bullets at the left edge.
-        html.append(EMAIL_TABLE);
-        digest(content, findings, 700).forEach(line -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
-                        + "style=\"width:20px;padding:4px 0;color:#1b64da;font-size:15px;line-height:1.8\">•</td>"
-                        + "<td valign=\"top\" style=\"padding:4px 0;color:#191f28;font-size:15px;line-height:1.8\">")
-                .append(escape(line)).append("</td></tr>"));
-        html.append("</tbody></table></td></tr></tbody></table>");
-        appendEmailInsight(html, brief);
+        var briefing = ReportBriefing.from(view);
+        appendEmailBriefing(html, briefing, content, findings);
+        if (unavailableAudience != null)
+            NotificationBriefingSection.field(html, "관점 준비 상태", NotificationBriefingSection.unavailable(unavailableAudience));
+        NotificationBriefingSection.emailInsight(html, insight, view);
         List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
@@ -167,17 +176,19 @@ public class NotificationRenderer {
             var counts = coverage == null ? ReportCoverageDTO.unavailable(card.sourceFindingIds())
                     : coverage.forSources(card.sourceFindingIds());
             html.append("<p style=\"margin:-12px 0 16px;color:#636c78;font-size:12px;line-height:1.7\">")
-                    .append(escape(NotificationCoverage.label(counts))).append("</p>")
-                    .append("<p style=\"margin:0 0 6px;color:#191f28;font-size:13px;font-weight:700\">주요 내용</p>"
-                            + "<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
-                    .append(escape(limit(card.summary(), 1200))).append("</p>");
-            if (!card.watches().isEmpty()) {
-                html.append(EMAIL_TABLE).append("<tr><td style=\"padding:20px 0 6px;color:#191f28;font-size:13px;line-height:1.7\">"
-                        + "<strong>후속 확인</strong></td></tr>");
-                card.watches().forEach(watch -> html.append("<tr><td valign=\"top\" "
-                                + "style=\"padding:0 0 4px;color:#4e5968;font-size:14px;line-height:1.8\">")
-                        .append(escape(limit(watch, 600))).append("</td></tr>"));
-                html.append("</tbody></table>");
+                    .append(escape(NotificationCoverage.label(counts))).append("</p>");
+            boolean inBrief = briefing.items().stream().anyMatch(item ->
+                    new java.util.HashSet<>(item.sourceFindingIds()).equals(new java.util.HashSet<>(card.sourceFindingIds()))
+                            && item.summary().equals(card.summary()));
+            if (!inBrief && card.summary().codePointCount(0, card.summary().length()) <= 180)
+                NotificationBriefingSection.paragraph(html, card.summary());
+            else if (!inBrief)
+                NotificationBriefingSection.field(html, "상세 안내", "긴 요약과 후속 확인 내용은 첨부 PDF에서 확인하세요.");
+            for (String watch : card.watches()) {
+                boolean alreadyShown = briefing.watchItems().stream().anyMatch(item ->
+                        watch.equals(watchText(new ReportContent.WatchItem(item.topic(), item.reason(), item.sourceFindingIds()))));
+                if (!alreadyShown && watch.codePointCount(0, watch.length()) <= 180)
+                    NotificationBriefingSection.field(html, "후속 확인", watch);
             }
             appendRepresentativeArticles(html, counts);
             appendCardSources(html, card.urls(), true);
@@ -190,39 +201,39 @@ public class NotificationRenderer {
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));
     }
 
-    private void appendEmailInsight(StringBuilder html, NotificationInsightBrief brief) {
-        if (brief == null) return;
-        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" style=\"padding:24px 0 4px\">"
-                        + "<h2 style=\"margin:0 0 8px;color:#1b64da;font-size:16px\">")
-                .append(escape(brief.label())).append("</h2><p style=\"margin:0 0 12px;color:#636c78;font-size:12px\">")
-                .append(escape(NotificationInsightBrief.AI_NOTICE)).append("</p>");
-        if (brief.items().isEmpty()) html.append("<p>").append(NotificationInsightBrief.UNAVAILABLE).append("</p>");
+    private void appendEmailBriefing(StringBuilder html, ReportBriefing brief, ReportReadingContent content,
+                                     List<Finding> findings) {
+        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
+                + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
+                + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:15px\">핵심 브리핑</h2>");
+        int number = 0;
         for (var item : brief.items()) {
-            html.append("<p style=\"margin:0 0 12px;color:#4e5968;font-size:14px;line-height:1.8\">")
-                    .append(escape(emailInsightText(item.text())));
-            html.append("</p>");
+            NotificationBriefingSection.label(html, (++number) + ". " + item.title());
+            NotificationBriefingSection.paragraph(html, item.summary());
+            NotificationBriefingSection.field(html, "읽을 포인트", item.significance());
         }
-        html.append("</td></tr></tbody></table>");
-    }
-
-    private static String emailInsightText(String value) {
-        String text = prose(value == null ? "" : value.replaceAll("\\\\[\\t ]*(?:\\r?\\n|$)", " "));
-        String prefix = "원문: 「";
-        if (!text.startsWith(prefix)) return text;
-        // Source sentences can contain quoted terms or the word '해석'; find the outer quote.
-        int depth = 1;
-        for (int index = prefix.length(); index < text.length(); index++) {
-            char character = text.charAt(index);
-            if (character == '「') depth++;
-            if (character == '」' && --depth == 0) {
-                String suffix = text.substring(index + 1).stripLeading();
-                if (suffix.startsWith("해석:") && StringUtils.hasText(suffix.substring(3))) {
-                    return suffix.substring(3).strip();
-                }
-                break;
+        if (!brief.watchItems().isEmpty()) {
+            NotificationBriefingSection.label(html, "다음 확인점");
+            for (var item : brief.watchItems()) NotificationBriefingSection.field(html, item.topic(), item.reason());
+        }
+        if (brief.omittedItemCount() > 0)
+            NotificationBriefingSection.field(html, "상세 안내", "나머지 " + brief.omittedItemCount() + "개 항목은 첨부 PDF에서 확인하세요.");
+        if (brief.items().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0) {
+            if (content.structuredContent() == null) {
+                // Legacy prose has no per-sentence source bindings; keep it separate from the linked brief.
+                NotificationBriefingSection.label(html, "저장된 요약");
+                var legacy = digest(content, findings, Integer.MAX_VALUE).stream()
+                        .filter(line -> line.codePointCount(0, line.length()) <= 180).toList();
+                legacy.forEach(line -> NotificationBriefingSection.paragraph(html, line));
+                if (legacy.isEmpty()) NotificationBriefingSection.paragraph(html, "긴 요약은 첨부 PDF에서 확인하세요.");
+            } else {
+                NotificationBriefingSection.paragraph(html, findings.isEmpty()
+                        ? "이번 수집에서 새롭게 정리할 주요 내용이 없습니다."
+                        : "짧은 브리핑의 연결 근거가 없습니다. 첨부 PDF의 저장된 내용을 확인하세요.");
             }
         }
-        return text;
+        html.append("<p style=\"margin:16px 0 0;color:#636c78;font-size:12px\">근거 기사와 자세한 내용은 아래 이슈 및 첨부 PDF에서 확인하세요.</p>")
+                .append("</td></tr></tbody></table>");
     }
 
     /** An interpretation and its assumptions are indivisible; budget pressure drops whole items. */

@@ -14,10 +14,11 @@ import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftE
 import { useReportEventFeedback } from './useReportEventFeedback'
 import './reportEventFeedback.css'
 
-export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOtherAnalysis, onRefreshReport }: {
+export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOtherAnalysis, onRefreshReport, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   beforeOtherAnalysis?: ReactNode
+  afterBriefing?: ReactNode
   onRefreshReport: () => Promise<unknown>
 }) {
   const hasEvents = !!report.structuredContent?.importantEvents.length
@@ -65,7 +66,7 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
     {interests.error != null && <div className="report-feedback-notice" role="alert"><span>의견 검토는 완료됐지만 회사 관심 기준의 현재 상태를 확인하지 못했습니다.</span>
       <button type="button" className="text-button" disabled={interests.busy} onClick={interests.refresh}>회사 기준 다시 확인</button></div>}
   </>
-  return <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis}
+  return <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis} afterBriefing={afterBriefing}
     feedbackNotice={notice} eventFeedback={(event, index) => {
       const target = matchReportFeedbackEvent(report.id, event, index, data)
       return <ReportEventFeedbackSlot key={report.id} reportId={report.id} target={target} feedback={data?.feedback ?? []}

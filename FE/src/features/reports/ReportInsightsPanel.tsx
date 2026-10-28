@@ -94,6 +94,9 @@ export function ReportInsightsContent({ result, insight, findings, reportScope =
   const evidence = (ids: string[]) => <ClaimEvidence ids={ids} facts={facts} findings={byFinding} onEvidenceSelect={onEvidenceSelect} />
   const hasSynthesis = insight.overview.length + insight.implications.length + insight.watchItems.length > 0
   return <div className="report-insights-content">
+    {insight.briefing ? <ReportInsightBrief insight={insight} findings={byFinding} facts={facts} onEvidenceSelect={onEvidenceSelect} />
+      : <p className="report-insights-brief-empty">이 분석의 짧은 요약이 없습니다. 아래 상세에서 저장된 분석과 근거를 확인해 주세요.</p>}
+    <details className="report-insights-full"><summary>관점 분석과 원문 근거 자세히 보기</summary>
     <div className="report-insights-meta"><Importance value={insight.importance} report />
       <span>{AUDIENCE_LABELS[insight.audience]} 관점</span><span>{result.cached ? '저장된 분석' : '새로 생성한 분석'}</span>
       <span>근거 분석 {result.inputFindingCount}건</span><time dateTime={insight.createdAt}>{formatFullDate(insight.createdAt)}</time>
@@ -135,7 +138,55 @@ export function ReportInsightsContent({ result, insight, findings, reportScope =
     <details className="report-insights-rubric"><summary>중요도 판단 기준 보기</summary>
       <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이 0이면 영향 크기가 미확인이어도 낮음입니다. 그 외에 직접 관련성이 미확인이면 관련성 미확인으로, 관련성은 확인했지만 영향 크기가 미확인이면 영향 규모 미확인으로 표시하고 중요도 판단을 보류합니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
     </details>
+    </details>
   </div>
+}
+
+function ReportInsightBrief({ insight, findings, facts, onEvidenceSelect }: {
+  insight: ReportAudienceInsight
+  findings: Map<number, ReportFinding>
+  facts: Map<string, ReportInsightFact>
+  onEvidenceSelect: EvidenceSelect
+}) {
+  const briefing = insight.briefing
+  if (!briefing) return null
+  const validFact = (fact: ReportInsightFact | undefined): fact is ReportInsightFact => !!fact
+    && fact.groundedness === 'grounded' && fact.evidenceSentenceIds.length > 0
+    && findings.get(fact.findingId)?.articleId === fact.articleId
+  const validBasis = (ids: string[]) => ids.length > 0 && ids.every(id => validFact(facts.get(id)))
+  const overview = briefing.overview.filter(item => validBasis(item.basisClaimIds))
+  const watchItems = briefing.watchItems.filter(item => validBasis(item.basisClaimIds))
+  const usedClaims = new Set([...overview, ...watchItems].flatMap(item => item.basisClaimIds))
+  const selectedFacts = briefing.facts.filter(fact => validFact(fact) && usedClaims.has(fact.id) && validFact(facts.get(fact.id)))
+  const evidence = (ids: string[]) => <ClaimEvidence ids={ids} facts={facts} findings={findings} onEvidenceSelect={onEvidenceSelect} />
+  return <section className="report-insights-brief" aria-label="짧은 관점 분석">
+    <p className="report-insights-brief-label">{AUDIENCE_LABELS[insight.audience]} 관점 <span>AI 해석</span></p>
+    {selectedFacts.length + overview.length + watchItems.length === 0
+      ? <p className="report-insights-brief-empty">간단히 표시할 관점 분석이 없습니다. 아래 상세에서 판단 이유와 원문 근거를 확인해 주세요.</p>
+      : <div className="report-insights-brief-grid">
+        {selectedFacts.length > 0 && <section className="report-insights-brief-section" aria-label="원문에서 확인한 내용">
+          <h4><span aria-hidden="true">01</span>원문에서 확인한 내용</h4>
+          <ul>{selectedFacts.map(fact => <li key={fact.id}>
+            <span className="report-insights-claim-type">{CLAIM_LABELS[fact.claimType]}{fact.attributedTo ? ` · ${fact.attributedTo}` : ''}</span>
+            <p>{fact.text}</p>{evidence([fact.id])}
+          </li>)}</ul>
+        </section>}
+        {overview.length > 0 && <section className="report-insights-brief-section" aria-label="업무상 의미">
+          <h4><span aria-hidden="true">02</span>업무상 의미</h4>
+          <ul>{overview.map((item, index) => <li key={index}>
+            <p>{item.text}</p><p className="report-insights-brief-condition"><strong>해석의 조건</strong>{item.assumption}</p>{evidence(item.basisClaimIds)}
+          </li>)}</ul>
+        </section>}
+        {watchItems.length > 0 && <section className="report-insights-brief-section" aria-label="다음 확인점">
+          <h4><span aria-hidden="true">03</span>다음 확인점</h4>
+          <ul>{watchItems.map((item, index) => <li key={index}>
+            <h5>{item.topic}</h5><dl className="report-insights-brief-check"><div><dt>확인할 지표</dt><dd>{item.indicator}</dd></div>
+              <div><dt>판단 기준</dt><dd>{item.trigger}</dd></div></dl>{evidence(item.basisClaimIds)}
+          </li>)}</ul>
+        </section>}
+      </div>}
+    {briefing.omittedItemCount > 0 && <p className="report-insights-brief-note">더 읽을 판단·확인 항목 {briefing.omittedItemCount}개는 아래 상세에 있습니다.</p>}
+  </section>
 }
 function axisScore(value: number | null) { return value === null ? '미확인' : `${value} / 3` }
 function IssueAssessmentNote({ issue }: { issue: ReportInsightIssue }) {

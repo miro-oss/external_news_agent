@@ -91,7 +91,7 @@ test('the important event itself owns the inline composer, with automatic multi-
     bound.push({ item, index }); return card()
   } }))
   assert.deepEqual(bound, [{ item: event, index: 0 }])
-  assert.match(markup, /<article class="report-event-card">.*서로 다른 공급 계약.*report-event-sources.*report-event-feedback/s)
+  assert.match(markup, /<article class="report-event-card"[^>]*>.*서로 다른 공급 계약.*report-event-sources.*report-event-feedback/s)
   assert.equal(markup.match(/>근거 기사 1/g)?.length, 1, 'source links deduplicate articles while the feedback target keeps all three findings')
   assert.match(markup, /<summary>의견 남기기/)
   assert.match(markup, /aria-label="서로 다른 공급 계약 의견"/)
@@ -129,7 +129,7 @@ test('one event under review or already reviewed leaves other matched event comp
       report: { ...report, structuredContent: { ...report.structuredContent, importantEvents: events } },
       onEvidenceSelect() {}, ...actions,
     }))
-    const cards = markup.match(/<article class="report-event-card">[\s\S]*?<\/article>/g)
+    const cards = markup.match(/<article class="report-event-card"[^>]*>[\s\S]*?<\/article>/g)
     assert.equal(cards.length, 3)
     assert.match(cards[0], /각각 다른 계약이에요/)
     assert.doesNotMatch(cards[0], /<form/)
@@ -151,7 +151,7 @@ test('one mismatched event does not disable another event whose position and ful
     report: { ...report, structuredContent: { ...report.structuredContent, importantEvents: [event, second] } },
     onEvidenceSelect() {}, ...actions,
   }))
-  const cards = markup.match(/<article class="report-event-card">[\s\S]*?<\/article>/g)
+  const cards = markup.match(/<article class="report-event-card"[^>]*>[\s\S]*?<\/article>/g)
   assert.equal(cards.length, 2)
   assert.match(markup, /보고서 내용이 바뀌었습니다/)
   assert.doesNotMatch(cards[0], /<form/)

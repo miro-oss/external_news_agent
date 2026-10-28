@@ -98,9 +98,10 @@ class NotificationRendererTest {
             assertTrue(document.select("a").eachAttr("href").contains(StoredReportDartFixture.FILING_URL));
             assertFalse(document.text().contains("이전 공시"));
         }
-        assertTrue(preview.contains("공용 주간 핵심 요약"));
+        assertFalse(preview.contains("공용 주간 핵심 요약"));
+        assertTrue(preview.contains("새롭게 정리할 주요 내용이 없습니다."));
         assertFalse(preview.contains(feedbackUrl));
-        assertTrue(personal.contains("수신자에게 허용된 요약"));
+        assertFalse(personal.contains("수신자에게 허용된 요약"));
         assertTrue(personal.contains(feedbackUrl));
         assertFalse(personal.contains("공용 주간 핵심 요약"));
         assertEquals(original, report.getStructuredContent());
@@ -273,7 +274,7 @@ class NotificationRendererTest {
             var message = renderer.render(report, channel(type,3500));
             org.junit.jupiter.api.Assertions.assertEquals(1,message.chunks().size());
             String body = message.chunks().getFirst();
-            assertTrue(body.contains("오늘 보고서의 결론입니다."));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("오늘 보고서의 결론입니다."));
             assertFalse(body.contains("검증된 핵심 요약"));
             assertFalse(body.contains("HBM 공급 계약 확대"));
             // Email includes the branded layout; the actual briefing must stay concise.
@@ -319,6 +320,20 @@ class NotificationRendererTest {
 
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            if (type == ChannelType.EMAIL) {
+                var document = org.jsoup.Jsoup.parse(body);
+                var cards = document.select("td.email-card").stream()
+                        .filter(card -> !card.select("h2:containsOwn(첫 번째 사건), h2:containsOwn(두 번째 사건)").isEmpty()).toList();
+                assertEquals(2, cards.size());
+                assertTrue(cards.getFirst().html().contains("https://example.com/first"));
+                assertFalse(cards.getFirst().html().contains("https://example.com/second"));
+                assertTrue(cards.getLast().html().contains("https://example.com/second"));
+                assertFalse(cards.getLast().html().contains("https://example.com/first"));
+                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용", "첫 확인 이유", "둘째 확인 이유", "읽을 포인트"))
+                    assertTrue(document.text().contains(visible));
+                assertFalse(body.contains("저장된 보고서의 핵심 결론")); // Unbound executive summary is not relabeled as a linked brief.
+                continue;
+            }
             int firstOffset = body.indexOf("첫 번째 사건");
             int secondOffset = body.indexOf("두 번째 사건");
             assertTrue(firstOffset >= 0 && secondOffset > firstOffset, body);
@@ -365,7 +380,7 @@ class NotificationRendererTest {
                         watch("일부만 유효 확인", "표시 금지", 11L, 999L),
                         watch("기사 ID 확인", "표시 금지", 101L),
                         watch("근거 없는 확인", "표시 금지"),
-                        watch("다른 사건의 확인", "표시 금지", 22L)), List.of()));
+                        watch("다른 사건의 확인", "독립적인 관찰 이유", 22L)), List.of()));
 
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
@@ -374,9 +389,10 @@ class NotificationRendererTest {
             assertTrue(body.contains("유효 확인 이유"));
             assertTrue(body.contains("https://example.com/valid"));
             for (String unsupported : List.of("없는 ID 사건", "기사 ID 사건", "배열 위치 사건", "일부만 유효 사건",
-                    "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "다른 사건의 확인", "표시 금지")) {
+                    "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "표시 금지")) {
                 assertFalse(body.contains(unsupported), unsupported + " must be omitted");
             }
+            assertEquals(type == ChannelType.EMAIL, body.contains("다른 사건의 확인"));
             assertFalse(body.contains("https://example.com/unrelated"));
         }
     }
@@ -393,19 +409,19 @@ class NotificationRendererTest {
             assertTrue(body.contains("저장된 주요 내용"));
             assertFalse(body.contains("후속 확인"));
             assertFalse(body.contains("확인할 점"));
-            assertFalse(body.contains("사용하지 않을 관점"));
+            assertEquals(type == ChannelType.EMAIL, body.contains("사용하지 않을 관점"));
         }
     }
 
     @Test
-    void noValidEventKeepsTheExistingSavedDigestAndGenericSourceFallback() {
+    void invalidEventDoesNotRestoreUnboundDigestInEmailButKeepsGenericSourceLinks() {
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding()));
         NewsReport report = structuredReport(new ReportContent(List.of("기존 보고서의 저장 요약"),
                 List.of(event("사용할 수 없는 사건", "잘못된 사건 내용", "", 101L)), List.of(), List.of()));
 
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
-            assertTrue(body.contains("기존 보고서의 저장 요약"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("기존 보고서의 저장 요약"));
             assertTrue(body.contains("참고 원문"));
             assertTrue(body.contains("https://example.com/article"));
             assertFalse(body.contains("사용할 수 없는 사건"));

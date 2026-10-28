@@ -42,6 +42,51 @@ class NotificationAutomationOracleIntegrationTests {
     @Autowired RunDeliverySettingsService runSettings;
 
     @Test
+    void automaticAudienceIsPersistedIndependentlyAndNeverCreatesAReportSubscriptionOrDelivery() {
+        var first = recipient(true); var other = recipient(true);
+        assertEquals(RecipientInsightAudience.NONE, subscriptions.get(first.getId()).autoInsightAudience());
+        assertEquals("NONE", jdbc.queryForObject("SELECT auto_insight_audience FROM notification_recipients WHERE id=?",
+                String.class, first.getId()));
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(), 40);
+        var selected = subscriptions.update(first.getId(),
+                new RecipientReportSubscriptionService.SettingsUpdate(null, null, null, "EQUIPMENT_MAKER"));
+        assertEquals(RecipientInsightAudience.EQUIPMENT_MAKER, selected.autoInsightAudience());
+        assertFalse(selected.aggregates().daily()); assertFalse(selected.aggregates().weekly());
+        assertTrue(selected.topics().isEmpty());
+        em.flush(); em.clear();
+        assertEquals(RecipientInsightAudience.EQUIPMENT_MAKER, subscriptions.get(first.getId()).autoInsightAudience());
+        assertEquals(RecipientInsightAudience.NONE, subscriptions.get(other.getId()).autoInsightAudience());
+        automation.enqueueCompletedReport(weekly);
+        assertTrue(outbox.deliveries(weekly.getId()).isEmpty());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM recipient_aggregate_subscriptions WHERE recipient_id=?",
+                Integer.class, first.getId()));
+
+        var preserved = subscriptions.update(first.getId(), new RecipientReportSubscriptionService.SettingsUpdate(true, null, null));
+        assertEquals(RecipientInsightAudience.EQUIPMENT_MAKER, preserved.autoInsightAudience());
+        assertTrue(preserved.aggregates().daily());
+        assertTrue(outbox.deliveries(weekly.getId()).isEmpty());
+        var cleared = subscriptions.update(first.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, null, null, "NONE"));
+        assertTrue(cleared.aggregates().daily());
+        em.flush(); em.clear();
+        assertEquals(RecipientInsightAudience.NONE, subscriptions.get(first.getId()).autoInsightAudience());
+    }
+
+    @Test
+    void invalidCombinedAudiencePatchLeavesAggregateTopicAndAudienceChoicesUnchanged() {
+        var recipient = recipient(true); var topic = topic();
+        subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(true, false,
+                List.of(new RecipientReportSubscriptionService.TopicChoice(topic.getId(), false)), "IT_INFRA"));
+        em.flush(); em.clear();
+        assertThrows(com.example.be.domain.settings.exception.AudienceException.class,
+                () -> subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(false, true,
+                        List.of(new RecipientReportSubscriptionService.TopicChoice(topic.getId(), true)), "INVALID")));
+        var unchanged = subscriptions.get(recipient.getId());
+        assertTrue(unchanged.aggregates().daily()); assertFalse(unchanged.aggregates().weekly());
+        assertEquals(RecipientInsightAudience.IT_INFRA, unchanged.autoInsightAudience());
+        assertEquals(List.of("RUN"), unchanged.topics().getFirst().excludedScopes());
+    }
+
+    @Test
     void aggregateSubscriptionWorksWithoutTopicsAndUnsubscribeCancelsQueuedDelivery() {
         var first = recipient(true); var other = recipient(true);
         var saved = subscriptions.update(first.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, true, null));

@@ -1,6 +1,8 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
@@ -78,6 +80,12 @@ public class ReportPdfRenderer {
 
     public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
                                  ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage) {
+        return renderDetailed(report, view, insight, coverage, null);
+    }
+
+    public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
+                                 ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
+                                 Audience unavailableAudience) {
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
@@ -96,8 +104,21 @@ public class ReportPdfRenderer {
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
+            if (content != null) briefing(pdf, ReportBriefing.from(view));
+            if (unavailableAudience != null) pdf.muted(NotificationBriefingSection.unavailable(unavailableAudience));
+            ReportPdfInsightSection.brief(pdf, insight, view);
+            if (content != null) {
+                pdf.internalLink("이슈와 근거 자세히 보기", "report-detail");
+                if (insight != null) pdf.internalLink("관점 분석 자세히 보기", "insight-detail");
+                pdf.pageBreak();
+            }
+            pdf.anchor("report-detail");
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
             else body(pdf, content, findings, coverage);
+            if (insight != null) {
+                pdf.reserve(110);
+                pdf.anchor("insight-detail");
+            }
             ReportPdfInsightSection.write(pdf, insight, view);
             Map<String, Integer> companyPages = companyData(pdf, companies);
             return new Result(pdf.save(), companyPages);
@@ -106,9 +127,28 @@ public class ReportPdfRenderer {
         }
     }
 
+    private void briefing(ReportPdfLayout pdf, ReportBriefing brief) throws IOException {
+        pdf.section("핵심 브리핑");
+        int number = 0;
+        for (var item : brief.items()) {
+            pdf.reserve(110);
+            pdf.subheading((++number) + ". " + item.title());
+            pdf.paragraph(item.summary());
+            if (item.significance() != null && !item.significance().isBlank()) pdf.muted("읽을 포인트 · " + item.significance());
+        }
+        if (!brief.watchItems().isEmpty()) {
+            pdf.subheading("다음 확인점");
+            for (var item : brief.watchItems()) pdf.bullet(item.topic() + " · " + item.reason());
+        }
+        if (brief.omittedItemCount() > 0) pdf.muted("나머지 " + brief.omittedItemCount() + "개 항목은 뒤쪽 이슈와 근거에서 확인하세요.");
+        if (brief.items().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
+            pdf.muted("짧은 브리핑의 연결 근거가 없습니다. 뒤쪽의 저장된 요약을 확인하세요.");
+    }
+
     private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
                       ReportCoverageDTO.View coverage) throws IOException {
         pdf.section("핵심 요약");
+        pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
         if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
         for (String summary : content.executiveSummary()) pdf.bullet(summary);
         pdf.reserve(140);
@@ -122,6 +162,8 @@ public class ReportPdfRenderer {
                     : coverage.forSources(event.sourceFindingIds());
             pdf.muted(NotificationCoverage.label(counts));
             pdf.paragraph(event.summaryKo());
+            String significance = ReportBriefing.readingSignificance(event.significance());
+            if (significance != null && !significance.isBlank()) pdf.keyValue("읽을 포인트", significance);
             representativeArticles(pdf, counts);
             pdf.muted("요약의 직접 근거");
             sources(pdf, event.sourceFindingIds(), findings);

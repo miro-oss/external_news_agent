@@ -21,21 +21,23 @@ class ReportDeliveryWorkerTest {
     private final NotificationSender sender=mock(NotificationSender.class);
     private final NotificationSender.DeliverySession session=mock(NotificationSender.DeliverySession.class);
     private final PersonalizedNotificationRenderer personalized = mock(PersonalizedNotificationRenderer.class);
-    private final ReportDeliveryWorker worker=new ReportDeliveryWorker(store,channels,senders,personalized);
+    private final AutomaticNotificationInsightService automaticInsights = mock(AutomaticNotificationInsightService.class);
+    private final ReportDeliveryWorker worker=new ReportDeliveryWorker(store,channels,senders,personalized,automaticInsights);
     private final ReportDeliveryOutboxStore.Work work=new ReportDeliveryOutboxStore.Work(1L,2L,3L,4L,"batch","수신자","test@invalid.test","제목","요약",1);
 
     private void ready() {
+        when(automaticInsights.resolve(anyLong(), anyLong())).thenReturn(AutomaticNotificationInsightService.Selection.neutral());
         var channel=NotificationChannel.builder().id(4L).channelType(ChannelType.EMAIL).active(true).build();
         when(channels.findById(4L)).thenReturn(Optional.of(channel));
         when(store.destinationStillActive(work)).thenReturn(true);
         when(senders.get(ChannelType.EMAIL)).thenReturn(sender);
         when(sender.isConfigured(channel)).thenReturn(true);
         when(sender.openSession(channel)).thenReturn(session);
-        when(personalized.render(2L,channel,3L)).thenReturn(new RenderedNotification(work.subject(),null,List.of(work.body())));
+        when(personalized.renderAutomatic(eq(2L), eq(channel), eq(3L), any())).thenReturn(new RenderedNotification(work.subject(),null,List.of(work.body())));
     }
     @Test void pendingPersonalizationDefersWithoutOpeningTransport() {
         ready();
-        when(personalized.render(eq(2L),any(),eq(3L))).thenThrow(new com.example.be.global.apiPayload.exception.GeneralException(
+        when(personalized.renderAutomatic(eq(2L),any(),eq(3L),any())).thenThrow(new com.example.be.global.apiPayload.exception.GeneralException(
                 com.example.be.global.apiPayload.code.GeneralErrorCode.CONFLICT));
         worker.deliver(work);
         verify(store).deferPersonalization(work);
@@ -44,9 +46,40 @@ class ReportDeliveryWorkerTest {
     }
     @Test void sendsOnlyRecipientSpecificPreparedContent() {
         ready();
-        when(personalized.render(eq(2L),any(),eq(3L))).thenReturn(new RenderedNotification("개인 제목",null,List.of("개인 내용")));
+        when(personalized.renderAutomatic(eq(2L),any(),eq(3L),any())).thenReturn(new RenderedNotification("개인 제목",null,List.of("개인 내용")));
         worker.deliver(work);
         verify(session).send(work.address(),"개인 제목","개인 내용");
+    }
+    @Test void missingSelectedAnalysisStillSendsOnePreparedNeutralReportWithoutDeferring() {
+        ready();
+        var selection = AutomaticNotificationInsightService.Selection.unavailable(
+                com.example.be.domain.analysis.entity.Audience.EQUIPMENT_MAKER);
+        when(automaticInsights.resolve(2L, 3L)).thenReturn(selection);
+        when(personalized.renderAutomatic(eq(2L), any(), eq(3L), eq(selection)))
+                .thenReturn(new RenderedNotification("기본 제목", "HTML", List.of("기본 보고서 · 관점 준비 안 됨")));
+        when(session.send(any(), any(), any())).thenReturn("message-id");
+        worker.deliver(work);
+        verify(personalized).renderAutomatic(eq(2L), any(), eq(3L), same(selection));
+        verify(session).send(work.address(), "기본 제목", "기본 보고서 · 관점 준비 안 됨");
+        verify(store).finish(work, "EMAIL", "SENT", "message-id", null, false);
+        verify(store, never()).deferPersonalization(any());
+        verify(automaticInsights).resolve(2L, 3L);
+        verifyNoMoreInteractions(automaticInsights);
+    }
+    @Test void selectedStoredAnalysisIsPassedOnlyToThisRecipientsRendering() {
+        ready();
+        var selection = AutomaticNotificationInsightService.Selection.ready(NotificationInsightTestSupport.insight());
+        when(automaticInsights.resolve(2L, 3L)).thenReturn(selection);
+        worker.deliver(work);
+        verify(personalized).renderAutomatic(eq(2L), any(), eq(3L), same(selection));
+    }
+    @Test void analysisStorageFailureStopsBeforeRenderingAndOpeningTransport() {
+        ready();
+        when(automaticInsights.resolve(2L, 3L)).thenThrow(new IllegalStateException("synthetic database outage"));
+        worker.deliver(work);
+        verifyNoInteractions(personalized, session);
+        verify(sender, never()).openSession(any());
+        verify(store).finish(work, "EMAIL", "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
     }
     @Test void consecutiveRecipientsReceiveOnlyTheirOwnPreparedPdf() {
         ready();
@@ -55,9 +88,9 @@ class ReportDeliveryWorkerTest {
         var firstAttachments = List.of(new NotificationAttachment("news-report-2.pdf", "application/pdf", new byte[]{1}));
         var secondAttachments = List.of(new NotificationAttachment("news-report-2.pdf", "application/pdf", new byte[]{2}));
         when(store.destinationStillActive(second)).thenReturn(true);
-        when(personalized.render(eq(2L), any(), eq(3L)))
+        when(personalized.renderAutomatic(eq(2L), any(), eq(3L), any()))
                 .thenReturn(new RenderedNotification("첫 제목", "HTML", List.of("첫 내용"), firstAttachments));
-        when(personalized.render(eq(2L), any(), eq(5L)))
+        when(personalized.renderAutomatic(eq(2L), any(), eq(5L), any()))
                 .thenReturn(new RenderedNotification("둘째 제목", "HTML", List.of("둘째 내용"), secondAttachments));
         when(session.send(any(), any(), any(), any())).thenReturn("first-id", "second-id");
 
@@ -72,7 +105,7 @@ class ReportDeliveryWorkerTest {
     }
     @Test void pdfPreparationFailureIsRetryableBeforeOpeningSmtp() {
         ready();
-        when(personalized.render(eq(2L), any(), eq(3L)))
+        when(personalized.renderAutomatic(eq(2L), any(), eq(3L), any()))
                 .thenThrow(new IllegalStateException("synthetic PDF preparation failure"));
 
         worker.deliver(work);
@@ -82,13 +115,14 @@ class ReportDeliveryWorkerTest {
         verifyNoInteractions(session);
     }
     @Test void telegramStillUsesItsTextOnlyDeliveryPath() {
+        when(automaticInsights.resolve(anyLong(), anyLong())).thenReturn(AutomaticNotificationInsightService.Selection.neutral());
         var channel = NotificationChannel.builder().id(4L).channelType(ChannelType.TELEGRAM).active(true).build();
         when(channels.findById(4L)).thenReturn(Optional.of(channel));
         when(store.destinationStillActive(work)).thenReturn(true);
         when(senders.get(ChannelType.TELEGRAM)).thenReturn(sender);
         when(sender.isConfigured(channel)).thenReturn(true);
         when(sender.openSession(channel)).thenReturn(session);
-        when(personalized.render(2L, channel, 3L))
+        when(personalized.renderAutomatic(eq(2L), eq(channel), eq(3L), any()))
                 .thenReturn(new RenderedNotification(null, "HTML", List.of("텔레그램 내용")));
         when(session.send(any(), any(), any())).thenReturn("telegram-id");
 
@@ -103,13 +137,13 @@ class ReportDeliveryWorkerTest {
         worker.deliver(work);
         verify(store).finish(work,"EMAIL","SENT","message-id",null,false);
         verify(session).close();
-        // Automatic delivery uses the original overload and never opts into manual insight sharing.
+        // The automatic path remains independent from explicitly selected manual sharing.
         verify(personalized, never()).render(any(com.example.be.domain.reports.entity.NewsReport.class), any(), any(), any());
     }
     @Test void changedDestinationDoesNotSendToOldAddress() {
         ready();when(store.destinationStillActive(work)).thenReturn(false);
         worker.deliver(work);
-        verifyNoInteractions(session);
+        verifyNoInteractions(session, automaticInsights);
         verify(store).finish(eq(work),eq("EMAIL"),eq("SKIPPED"),isNull(),anyString(),eq(false));
     }
     @Test void unknownSendResultDoesNotAutomaticallyRetry() {

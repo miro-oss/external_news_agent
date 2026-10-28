@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
+import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -86,7 +87,7 @@ public class ReportResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "id", "runId", "reportScope", "topicId", "topicName", "sourceAnalysisDates", "reportDate", "reportEndDate", "sourceReportIds", "sourceReportDates", "missingReportDates", "sourceRunIds", "sourceReportCount", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
-            "generatedAt", "structuredContent", "collectionContexts", "dartCompanies", "articleStats", "summaryStats", "coverage", "findings"
+            "generatedAt", "structuredContent", "briefing", "collectionContexts", "dartCompanies", "articleStats", "summaryStats", "coverage", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
@@ -129,6 +130,9 @@ public class ReportResDTO {
         private final SummaryStats summaryStats;
         @Schema(description = "화면과 알림이 함께 사용하는 저장된 핵심 요약·중요 이벤트·관찰 항목·수집 참고. 구조화 저장 이전 보고서는 null이며 markdownBody로 표시. includeFindings와 관계없이 반환", nullable = true)
         private final ReportContent structuredContent;
+        @Schema(description = "최종 표시 근거에 연결된 짧은 브리핑. 저장 이슈 최대 3개·관찰 최대 2개, 긴 항목은 상세에 보존. includeFindings=false에도 반환")
+        @Builder.Default
+        private final ReportBriefing briefing = ReportBriefing.empty();
         @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
         private final List<ReportCollectionContext> collectionContexts;
         @Schema(description = "공시·실적 자료 대상 회사 스냅샷. RUN은 실행 접수 당시 선택한 회사를 중복 제거하고, 주제별 WEEKLY는 보고서 생성 요청 당시 연결한 회사 최대 1개. 전체 DAILY/WEEKLY·회사 미선택·회사 스냅샷 없는 이전 보고서는 []. includeFindings와 관계없이 반환하며 현재 주제 설정을 조회하지 않음", requiredMode = Schema.RequiredMode.REQUIRED)

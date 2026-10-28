@@ -165,3 +165,42 @@ test('an old server ignoring personal weekly opt-in must not show a successful s
   await assert.rejects(mutation.execute(choices([], ['WEEKLY'])), /서버 업데이트/)
   assert.deepEqual(client.getQueryData(key).topics, [oldRow])
 })
+
+test('automatic audience alone can be saved and cleared without changing report subscriptions', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const initial = { recipientId: 1, autoInsightAudience: 'NONE',
+    aggregates: { daily: false, weekly: true, channelTypes: ['EMAIL'] }, topics: [row] }
+  client.setQueryData(key, initial)
+  const calls = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = JSON.parse(init.body)
+    calls.push({ url, method: init.method, body })
+    return response({ ...initial, autoInsightAudience: body.autoInsightAudience })
+  })
+  const mutation = client.getMutationCache().build(client, saveRecipientSettingsOptions(client, 1))
+  for (const audience of ['EQUIPMENT_MAKER', 'NONE']) {
+    await mutation.execute({ autoInsightAudience: audience })
+    assert.equal(client.getQueryData(key).autoInsightAudience, audience)
+    assert.deepEqual(client.getQueryData(key).aggregates, initial.aggregates)
+    assert.deepEqual(client.getQueryData(key).topics, initial.topics)
+  }
+  assert.deepEqual(calls.map(call => call.body), [{ autoInsightAudience: 'EQUIPMENT_MAKER' }, { autoInsightAudience: 'NONE' }])
+  assert.ok(calls.every(call => call.method === 'PATCH' && call.url === '/api/notifications/recipients/1/report-subscriptions'))
+})
+
+test('a server ignoring automatic audience selection cannot overwrite the cache or report a successful save', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const initial = { recipientId: 1, autoInsightAudience: 'NONE',
+    aggregates: { daily: false, weekly: true, channelTypes: [] }, topics: [] }
+  client.setQueryData(key, initial)
+  for (const reply of [{ ...initial, autoInsightAudience: undefined }, initial]) {
+    context.mock.method(globalThis, 'fetch', async () => response(reply))
+    const mutation = client.getMutationCache().build(client, saveRecipientSettingsOptions(client, 1))
+    await assert.rejects(mutation.execute({ autoInsightAudience: 'IT_INFRA' }), /관점 설정을 저장한 결과를 확인하지 못했습니다/)
+    assert.deepEqual(client.getQueryData(key), initial)
+  }
+})
