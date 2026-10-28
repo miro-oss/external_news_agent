@@ -28,6 +28,7 @@ public class TopicWeeklyReportPersistenceService {
     private final TopicRepository topics;
     private final TopicWeeklyReportSelector selector;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
+    private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
 
     @Transactional
     public Reservation reserve(Long topicId, LocalDate monday, LocalDateTime now) {
@@ -73,6 +74,7 @@ public class TopicWeeklyReportPersistenceService {
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
         report.freezeReportCoverageSnapshot(reportCoverage.captureTopicWeek(report, prepared, now));
+        report.freezeReportKeywordSnapshot(reportKeywords.captureTopicWeek(report, prepared, now));
         return new Reservation(report.getId(), true, false, input, prepared);
     }
 

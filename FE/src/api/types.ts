@@ -502,6 +502,7 @@ export interface ReportDetail {
   structuredContent?: ReportContent | null
   briefing?: ReportBriefing | null
   coverage?: ReportCoverage | null
+  keywordStats?: ReportKeywordStats | null
   dartCompanies?: import('./dart').DartCompany[]
   collectionContexts?: ReportCollectionContext[]
   articleStats?: { totalCount: number; newCount: number; existingCount: number }
@@ -543,6 +544,23 @@ export interface ReportCoverage {
   periodLabel: string
   events: Array<ReportCoverageItem & { sourceFindingIds: number[] }>
   findings: Array<ReportCoverageItem & { findingId: number }>
+}
+
+export interface ReportKeywordStats {
+  status: 'AVAILABLE' | 'UNAVAILABLE'
+  unavailableReason: 'NO_SNAPSHOT' | 'INCOMPLETE_SOURCE' | 'MISSING_COLLECTION_CONTEXT'
+    | 'INVALID_SNAPSHOT' | 'COMPANY_SCOPE_UNVERIFIED' | 'PERSONALIZATION_UNVERIFIED' | null
+  ruleVersion: string | null
+  capturedAt: string | null
+  periodLabel: string
+  denominatorIssueCount: number | null
+  items: Array<{
+    keyword: string
+    issueCount: number
+    sharePercent: number | null
+    relatedKeywords: Array<{ keyword: string; issueCount: number }>
+  }>
+  omittedKeywordCount: number
 }
 
 export interface ReportCoverageItem {

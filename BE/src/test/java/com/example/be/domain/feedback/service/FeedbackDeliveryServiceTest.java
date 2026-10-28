@@ -16,6 +16,19 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class FeedbackDeliveryServiceTest {
+    @Test void keywordPolicyGuardUsesActivePoliciesAndHonorsDisabledPersonalization() {
+        var store = mock(FeedbackStore.class);
+        var service = new FeedbackDeliveryService(store, mock(FeedbackSnapshotFactory.class),
+                mock(FeedbackWorkService.class), new ObjectMapper());
+        var now = LocalDateTime.of(2026, 10, 29, 9, 0);
+        when(store.policies(7)).thenReturn(List.of(new Policy(6, 7, 2, "주제", "제외", 1, "REVOKED", now)));
+        assertFalse(service.hasActivePersonalPolicies(7));
+        when(store.policies(7)).thenReturn(List.of(new Policy(6, 7, 2, "주제", "제외", 1, "ACTIVE", now)));
+        assertTrue(service.hasActivePersonalPolicies(7));
+        ReflectionTestUtils.setField(service, "enabled", false);
+        assertFalse(service.hasActivePersonalPolicies(7));
+    }
+
     @Test void disabledSchedulingKeepsPendingArticlesWithoutCreatingJobsOrBlockingDelivery() {
         var store=mock(FeedbackStore.class);var factory=mock(FeedbackSnapshotFactory.class);var work=mock(FeedbackWorkService.class);var json=new ObjectMapper();
         var service=new FeedbackDeliveryService(store,factory,work,json);ReflectionTestUtils.setField(service,"schedulingEnabled",false);

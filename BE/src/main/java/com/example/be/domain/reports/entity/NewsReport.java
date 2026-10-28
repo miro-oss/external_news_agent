@@ -5,6 +5,8 @@ import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.converter.ReportContentConverter;
 import com.example.be.domain.reports.converter.ReportCoverageSnapshotConverter;
 import com.example.be.domain.reports.coverage.ReportCoverageSnapshot;
+import com.example.be.domain.reports.keyword.ReportKeywordSnapshot;
+import com.example.be.domain.reports.converter.ReportKeywordSnapshotConverter;
 import com.example.be.domain.reports.converter.LocalDateListConverter;
 import com.example.be.domain.reports.converter.WeeklyReportInputConverter;
 import com.example.be.domain.reports.converter.ReportCollectionContextConverter;
@@ -161,6 +163,25 @@ public class NewsReport {
     public void freezeReportCoverageSnapshot(ReportCoverageSnapshot snapshot) {
         if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("생성 중인 보고서만 집계 입력을 고정할 수 있습니다.");
         if (reportCoverageSnapshot == null) reportCoverageSnapshot = snapshot;
+    }
+
+    @Convert(converter = ReportKeywordSnapshotConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "report_keyword_snapshot")
+    private ReportKeywordSnapshot reportKeywordSnapshot;
+
+    /** A missing historical universe stays missing; only new reservations call this method. */
+    public void freezeReportKeywordSnapshot(ReportKeywordSnapshot snapshot) {
+        if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("생성 중인 보고서만 키워드 집계 입력을 고정할 수 있습니다.");
+        if (reportKeywordSnapshot == null) reportKeywordSnapshot = snapshot;
+    }
+
+    /** Final selection may invalidate the captured scope, but can never replace or expand its evidence. */
+    public void markKeywordCompanyScopeUnverified() {
+        if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("생성 중인 보고서만 키워드 집계 범위를 확정할 수 있습니다.");
+        if (reportKeywordSnapshot == null || reportKeywordSnapshot.unavailableReason() != null) return;
+        reportKeywordSnapshot = new ReportKeywordSnapshot(reportKeywordSnapshot.ruleVersion(), reportKeywordSnapshot.capturedAt(),
+                reportKeywordSnapshot.periodLabel(), "COMPANY_SCOPE_UNVERIFIED", reportKeywordSnapshot.definitions(), reportKeywordSnapshot.candidates());
     }
 
     @Builder.Default

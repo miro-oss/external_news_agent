@@ -8,6 +8,8 @@ import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
 import com.example.be.domain.reports.coverage.ReportCoverageService;
+import com.example.be.domain.reports.keyword.ReportKeywordDTO;
+import com.example.be.domain.reports.keyword.ReportKeywordService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -45,6 +47,9 @@ public class ReportPdfRenderer {
     private ReportCoverageService coverageService;
     @org.springframework.beans.factory.annotation.Autowired
     public void setCoverageService(ReportCoverageService coverageService) { this.coverageService = coverageService; }
+    private ReportKeywordService keywordService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setKeywordService(ReportKeywordService keywordService) { this.keywordService = keywordService; }
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^]\\r\\n]+)]\\(([^)\\r\\n]+)\\)");
     private static final Pattern AUTOLINK = Pattern.compile("<(https?://[^>\\r\\n]+)>");
@@ -86,6 +91,13 @@ public class ReportPdfRenderer {
     public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
                                  ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
                                  Audience unavailableAudience) {
+        return renderDetailed(report, view, insight, coverage, unavailableAudience,
+                keywordService == null ? null : keywordService.projectForDelivery(report, view));
+    }
+
+    public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
+                                 ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
+                                 Audience unavailableAudience, ReportKeywordDTO.View keywords) {
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
@@ -107,6 +119,7 @@ public class ReportPdfRenderer {
             if (content != null) briefing(pdf, ReportBriefing.from(view));
             if (unavailableAudience != null) pdf.muted(NotificationBriefingSection.unavailable(unavailableAudience));
             ReportPdfInsightSection.brief(pdf, insight, view);
+            NotificationKeywordSection.pdf(pdf, keywords);
             if (content != null) {
                 pdf.internalLink("이슈와 근거 자세히 보기", "report-detail");
                 if (insight != null) pdf.internalLink("관점 분석 자세히 보기", "insight-detail");

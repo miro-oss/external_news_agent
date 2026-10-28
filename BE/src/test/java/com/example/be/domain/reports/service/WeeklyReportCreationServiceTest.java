@@ -52,12 +52,23 @@ class WeeklyReportCreationServiceTest {
         var original = new WeeklyReportInput(monday, monday.plusDays(6), List.of(first, second), List.of());
         var selected = new WeeklyReportInput(monday, monday.plusDays(6), List.of(second), List.of());
         when(reservations.reserve(eq(monday), any())).thenReturn(new WeeklyReportPersistenceService.Reservation(1L, true, original));
-        when(interests.selectWeekly(original)).thenReturn(new CompanyInterestSelection.WeeklyResult(selected, List.of()));
+        when(interests.selectWeekly(original, java.util.Set.of())).thenReturn(new CompanyInterestSelection.WeeklyResult(selected, List.of()));
         when(agent.generate(eq(1L), eq(selected), any())).thenReturn(new ReportDocument("주간", "내용", "model"));
         service.generate(monday);
         var ordering = inOrder(persistence, agent);
-        ordering.verify(persistence).freezeCompanySelection(eq(1L), eq(List.of(102L)), eq(List.of(101L)), eq(selected), eq(List.of()), any());
+        ordering.verify(persistence).freezeCompanySelection(eq(1L), eq(List.of(102L)), eq(List.of(101L)), eq(selected), eq(List.of()), eq(java.util.Set.of()), any());
         ordering.verify(agent).generate(eq(1L), eq(selected), any());
+    }
+
+    @Test
+    void forwardsFrozenKeywordTopicsAndActualCriterionProvenanceWithoutAddingFindings() {
+        var topics = java.util.Set.of(1L, 2L);
+        when(reservations.reserve(eq(monday), any())).thenReturn(new WeeklyReportPersistenceService.Reservation(1L, true, input, topics));
+        when(interests.selectWeekly(input, topics)).thenReturn(new CompanyInterestSelection.WeeklyResult(input, List.of(), java.util.Set.of(2L)));
+        when(agent.generate(eq(1L), eq(input), any())).thenReturn(new ReportDocument("주간", "내용", "model"));
+        service.generate(monday);
+        verify(interests).selectWeekly(input, topics);
+        verify(persistence).freezeCompanySelection(eq(1L), eq(List.of()), eq(List.of()), same(input), eq(List.of()), eq(java.util.Set.of(2L)), any());
     }
 
     @Test

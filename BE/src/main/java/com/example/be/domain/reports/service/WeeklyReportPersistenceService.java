@@ -34,6 +34,7 @@ public class WeeklyReportPersistenceService {
     private final ReportEventFeedbackProjection feedbackProjection;
     private final DailyReportFeedbackExclusions feedbackExclusions;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
+    private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
 
     @Transactional
     public Reservation reserve(LocalDate monday, LocalDateTime now) {
@@ -69,7 +70,12 @@ public class WeeklyReportPersistenceService {
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
         report.freezeReportCoverageSnapshot(reportCoverage.mergeWeekly(report, sources, now));
-        return new Reservation(report.getId(), true, input);
+        report.freezeReportKeywordSnapshot(reportKeywords.mergeWeekly(report, sources, now));
+        var keywordSnapshot = report.getReportKeywordSnapshot();
+        Set<Long> keywordTopics = keywordSnapshot == null ? Set.of() : keywordSnapshot.candidates().stream()
+                .map(com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate::topicId)
+                .collect(java.util.stream.Collectors.toSet());
+        return new Reservation(report.getId(), true, input, keywordTopics);
     }
 
     private WeeklyReportInput.DailySource snapshot(NewsReport source) {
@@ -117,7 +123,11 @@ public class WeeklyReportPersistenceService {
     }
 
 
-    public record Reservation(Long reportId, boolean owner, WeeklyReportInput input) {
+    public record Reservation(Long reportId, boolean owner, WeeklyReportInput input, Set<Long> keywordTopicIds) {
+        public Reservation { keywordTopicIds = Set.copyOf(keywordTopicIds); }
+        public Reservation(Long reportId, boolean owner, WeeklyReportInput input) {
+            this(reportId, owner, input, Set.of());
+        }
         static Reservation deferred() { return new Reservation(null, false, null); }
     }
 }

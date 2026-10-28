@@ -94,6 +94,28 @@ final class ReportPdfLayout implements AutoCloseable {
 
     void pageBreak() throws IOException { newPage(); }
 
+    /** A 0–100 keyword share with explicit counts; keep ordinary rows on one page. */
+    void keywordBar(String label, String amount, double share, String related) throws IOException {
+        float height = readingTextHeight(label, bold, 10.5f, 17)
+                + readingTextHeight(amount, regular, 8.5f, 13)
+                + readingTextHeight(related, regular, 8.5f, 13) + 42;
+        ensure(Math.min(height, TOP - BOTTOM));
+        textBlock(label, 10.5f, 17, bold, INK, 0);
+        muted(amount);
+        ensure(20);
+        stream.setNonStrokingColor(RULE);
+        stream.addRect(MARGIN, y - 6, WIDTH, 7);
+        stream.fill();
+        if (share > 0) {
+            stream.setNonStrokingColor(BLUE);
+            stream.addRect(MARGIN, y - 6, WIDTH * (float) (Math.min(100, share) / 100), 7);
+            stream.fill();
+        }
+        gap(18);
+        if (related != null && !related.isBlank()) muted(related);
+        gap(10);
+    }
+
     void anchor(String name) {
         if (destinations.containsKey(name)) throw new IllegalArgumentException("중복된 PDF 이동 대상입니다.");
         PDPageXYZDestination destination = new PDPageXYZDestination();

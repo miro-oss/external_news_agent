@@ -12,6 +12,8 @@ public final class CompanyInterestSelectionTestSupport {
                 new CompanyInterestSelection.Result(call.getArgument(0), List.of()));
         when(selection.selectWeekly(any())).thenAnswer(call ->
                 new CompanyInterestSelection.WeeklyResult(call.getArgument(0), List.of()));
+        when(selection.selectWeekly(any(), anySet())).thenAnswer(call ->
+                new CompanyInterestSelection.WeeklyResult(call.getArgument(0), List.of()));
         return selection;
     }
 }

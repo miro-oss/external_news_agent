@@ -1,0 +1,31 @@
+.report-keyword-stats { min-width: 0; overflow-wrap: anywhere; }
+.report-keyword-heading { margin-bottom: 1.15rem; }
+.report-keyword-stats .report-keyword-heading h3 { margin: 0 0 .6rem; }
+.report-keyword-stats .report-keyword-basis { margin: 0; color: var(--fg-2); font-size: .82rem; line-height: 1.7; }
+.report-keyword-basis strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+.report-keyword-stats .report-keyword-period { margin: .2rem 0 0; color: var(--fg-3); font-size: .74rem; line-height: 1.65; }
+.report-reading-content .report-keyword-list,
+.report-keyword-list { display: grid; gap: 1.05rem; margin: 0; padding: 0; list-style: none; }
+.report-keyword-item { min-width: 0; }
+.report-keyword-row { display: flex; justify-content: space-between; align-items: baseline; gap: .6rem 1rem; }
+.report-keyword-stats .report-keyword-row h4 { min-width: 0; margin: 0; color: var(--fg); font-size: .88rem; line-height: 1.65; }
+.report-keyword-numbers { display: flex; flex: 0 0 auto; align-items: baseline; gap: .8rem; font-variant-numeric: tabular-nums; }
+.report-keyword-numbers > span { color: var(--fg-3); font-size: .75rem; }
+.report-keyword-numbers > strong { min-width: 3.8rem; color: var(--primary-strong); font-size: .9rem; text-align: right; }
+.report-keyword-track { overflow: hidden; height: .45rem; margin: .45rem 0 0; border-radius: 999px; background: var(--surface-sunken); }
+.report-keyword-track > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+.report-keyword-related { display: flex; gap: .35rem .6rem; margin-top: .45rem; color: var(--fg-3); font-size: .72rem; line-height: 1.65; }
+.report-keyword-related > span { flex-shrink: 0; }
+.report-reading-content .report-keyword-related ul,
+.report-keyword-related ul { display: flex; flex-wrap: wrap; gap: .25rem .8rem; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.report-keyword-stats .report-keyword-related li { min-width: 0; color: var(--fg-2); }
+.report-keyword-related li > span { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.report-keyword-stats .report-keyword-more { margin: 1rem 0 0; color: var(--fg-3); font-size: .75rem; line-height: 1.7; }
+.report-keyword-stats .report-keyword-note { padding-top: .9rem; margin: 1rem 0 0; border-top: 1px solid var(--line); color: var(--fg-3); font-size: .73rem; line-height: 1.85; }
+.report-keyword-stats .report-keyword-empty { margin: .75rem 0 0; color: var(--fg-3); font-size: .82rem; line-height: 1.8; }
+.report-keyword-empty strong { display: block; margin-bottom: .2rem; color: var(--fg-2); font-weight: 600; }
+@media (max-width: 520px) {
+  .report-keyword-row { align-items: flex-start; flex-direction: column; gap: .15rem; }
+  .report-keyword-numbers { justify-content: space-between; width: 100%; }
+  .report-keyword-related { flex-direction: column; gap: .15rem; }
+}
