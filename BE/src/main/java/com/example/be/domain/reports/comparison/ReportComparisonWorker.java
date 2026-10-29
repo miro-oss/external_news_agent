@@ -18,7 +18,7 @@ public class ReportComparisonWorker {
     private final ReportComparisonPersistence persistence;
     private final ReportComparisonEngine engine;
     private final ReportComparisonAnalyzer analyzer;
-    @Value("${news.reports.daily.enabled:true}") private boolean enabled = true;
+    @Value("${news.reports.changes.enabled:true}") private boolean enabled = true;
     @Value("${news.scheduling.enabled:true}") private boolean schedulingEnabled = true;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)

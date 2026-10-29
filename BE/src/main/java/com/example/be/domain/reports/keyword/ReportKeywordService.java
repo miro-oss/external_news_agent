@@ -36,11 +36,11 @@ public class ReportKeywordService {
     private final DailyReportFeedbackExclusions dailyExclusions;
 
     public ReportKeywordDTO.View project(NewsReport report, ReportEventFeedbackProjection.View view) {
-        return project(report, view, false);
+        return aggregate(report, view, false).view();
     }
 
     public ReportKeywordDTO.View projectForDelivery(NewsReport report, ReportEventFeedbackProjection.View view) {
-        return project(report, view, true);
+        return aggregate(report, view, true).view();
     }
 
     public ReportKeywordDTO.View unavailable(NewsReport report, String reason) {
@@ -51,12 +51,13 @@ public class ReportKeywordService {
                 snapshot == null ? ReportCoverageCapture.periodLabel(report) : snapshot.periodLabel(), null, List.of(), 0);
     }
 
-    private ReportKeywordDTO.View project(NewsReport report, ReportEventFeedbackProjection.View view, boolean delivery) {
+    /** Includes every registered key before presentation limits; callers must not compare top-six lists. */
+    public FullAggregation aggregate(NewsReport report, ReportEventFeedbackProjection.View view, boolean delivery) {
         var snapshot = report.getReportKeywordSnapshot();
-        if (snapshot == null) return unavailable(report, "NO_SNAPSHOT");
-        if (!ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())) return unavailable(report, "INVALID_SNAPSHOT");
-        if (snapshot.unavailableReason() != null) return unavailable(report, snapshot.unavailableReason());
-        if (!valid(snapshot)) return unavailable(report, "INVALID_SNAPSHOT");
+        if (snapshot == null) return unavailableAggregation(report, "NO_SNAPSHOT");
+        if (!ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())) return unavailableAggregation(report, "INVALID_SNAPSHOT");
+        if (snapshot.unavailableReason() != null) return unavailableAggregation(report, snapshot.unavailableReason());
+        if (!valid(snapshot)) return unavailableAggregation(report, "INVALID_SNAPSHOT");
 
         Map<Long, Set<Pair>> identities = new HashMap<>();
         snapshot.candidates().forEach(candidate -> identities.computeIfAbsent(candidate.findingId(), ignored -> new HashSet<>())
@@ -68,13 +69,14 @@ public class ReportKeywordService {
                     .forEach(binding -> identities.computeIfAbsent(binding.findingId(), ignored -> new HashSet<>())
                             .add(new Pair(binding.issueId(), binding.topicId())));
         }
-        Set<Long> rejected = new HashSet<>(view.excludedEvidenceFindingIds());
+        Set<Long> dynamicRejected = new HashSet<>(view.excludedEvidenceFindingIds());
+        dynamicRejected.addAll(dailyExclusions.forKeywordCandidates(report, snapshot, delivery));
+        Set<Long> rejected = new HashSet<>(dynamicRejected);
         rejected.addAll(report.getCompanySuppressedFindingIds());
-        rejected.addAll(dailyExclusions.forKeywordCandidates(report, snapshot, delivery));
         // An unbound rejected representative could belong to any surviving frozen issue. Do not
         // publish a seemingly complete count until its original identity can be established.
         if (!snapshot.candidates().isEmpty() && !identities.keySet().containsAll(rejected))
-            return unavailable(report, "INVALID_SNAPSHOT");
+            return unavailableAggregation(report, "INVALID_SNAPSHOT");
         Set<Pair> rejectedPairs = rejected.stream().flatMap(id -> identities.getOrDefault(id, Set.of()).stream())
                 .collect(Collectors.toSet());
         var candidates = snapshot.candidates().stream()
@@ -109,8 +111,21 @@ public class ReportKeywordService {
                     .map(value -> new ReportKeywordDTO.RelatedKeyword(labels.get(value.key()), value.count())).toList();
             return new ReportKeywordDTO.Item(labels.get(key), count, share, related);
         }).toList();
-        return new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, snapshot.ruleVersion(), snapshot.capturedAt(),
+        Map<String, KeywordCount> all = new LinkedHashMap<>();
+        ordered.forEach(key -> all.put(key, new KeywordCount(labels.get(key), byKeyword.get(key).size(),
+                issueIds.isEmpty() ? null : Math.round(byKeyword.get(key).size() * 1000.0 / issueIds.size()) / 10.0)));
+        var result = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, snapshot.ruleVersion(), snapshot.capturedAt(),
                 snapshot.periodLabel(), issueIds.size(), items, Math.max(0, ordered.size() - items.size()));
+        return new FullAggregation(result, all, !dynamicRejected.isEmpty() || permitted.size() != candidates.size());
+    }
+
+    private FullAggregation unavailableAggregation(NewsReport report, String reason) {
+        return new FullAggregation(unavailable(report, reason), Map.of(), false);
+    }
+
+    public record KeywordCount(String label, int count, Double sharePercent) { }
+    public record FullAggregation(ReportKeywordDTO.View view, Map<String, KeywordCount> counts, boolean filtered) {
+        public FullAggregation { counts = Map.copyOf(counts); }
     }
 
     private static boolean valid(ReportKeywordSnapshot snapshot) {

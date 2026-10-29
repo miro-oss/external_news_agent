@@ -32,15 +32,17 @@ public class DailyReportPersistenceService {
     private final CompanyInterestSelection companyInterests;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
     private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
+    private final com.example.be.domain.reports.comparison.ReportComparisonCapture comparisonCapture;
 
     @Transactional
     public void freezeSelection(Long reportId, DailyReportSelector.Selection selection, LocalDateTime now) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId).orElseThrow();
         report.freezeCompanySelection(selection.findings().stream().map(com.example.be.domain.analysis.entity.Finding::getId).toList(),
                 selection.companySuppressedFindingIds(), null);
+        if (!selection.comparisonScopeKnown()) report.markKeywordCompanyScopeUnverified();
         companyInterests.record(reportId, selection.applications(), now);
         if (selection.comparisonSnapshot() != null) {
-            try { comparisons.captureInput(report, selection.comparisonSnapshot(), now); }
+            try { comparisonCapture.daily(report, selection.comparisonSnapshot(), now); }
             catch (RuntimeException exception) { log.warn("일일 보고서 비교 입력 저장 실패. reportId={}", reportId, exception); }
         }
     }
@@ -82,7 +84,7 @@ public class DailyReportPersistenceService {
         report.freezeReportKeywordSnapshot(reportKeywords.captureDaily(report, prepared, now));
         if (snapshot != null) {
             try {
-                comparisons.captureInput(report, snapshot, now);
+                comparisonCapture.daily(report, snapshot, now);
             } catch (RuntimeException exception) {
                 // Oracle statement failure does not abort the transaction; report generation remains available.
                 log.warn("일일 보고서 비교 입력 저장 실패. reportId={}", report.getId(), exception);

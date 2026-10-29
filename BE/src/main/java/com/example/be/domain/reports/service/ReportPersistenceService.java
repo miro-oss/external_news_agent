@@ -37,6 +37,7 @@ public class ReportPersistenceService {
     private final CompanyInterestSelection companyInterests;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
     private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
+    private final com.example.be.domain.reports.comparison.ReportComparisonCapture comparisonCapture;
 
     @Transactional
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
@@ -55,11 +56,19 @@ public class ReportPersistenceService {
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
                                        WeeklyReportInput weeklyInput, List<CompanyInterestSelection.Application> applications,
                                        Set<Long> criterionTopicIds, LocalDateTime now) {
+        freezeCompanySelection(reportId, findingIds, suppressedFindingIds, weeklyInput, applications, criterionTopicIds, false, now);
+    }
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput weeklyInput, List<CompanyInterestSelection.Application> applications,
+                                       Set<Long> criterionTopicIds, boolean comparisonScopeKnown, LocalDateTime now) {
         NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
         Set<Long> activeTopics = new java.util.HashSet<>(criterionTopicIds);
         applications.forEach(application -> activeTopics.add(application.criterion().topicId()));
         if (hasUnassessedWeeklyKeywordCandidates(report, activeTopics)) report.markKeywordCompanyScopeUnverified();
+        if (!comparisonScopeKnown) report.markKeywordCompanyScopeUnverified();
         report.freezeCompanySelection(findingIds, suppressedFindingIds, weeklyInput);
         companyInterests.record(reportId, applications, now);
     }
@@ -97,6 +106,7 @@ public class ReportPersistenceService {
                 .build());
         report.freezeReportCoverageSnapshot(reportCoverage.captureRun(report, generatedAt));
         report.freezeReportKeywordSnapshot(reportKeywords.captureRun(report, generatedAt));
+        comparisonCapture.run(report, generatedAt);
         run.attachReport(report.getId());
         return new Reservation(report.getId(), true);
     }
@@ -122,6 +132,8 @@ public class ReportPersistenceService {
         if (report.getRunId() == null) {
             throw new IllegalArgumentException("실행별 보고서만 복구할 수 있습니다. reportId=" + reportId);
         }
+        // A replacement document has no matching reservation-time comparison evidence.
+        report.invalidateComparisonInput();
         String title = ReportTitles.forReport(report, document.title(), generatedAt);
         report.complete(
                 title,

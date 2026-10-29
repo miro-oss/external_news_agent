@@ -163,6 +163,21 @@ class ReportKeywordServiceTest {
         verifyNoInteractions(articles, relevance);
     }
 
+    @Test void completeAggregationKeepsKeywordsOutsideBothTopSixListsAndMarksLostCandidates() {
+        var definitions = IntStream.range(0, 9).mapToObj(index -> new ReportKeywordSnapshot.Definition("k" + index, "키워드" + index)).toList();
+        var keys = definitions.stream().map(ReportKeywordSnapshot.Definition::key).toArray(String[]::new);
+        var snapshot = new ReportKeywordSnapshot(ReportKeywordSnapshot.RULE_VERSION, NOW, "기간", null, definitions,
+                List.of(candidate(1, 11, keys), candidate(2, 22, "k8")));
+        fullText(1, 2);
+        var all = service.aggregate(report(snapshot), view(List.of(), Set.of()), false);
+        assertEquals(9, all.counts().size());
+        assertEquals(1, all.counts().get("k7").count());
+        assertEquals(50.0, all.counts().get("k7").sharePercent());
+        assertFalse(all.filtered());
+        fullText(1);
+        assertTrue(service.aggregate(report(snapshot), view(List.of(), Set.of()), false).filtered());
+    }
+
     private void fullText(long... ids) {
         var values = java.util.Arrays.stream(ids).mapToObj(id -> {
             var article = mock(Article.class); when(article.getId()).thenReturn(id); when(article.hasFullText()).thenReturn(true); return article;

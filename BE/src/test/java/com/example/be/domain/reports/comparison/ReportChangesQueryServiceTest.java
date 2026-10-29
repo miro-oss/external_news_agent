@@ -34,7 +34,9 @@ class ReportChangesQueryServiceTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
-    private final ReportEventFeedbackProjection feedbackProjection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class));
+    private final com.example.be.domain.reports.service.DailyReportFeedbackExclusions dailyExclusions =
+            mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class);
+    private final ReportEventFeedbackProjection feedbackProjection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots, dailyExclusions);
     private final ReportChangesQueryService query = new ReportChangesQueryService(reports, comparisons, findings, relevancePolicy, feedbackProjection);
 
     private void visible(ReportScope scope) {
@@ -42,10 +44,16 @@ class ReportChangesQueryServiceTest {
                 NewsReport.builder().id(101L).reportScope(scope).reportDate(LocalDate.of(2026, 9, 10)).build()));
     }
 
-    @Test void weeklyReportDoesNotFetchOrSchedulePreviousWeekComparisons() {
+    @Test void weeklyReportWithoutFrozenInputIsUnavailableWithoutSchedulingOrBackfill() {
         visible(ReportScope.WEEKLY);
-        assertEquals(ReportChanges.Status.NOT_APPLICABLE, query.get(101).status());
-        verifyNoInteractions(comparisons, findings, relevancePolicy);
+        var result = query.get(101);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+        assertEquals("WEEKLY", result.periods().basis());
+        assertEquals("NO_SNAPSHOT", result.keywordChanges().reason());
+        verify(comparisons).find(101);
+        verify(comparisons).findInput(101);
+        verifyNoInteractions(findings, relevancePolicy);
+        verify(comparisons, never()).insert(any(), any(), any());
     }
 
     @Test void missingHiddenOrPendingReportUsesReport404() {
@@ -53,14 +61,14 @@ class ReportChangesQueryServiceTest {
         verifyNoInteractions(comparisons);
     }
 
-    @Test void runReportIsNotApplicableAndLegacyDailyDoesNotBackfillLiveEvidence() {
+    @Test void runAndLegacyDailyWithoutFrozenInputDoNotBackfillLiveEvidence() {
         visible(ReportScope.RUN);
-        assertEquals(ReportChanges.Status.NOT_APPLICABLE, query.get(101).status());
-        verifyNoInteractions(comparisons);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, query.get(101).status());
         visible(ReportScope.DAILY);
         assertEquals(ReportChanges.Status.UNAVAILABLE, query.get(101).status());
-        verify(comparisons).findInput(101);
+        verify(comparisons, times(2)).findInput(101);
         verify(comparisons, never()).insert(any(), any(), any());
+        verifyNoInteractions(findings);
     }
 
     @Test void savedResultIsReadOnlyAndHiddenBaselineQuotesAreNeverReturned() {
@@ -258,6 +266,56 @@ class ReportChangesQueryServiceTest {
         assertTrue(saved.scopeChanged());
         assertEquals(ready.items(), saved.items());
         verify(comparisons, never()).finish(anyLong(), any(), any());
+    }
+
+    @Test void invalidatedGenerationInputCannotServeAnOlderReadyComparison() {
+        var fixture = comparisonWithEvents(false);
+        fixture.base().invalidateComparisonInput();
+        var result = query.get(101);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+        assertEquals("NO_SNAPSHOT", result.keywordChanges().reason());
+        assertTrue(result.items().isEmpty());
+        assertTrue(result.notes().isEmpty());
+    }
+
+    @Test void inheritedDailyExclusionHidesWeeklyComparisonWithoutAnyDirectFeedback() {
+        var fixture = comparisonWithEvents(false);
+        when(dailyExclusions.forReport(fixture.base())).thenReturn(Set.of(10L));
+        assertEquals(ReportChanges.Status.UNAVAILABLE, query.get(101).status());
+        assertTrue(query.get(101).notes().isEmpty());
+        assertTrue(query.get(101).items().isEmpty());
+        assertEquals("FILTERED_INPUT", query.get(101).keywordChanges().reason());
+    }
+
+    @Test void deliveryChecksUnconfirmedBaselineOpinionAndPersonalPolicyWithoutChangingPublicReading() {
+        var fixture = comparisonWithEvents(false);
+        when(feedbackStore.eventFeedback(100L)).thenReturn(List.of(review(100L, fixture.baseEvent(),
+                FeedbackModels.Status.PENDING, null)));
+        var view = new ReportEventFeedbackProjection.View(List.of(fullText(20)),
+                new com.example.be.domain.reports.service.ReportReadingContent("", fixture.current().getStructuredContent()), false);
+        assertEquals(ReportChanges.Status.READY, query.get(101).status());
+        var delivered = query.projectForDelivery(fixture.current(), view, false);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, delivered.status());
+        assertTrue(delivered.items().isEmpty());
+        assertEquals("FILTERED_INPUT", delivered.keywordChanges().reason());
+        when(feedbackStore.eventFeedback(100L)).thenReturn(List.of());
+        var personal = query.projectForDelivery(fixture.current(), view, true);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, personal.status());
+        assertEquals("PERSONALIZATION_UNVERIFIED", personal.keywordChanges().reason());
+        assertTrue(personal.items().isEmpty());
+        assertEquals(ReportChanges.Status.READY, query.get(101).status());
+    }
+
+    @Test void filteredProvidedDeliveryViewHidesTitlesClaimsAndUncertaintyNotes() {
+        var fixture = comparisonWithEvents(false);
+        var view = new ReportEventFeedbackProjection.View(List.of(fullText(20)),
+                new com.example.be.domain.reports.service.ReportReadingContent("", fixture.current().getStructuredContent()),
+                false, Set.of(20L), false);
+        var result = query.projectForDelivery(fixture.current(), view, false);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+        assertTrue(result.items().isEmpty());
+        assertTrue(result.notes().isEmpty());
+        assertEquals("FILTERED_INPUT", result.keywordChanges().reason());
     }
 
     private EventComparisonFixture comparisonWithEvents(boolean sharedEvidence) {

@@ -35,6 +35,7 @@ public class WeeklyReportPersistenceService {
     private final DailyReportFeedbackExclusions feedbackExclusions;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
     private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
+    private final com.example.be.domain.reports.comparison.ReportComparisonCapture comparisonCapture;
 
     @Transactional
     public Reservation reserve(LocalDate monday, LocalDateTime now) {
@@ -66,11 +67,12 @@ public class WeeklyReportPersistenceService {
                 .collectionContexts(sources.stream().flatMap(source -> source.getCollectionContexts().stream())
                         .distinct().toList())
                 .reflectedFindingIds(input.sourceFindingIds()).coverageRecorded(true)
-                .comparisonInputUsable(false)
+                .comparisonInputUsable(true)
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
         report.freezeReportCoverageSnapshot(reportCoverage.mergeWeekly(report, sources, now));
         report.freezeReportKeywordSnapshot(reportKeywords.mergeWeekly(report, sources, now));
+        comparisonCapture.weekly(report, now);
         var keywordSnapshot = report.getReportKeywordSnapshot();
         Set<Long> keywordTopics = keywordSnapshot == null ? Set.of() : keywordSnapshot.candidates().stream()
                 .map(com.example.be.domain.reports.keyword.ReportKeywordSnapshot.Candidate::topicId)
@@ -105,7 +107,7 @@ public class WeeklyReportPersistenceService {
         List<Long> selected = allowed;
         var snapshot = comparisons.findInput(source.getId()).map(saved -> new ReportComparisonSnapshot(
                 saved.version(), saved.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(),
-                saved.scopes())).orElse(null);
+                saved.scopes(), saved.period(), saved.sourceConditions())).orElse(null);
         return new WeeklyReportInput.DailySource(source.getId(), source.getReportDate(), source.getTitle(),
                 markdown, content, allowed, snapshot);
     }

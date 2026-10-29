@@ -36,7 +36,8 @@ public class TopicWeeklyReportCreationService {
             List<LocalDate> missing = monday.datesUntil(monday.plusWeeks(1)).filter(date -> !sourceDates.contains(date)).toList();
             input = new WeeklyReportInput(monday, monday.plusDays(6), sources, missing, topicId, input.topicName());
             persistence.freezeCompanySelection(reservation.reportId(), input.sourceFindingIds(),
-                    selection.companySuppressedFindingIds(), input, selection.applications(), now);
+                    selection.companySuppressedFindingIds(), input, selection.applications(), java.util.Set.of(),
+                    selection.comparisonScopeKnown(), now);
         }
         ReportDocument document;
         try {

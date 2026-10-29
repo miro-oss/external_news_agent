@@ -79,10 +79,12 @@ public class PersonalizedNotificationRenderer {
         // Render from the same final view as the email: discarded evidence must never return in the PDF.
         // Preparation failure aborts before opening SMTP; never silently send a report without its PDF.
         var coverage = renderer.projectCoverage(report, delivered);
-        var keywords = renderer.projectKeywords(report, delivered, feedback.hasActivePersonalPolicies(recipientId));
-        ReportPdfRenderer.Result pdf = pdfRenderer.renderDetailed(report, delivered, insight, coverage, unavailableAudience, keywords);
+        boolean personalPolicies = feedback.hasActivePersonalPolicies(recipientId);
+        var keywords = renderer.projectKeywords(report, delivered, personalPolicies);
+        var changes = renderer.projectChanges(report, delivered, personalPolicies);
+        ReportPdfRenderer.Result pdf = pdfRenderer.renderDetailed(report, delivered, insight, coverage, unavailableAudience, keywords, changes);
         RenderedNotification rendered = renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight,
-                pdf.companyPages(), coverage, unavailableAudience, keywords);
+                pdf.companyPages(), coverage, unavailableAudience, keywords, changes);
         return new RenderedNotification(rendered.subject(), rendered.parseMode(), rendered.chunks(),
                 List.of(new NotificationAttachment("news-report-" + report.getId() + ".pdf", "application/pdf", pdf.bytes())));
     }

@@ -34,6 +34,7 @@ class ReportComparisonOracleIntegrationTests {
     @Autowired ReportComparisonPersistence persistence;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired jakarta.persistence.EntityManager em;
     private final List<Long> created = new ArrayList<>();
     private final LocalDate date = LocalDate.of(2196, 1, 10);
 
@@ -120,5 +121,61 @@ class ReportComparisonOracleIntegrationTests {
         var result = comparisons.find(current.getId()).orElseThrow();
         assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
         assertTrue(result.result().items().isEmpty());
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void runQueriesPreserveReportlessExecutionsSavedTopicsAndTimestampTieOrderInOracle() {
+        String suffix = java.util.UUID.randomUUID().toString();
+        var source = com.example.be.domain.sources.entity.Source.builder()
+                .sourceKind(com.example.be.domain.sources.entity.Source.KIND_FEED).name("comparison source " + suffix)
+                .urlTemplate("https://example.com/comparison/" + suffix).language("ko").active(true).build();
+        var topic = com.example.be.domain.topics.entity.Topic.builder().name("comparison topic " + suffix)
+                .queryText("HBM").requiredKeywords(List.of("HBM")).batchSize(10).intervalMinutes(10080).active(true).build();
+        var otherTopic = com.example.be.domain.topics.entity.Topic.builder().name("other comparison topic " + suffix)
+                .batchSize(10).intervalMinutes(60).active(true).build();
+        em.persist(source); em.persist(topic); em.persist(otherTopic); em.flush();
+        var sameTime = LocalDateTime.of(2198, 7, 17, 10, 0);
+        var older = execution(topic, source, sameTime.minusHours(1), true);
+        var legacy = execution(topic, source, sameTime.minusMinutes(1), false);
+        var reportless = execution(topic, source, sameTime, true);
+        var different = execution(otherTopic, source, sameTime, true);
+        var report = NewsReport.builder().run(older).reportScope(ReportScope.RUN).title("SQL comparison fixture")
+                .markdownBody("saved input").modelName("test").reportStatus(ReportStatus.GENERATED)
+                .generatedAt(older.getStartedAt().plusMinutes(1)).build();
+        em.persist(report); em.flush();
+        older.attachReport(report.getId()); em.flush();
+
+        var candidates = comparisons.previousRuns(sameTime.plusMinutes(1), Long.MAX_VALUE);
+        assertEquals(List.of(different.getId(), reportless.getId(), legacy.getId(), older.getId()),
+                candidates.stream().limit(4).map(ReportComparisonRepository.RunCandidate::runId).toList());
+        assertEquals(java.util.Set.of(otherTopic.getId()), candidates.getFirst().savedTopicIds());
+        assertEquals(java.util.Set.of(topic.getId()), candidates.get(1).savedTopicIds());
+        assertTrue(candidates.get(1).known());
+        assertNull(candidates.get(1).reportId(), "a reportless immediate execution must survive the SQL query");
+        assertFalse(candidates.get(2).known(), "missing historical topic JSON must stay unknown");
+        assertEquals(java.util.Set.of(topic.getId()), candidates.get(2).topicIds());
+        assertEquals(report.getId(), candidates.get(3).reportId());
+        assertEquals(reportless.getId(), comparisons.previousRuns(sameTime, different.getId()).getFirst().runId(),
+                "cursor uses both timestamp and ID so a same-time row is not lost");
+        assertEquals(List.of(older.getId(), legacy.getId(), reportless.getId(), different.getId()),
+                comparisons.periodRunIds(sameTime.toLocalDate().atStartOfDay(), sameTime.toLocalDate().plusDays(1).atStartOfDay()));
+        assertEquals(List.of(older.getId(), legacy.getId()), comparisons.periodRunIds(sameTime.minusHours(1), sameTime),
+                "period is inclusive at start and exclusive at end");
+    }
+
+    private com.example.be.domain.collection.entity.CollectionRun execution(
+            com.example.be.domain.topics.entity.Topic topic, com.example.be.domain.sources.entity.Source source,
+            LocalDateTime startedAt, boolean captureTopic) {
+        var run = com.example.be.domain.collection.entity.CollectionRun.builder()
+                .status(com.example.be.domain.collection.entity.RunStatus.SUCCESS)
+                .triggerType(com.example.be.domain.collection.entity.TriggerType.MANUAL)
+                .startedAt(startedAt).finishedAt(startedAt.plusSeconds(30)).build();
+        var item = com.example.be.domain.collection.entity.CollectionRunItem.builder().topic(topic).source(source)
+                .status(com.example.be.domain.collection.entity.RunItemStatus.SUCCESS).build();
+        if (captureTopic) item.captureTopicSnapshot();
+        run.addItem(item);
+        em.persist(run);
+        return run;
     }
 }

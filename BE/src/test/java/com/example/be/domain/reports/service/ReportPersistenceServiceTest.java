@@ -49,7 +49,7 @@ class ReportPersistenceServiceTest {
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
+                    events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
@@ -194,7 +194,7 @@ class ReportPersistenceServiceTest {
             var original = report.getReportKeywordSnapshot();
             when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
             var active = inputIds.size() == 1 ? java.util.Set.of(1L) : java.util.Set.of(1L, 2L);
-            service.freezeCompanySelection(17L, inputIds, List.of(), report.getWeeklyInput(), List.of(), active, LocalDateTime.now());
+            service.freezeCompanySelection(17L, inputIds, List.of(), report.getWeeklyInput(), List.of(), active, true, LocalDateTime.now());
             assertEquals(original, report.getReportKeywordSnapshot());
         }
     }
@@ -206,7 +206,7 @@ class ReportPersistenceServiceTest {
         var report = NewsReport.builder().id(17L).reportScope(scope).topicId(base.getTopicId()).reportStatus(ReportStatus.PENDING)
                 .reportKeywordSnapshot(base.getReportKeywordSnapshot()).weeklyInput(base.getWeeklyInput()).build();
         when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
-        service.freezeCompanySelection(17L, List.of(1L), List.of(), report.getWeeklyInput(), List.of(), java.util.Set.of(2L), LocalDateTime.now());
+        service.freezeCompanySelection(17L, List.of(1L), List.of(), report.getWeeklyInput(), List.of(), java.util.Set.of(2L), true, LocalDateTime.now());
         assertEquals(base.getReportKeywordSnapshot(), report.getReportKeywordSnapshot());
     }
 
@@ -325,6 +325,7 @@ class ReportPersistenceServiceTest {
 
         assertEquals(17L, service.replace(17L, document, generatedAt));
 
+        assertFalse(report.isComparisonInputUsable(), "replaced RUN content cannot expose an earlier saved comparison");
         assertEquals("복구 보고서", report.getTitle());
         assertEquals("# 복구 보고서", report.getMarkdownBody());
         assertEquals("configured-model", report.getModelName());

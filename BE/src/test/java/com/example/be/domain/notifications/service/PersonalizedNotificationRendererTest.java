@@ -65,9 +65,28 @@ class PersonalizedNotificationRendererTest {
 
     @BeforeEach
     void configurePublicLinks() {
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
         ReflectionTestUtils.setField(personalized, "publicBaseUrl", "https://news.example.com");
+    }
+
+    @Test
+    void emailAndPdfShareOneComparisonProjectedAgainstTheFinalRecipientView() {
+        var fixture = fixture(false);
+        prepare(fixture, List.of(), Set.of());
+        when(feedback.hasActivePersonalPolicies(RECIPIENT_ID)).thenReturn(true);
+        var changesService = mock(com.example.be.domain.reports.comparison.ReportChangesQueryService.class);
+        renderer.setChangesService(changesService);
+        var changes = new com.example.be.domain.reports.comparison.ReportChanges(17L, null, null, null,
+                com.example.be.domain.reports.comparison.ReportChanges.Status.UNAVAILABLE,
+                "개인 기준을 확인할 수 없어 비교를 제공하지 않습니다.", false, List.of(), List.of());
+        when(changesService.projectForDelivery(eq(fixture.report()), any(), eq(true))).thenReturn(changes);
+        var channel = NotificationChannel.builder().channelType(ChannelType.EMAIL).maxLength(3500).build();
+        var result = personalized.render(fixture.report(), channel, RECIPIENT_ID);
+        assertTrue(result.chunks().getFirst().contains(changes.message()));
+        verify(changesService, times(1)).projectForDelivery(eq(fixture.report()), any(), eq(true));
+        verify(pdfRenderer).renderDetailed(eq(fixture.report()), any(), any(), any(), any(), any(), same(changes));
+        verify(changesService, never()).get(anyLong());
     }
 
     @ParameterizedTest
@@ -249,7 +268,7 @@ class PersonalizedNotificationRendererTest {
         assertEquals("application/pdf", attachment.contentType());
         assertArrayEquals(new byte[]{'%', 'P', 'D', 'F'}, attachment.content());
         var view = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
-        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any(), any(), any());
+        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any(), any(), any(), any());
         assertEquals(List.of("정상 사건 제목"), eventTitles(view.getValue()));
         assertEquals(List.of(12L, 13L), view.getValue().findings().stream().map(Finding::getId).toList());
         assertTrue(view.getValue().excludedEvidenceFindingIds().containsAll(Set.of(11L, 12L, 14L)));
@@ -316,7 +335,7 @@ class PersonalizedNotificationRendererTest {
         prepare(fixture, List.of(), Set.of());
         var channel = NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL).maxLength(3500).active(true).build();
         var failure = new IllegalStateException("synthetic PDF preparation failure");
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any())).thenThrow(failure);
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any())).thenThrow(failure);
 
         assertSame(failure, assertThrows(IllegalStateException.class,
                 () -> personalized.render(fixture.report(), channel, RECIPIENT_ID)));

@@ -24,7 +24,10 @@ public class ReportComparisonEngine {
                 .filter(id -> currentScopes.get(id).equals(priorScopes.get(id))).collect(Collectors.toSet());
         List<String> notes = new ArrayList<>();
         if (scopeChanged) notes.add("수집 조건이 달라진 주제는 비교를 보류하고 동일한 조건의 공통 주제만 비교했습니다.");
-        if (ChronoUnit.DAYS.between(work.baseReportDate(), work.reportDate()) > 1) {
+        long expectedGap = work.current().period() != null && work.current().period().durationDays() != null
+                ? work.current().period().durationDays() : 1;
+        if (work.baseReportDate() != null && work.reportDate() != null
+                && ChronoUnit.DAYS.between(work.baseReportDate(), work.reportDate()) > expectedGap) {
             notes.add(work.baseReportDate() + "부터 " + work.reportDate() + "까지의 보고서를 비교했습니다. 수집 날짜 사이에 공백이 있습니다.");
         }
         List<ReportChanges.Item> items = new ArrayList<>();
@@ -121,7 +124,7 @@ public class ReportComparisonEngine {
         }).toList();
         var result = plan.result();
         return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(), result.baseReportDate(),
-                result.status(), result.message(), result.scopeChanged(), result.notes(), items);
+                result.status(), result.message(), result.scopeChanged(), result.notes(), items, result.periods(), result.keywordChanges());
     }
 
     private ReportChanges.Side referenced(ReportChanges.Side side, List<String> ids) {

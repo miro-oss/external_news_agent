@@ -135,7 +135,7 @@ public class DailyReportSelector {
             log.warn("일일 보고서 비교 입력을 보존할 수 없어 비교를 제공하지 않습니다.", exception);
         }
         return new Selection(selected, prepared.stubExcluded(), prepared.evidenceExcluded(), snapshot,
-                companySelection.applications(), companySuppressed);
+                companySelection.applications(), companySuppressed, companySelection.comparisonScopeKnown());
     }
 
     public record Prepared(List<Finding> candidates, int stubExcluded, int evidenceExcluded,
@@ -143,9 +143,14 @@ public class DailyReportSelector {
 
     public record Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
                             ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications,
-                            List<Long> companySuppressedFindingIds) {
+                            List<Long> companySuppressedFindingIds, boolean comparisonScopeKnown) {
         public Selection {
             companySuppressedFindingIds = List.copyOf(companySuppressedFindingIds);
+        }
+        public Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
+                         ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications,
+                         List<Long> companySuppressedFindingIds) {
+            this(findings, stubExcluded, evidenceExcluded, comparisonSnapshot, applications, companySuppressedFindingIds, false);
         }
         public Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
                          ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications) {

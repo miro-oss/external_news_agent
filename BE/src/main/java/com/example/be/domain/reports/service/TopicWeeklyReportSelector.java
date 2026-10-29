@@ -89,7 +89,7 @@ public class TopicWeeklyReportSelector {
                 .filter(id -> !retained.contains(id)).distinct().sorted().toList();
         return new WeekSelection(prepared.stream().map(day -> finish(day,
                 new CompanyInterestSelection.Result(day.candidates().stream().filter(f -> retained.contains(f.getId())).toList(), List.of()))).toList(),
-                result.applications(), suppressed);
+                result.applications(), suppressed, result.comparisonScopeKnown());
     }
 
     private Selection finish(Prepared prepared, CompanyInterestSelection.Result companySelection) {
@@ -133,8 +133,12 @@ public class TopicWeeklyReportSelector {
                            Map<Long, NewsIssue> issues) { }
 
     public record WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications,
-                                List<Long> companySuppressedFindingIds) {
+                                List<Long> companySuppressedFindingIds, boolean comparisonScopeKnown) {
         public WeekSelection { companySuppressedFindingIds = List.copyOf(companySuppressedFindingIds); }
+        public WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications,
+                             List<Long> companySuppressedFindingIds) {
+            this(selections, applications, companySuppressedFindingIds, false);
+        }
         public WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications) {
             this(selections, applications, List.of());
         }

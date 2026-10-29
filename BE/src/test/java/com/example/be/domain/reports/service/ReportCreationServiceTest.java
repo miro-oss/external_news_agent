@@ -56,7 +56,7 @@ class ReportCreationServiceTest {
         var observations = mock(CollectionRunArticleRepository.class);
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
-        var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
+        var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
         var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
@@ -199,7 +199,7 @@ class ReportCreationServiceTest {
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
         var persistence = new ReportPersistenceService(
-                runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class));
+                runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
         var creation = new ReportCreationService(
                 runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));

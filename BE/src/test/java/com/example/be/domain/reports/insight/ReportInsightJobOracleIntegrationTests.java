@@ -47,6 +47,7 @@ class ReportInsightJobOracleIntegrationTests {
 
     @AfterEach void removeOwnedFixtures() {
         for (var id : created) jdbc.update("DELETE FROM news_report_insight_jobs WHERE report_id = ?", id);
+        for (var id : created) jdbc.update("DELETE FROM news_report_comparisons WHERE report_id = ?", id);
         for (var id : created) jdbc.update("DELETE FROM news_reports WHERE id = ?", id);
         for (var id : createdRuns) jdbc.update("DELETE FROM news_collection_runs WHERE id = ?", id);
     }

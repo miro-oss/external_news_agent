@@ -42,6 +42,7 @@ class CompanyInterestSelectionTest {
         when(agent.evaluate(isNull(), eq(1L), any())).thenAnswer(call -> response(call.getArgument(2), Map.of(2L, "UNCERTAIN"), false));
         var result = selection.select(List.of(finding(1, "수학 연구 발표"), finding(2, "자료 부족")), 1L);
         assertEquals(List.of(2L), result.findings().stream().map(Finding::getId).toList());
+        assertFalse(result.comparisonScopeKnown());
         assertEquals(List.of(new CompanyInterestSelection.Application(criterion, 1, 1)), result.applications());
         verify(agent).evaluate(isNull(), eq(1L), argThat(request ->
                 "COMPANY_REPORT".equals(request.path("scope").asString()) && "FREE".equals(request.path("plan").asString())));
@@ -54,6 +55,7 @@ class CompanyInterestSelectionTest {
         var result = selection.select(List.of(finding(1, "수학 연구"), oversized), 1L);
         assertEquals(List.of(oversized), result.findings());
         assertEquals(1, result.applications().getFirst().evaluatedCount());
+        assertFalse(result.comparisonScopeKnown());
         verify(agent).evaluate(any(), any(), argThat(request -> request.path("articles").size() == 1
                 && request.path("articles").get(0).path("content").asString().equals("수학 연구")));
     }
@@ -66,6 +68,7 @@ class CompanyInterestSelectionTest {
         });
         var result = selection.select(IntStream.rangeClosed(1, 11).mapToObj(id -> finding(id, "수학 연구")).toList(), 1L);
         assertEquals(List.of(11L), result.findings().stream().map(Finding::getId).toList());
+        assertFalse(result.comparisonScopeKnown());
         assertEquals(new CompanyInterestSelection.Application(criterion, 10, 10), result.applications().getFirst());
         verify(agent, times(2)).evaluate(any(), any(), any());
     }
@@ -74,6 +77,7 @@ class CompanyInterestSelectionTest {
         var candidate = finding(1, "기사 원문");
         when(agent.evaluate(any(), any(), any())).thenAnswer(call -> response(call.getArgument(2), Map.of(), true));
         var mocked = selection.select(List.of(candidate), 1L);
+        assertFalse(mocked.comparisonScopeKnown());
         assertEquals(List.of(candidate), mocked.findings()); assertTrue(mocked.applications().isEmpty());
         doReturn(json.valueToTree(Map.of("meta", Map.of("mock", false, "truncated", false),
                 "decisions", List.of(Map.of("articleId", 1, "status", "SUPPRESS", "policyIds", List.of(5),
@@ -97,6 +101,7 @@ class CompanyInterestSelectionTest {
         Finding candidate = finding(1, "수학 연구");
         var result = selection.select(List.of(candidate), 1L);
         assertEquals(List.of(candidate), result.findings()); assertTrue(result.applications().isEmpty());
+        assertTrue(result.comparisonScopeKnown());
         verifyNoInteractions(agent);
     }
 
@@ -170,11 +175,13 @@ class CompanyInterestSelectionTest {
         assertEquals(Set.of(1L), uncertain.criterionTopicIds());
         assertTrue(uncertain.applications().isEmpty());
         assertEquals(input, uncertain.input());
+        assertFalse(uncertain.comparisonScopeKnown());
         doThrow(new IllegalStateException("unavailable")).when(agent).evaluate(any(), any(), any());
         var failed = selection.selectWeekly(input, Set.of(1L, 2L));
         assertEquals(Set.of(1L), failed.criterionTopicIds());
         assertTrue(failed.applications().isEmpty());
         assertEquals(input, failed.input());
+        assertFalse(failed.comparisonScopeKnown());
     }
 
     @Test void weeklyCriterionReadFailureMarksTheEntireRequestedTopicScopeUnverified() {

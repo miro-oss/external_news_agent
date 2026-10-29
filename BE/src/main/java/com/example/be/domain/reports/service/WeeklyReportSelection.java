@@ -41,7 +41,7 @@ public final class WeeklyReportSelection {
         if (evidence != null) {
             List<Long> selected = allowed;
             evidence = new ReportComparisonSnapshot(evidence.version(),
-                    evidence.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(), evidence.scopes());
+                    evidence.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(), evidence.scopes(), evidence.period(), evidence.sourceConditions());
         }
         return new WeeklyReportInput.DailySource(source.reportId(), source.reportDate(), source.title(), "", content, allowed, evidence);
     }

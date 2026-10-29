@@ -48,7 +48,7 @@ class TopicWeeklyReportCreationServiceTest {
         verify(selector).selectWeek(List.of(prepared));
         var ordering = inOrder(persistence, orchestrator);
         ordering.verify(persistence).freezeCompanySelection(eq(8L), eq(List.of()), eq(List.of(1L)),
-                argThat(value -> value.sourceFindingIds().isEmpty()), eq(List.of()), any());
+                argThat(value -> value.sourceFindingIds().isEmpty()), eq(List.of()), eq(java.util.Set.of()), eq(false), any());
         ordering.verify(orchestrator).generate(eq(8L), argThat(value -> value.sourceFindingIds().isEmpty()), any());
         ordering.verify(persistence).complete(eq(8L), any(), any());
     }

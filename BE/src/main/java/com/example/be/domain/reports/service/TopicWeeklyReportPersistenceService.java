@@ -29,6 +29,7 @@ public class TopicWeeklyReportPersistenceService {
     private final TopicWeeklyReportSelector selector;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
     private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
+    private final com.example.be.domain.reports.comparison.ReportComparisonCapture comparisonCapture;
 
     @Transactional
     public Reservation reserve(Long topicId, LocalDate monday, LocalDateTime now) {
@@ -70,11 +71,12 @@ public class TopicWeeklyReportPersistenceService {
                 .topicDartStockCode(company == null ? null : company.stockCode())
                 .sourceReportCount(0L).sourceRunIds(runs.stream().map(run -> run.getId()).toList())
                 .collectionContexts(contexts).missingReportDates(missingDates).weeklyInput(input)
-                .reflectedFindingIds(input.sourceFindingIds()).coverageRecorded(true).comparisonInputUsable(false)
+                .reflectedFindingIds(input.sourceFindingIds()).coverageRecorded(true).comparisonInputUsable(true)
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
         report.freezeReportCoverageSnapshot(reportCoverage.captureTopicWeek(report, prepared, now));
         report.freezeReportKeywordSnapshot(reportKeywords.captureTopicWeek(report, prepared, now));
+        comparisonCapture.topicWeek(report, prepared, now);
         return new Reservation(report.getId(), true, false, input, prepared);
     }
 

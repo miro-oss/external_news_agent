@@ -44,6 +44,7 @@ class CompanyInterestOracleIntegrationTests {
     @Autowired CompanyInterestService service;
     @Autowired FeedbackStore feedback;
     @Autowired ObjectMapper json;
+    @Autowired com.example.be.domain.reports.comparison.ReportComparisonCriteria comparisonCriteria;
     private final List<Long> reports = new ArrayList<>(), topics = new ArrayList<>();
     private int eventNumber;
 
@@ -89,6 +90,57 @@ class CompanyInterestOracleIntegrationTests {
         var revoked = service.update(updated.id(), new Update(updated.version(), updated.instruction(), topic, "REVOKED"));
         assertNull(revoked.lastApplication()); assertTrue(store.active(topic).isEmpty());
         assertEquals(updated.activatedAt(), revoked.activatedAt());
+    }
+
+    @Test void comparisonReadsFrozenCriterionVersionsFromSourceDaysAndWeeklySelectionAfterCurrentPolicyChanges() {
+        long topic = topic(), origin = report(ReportStatus.GENERATED);
+        var draft = criterion(review(origin, List.of(topic), "순수 수학 소식은 제외", false, true));
+        var active = service.update(draft.id(), new Update(draft.version(), draft.instruction(), topic, "ACTIVE"));
+        var dailyVersion = store.active(topic).getFirst();
+        long first = report(ReportStatus.GENERATED), second = report(ReportStatus.GENERATED);
+        store.recordApplication(first, dailyVersion, 10, 2, now());
+        store.recordApplication(second, dailyVersion, 12, 3, now());
+        var weekly = week(List.of(first, second));
+        var changed = service.update(active.id(), new Update(active.version(), "사업 연결 없는 수학 연구만 제외", topic, "ACTIVE"));
+        var weeklyVersion = store.active(topic).getFirst();
+        store.recordApplication(weekly.getId(), weeklyVersion, 8, 1, now());
+        var expected = java.util.Set.of(
+                new com.example.be.domain.reports.comparison.ReportComparisonCriteria.AppliedCriterion(
+                        dailyVersion.id(), dailyVersion.version(), topic),
+                new com.example.be.domain.reports.comparison.ReportComparisonCriteria.AppliedCriterion(
+                        weeklyVersion.id(), weeklyVersion.version(), topic));
+        assertEquals(expected, comparisonCriteria.applied(weekly));
+        assertFalse(comparisonCriteria.hasMixedSourceCriteria(weekly));
+        service.update(changed.id(), new Update(changed.version(), changed.instruction(), topic, "REVOKED"));
+        assertTrue(store.active(topic).isEmpty());
+        assertEquals(expected, comparisonCriteria.applied(weekly), "current policy changes must not rewrite comparison provenance");
+        var empty = NewsReport.builder().id(report(ReportStatus.GENERATED)).build();
+        assertTrue(comparisonCriteria.applied(empty).isEmpty());
+        assertFalse(comparisonCriteria.hasMixedSourceCriteria(empty));
+    }
+
+    @Test void comparisonRejectsMixedDailyCriteriaEvenWhenBothWeeklyUnionsMatchAndKeepsEmptyDaysDistinct() {
+        long topic = topic(), origin = report(ReportStatus.GENERATED);
+        var draft = criterion(review(origin, List.of(topic), "순수 수학 소식은 제외", false, true));
+        var active = service.update(draft.id(), new Update(draft.version(), draft.instruction(), topic, "ACTIVE"));
+        var firstVersion = store.active(topic).getFirst();
+        service.update(active.id(), new Update(active.version(), "사업 연결 없는 수학 소식만 제외", topic, "ACTIVE"));
+        var secondVersion = store.active(topic).getFirst();
+        long first = report(ReportStatus.GENERATED), second = report(ReportStatus.GENERATED);
+        long third = report(ReportStatus.GENERATED), fourth = report(ReportStatus.GENERATED);
+        store.recordApplication(first, firstVersion, 5, 0, now());
+        store.recordApplication(second, secondVersion, 5, 0, now());
+        store.recordApplication(third, secondVersion, 5, 0, now());
+        store.recordApplication(fourth, firstVersion, 5, 0, now());
+        var prior = week(List.of(first, second));
+        var current = week(List.of(third, fourth));
+        assertEquals(comparisonCriteria.applied(prior), comparisonCriteria.applied(current));
+        assertTrue(comparisonCriteria.hasMixedSourceCriteria(prior));
+        assertTrue(comparisonCriteria.hasMixedSourceCriteria(current));
+        long noApplication = report(ReportStatus.GENERATED);
+        assertTrue(comparisonCriteria.hasMixedSourceCriteria(week(List.of(first, noApplication))),
+                "a source day without a recorded criterion must not disappear from the comparison");
+        assertFalse(comparisonCriteria.hasMixedSourceCriteria(week(List.of(noApplication, report(ReportStatus.GENERATED)))));
     }
 
     @Test void revokingAnUnactivatedDraftDoesNotInventAnActivationTime() {
@@ -176,5 +228,20 @@ class CompanyInterestOracleIntegrationTests {
             em.persist(report); em.flush(); reports.add(report.getId()); return report.getId();
         });
     }
+    private NewsReport week(List<Long> sourceIds) {
+        return new TransactionTemplate(manager).execute(tx -> {
+            var from = LocalDate.of(2197, 1, 1).with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.MONDAY))
+                    .plusWeeks(reports.size());
+            var sources = sourceIds.stream().map(id -> em.find(NewsReport.class, id))
+                    .map(com.example.be.domain.reports.entity.WeeklyReportInput.DailySource::from).toList();
+            var input = new com.example.be.domain.reports.entity.WeeklyReportInput(from, from.plusDays(6), sources, List.of());
+            var report = NewsReport.builder().reportScope(ReportScope.WEEKLY).reportDate(from).reportEndDate(from.plusDays(6))
+                    .sourceReportIds(sourceIds).sourceReportCount((long) sourceIds.size()).weeklyInput(input)
+                    .reportStatus(ReportStatus.GENERATED).title("회사 기준 비교 주간 보고서").markdownBody("본문")
+                    .modelName("fixture").generatedAt(now()).build();
+            em.persist(report); em.flush(); reports.add(report.getId()); return report;
+        });
+    }
+
     private static LocalDateTime now() { return LocalDateTime.now(ApiTimeZone.ZONE); }
 }
