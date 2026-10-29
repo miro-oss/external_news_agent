@@ -10,6 +10,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
 import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.keyword.ReportKeywordDTO;
@@ -57,6 +58,10 @@ public class NotificationRenderer {
     private ReportChangesQueryService changesService;
     @org.springframework.beans.factory.annotation.Autowired
     public void setChangesService(ReportChangesQueryService changesService) { this.changesService = changesService; }
+
+    List<CompanyAttachment> projectCompanies(NewsReport report, ReportEventFeedbackProjection.View view) {
+        return dartSummary.project(report, view);
+    }
 
     ReportChanges projectChanges(NewsReport report, ReportEventFeedbackProjection.View view, boolean personalPolicyActive) {
         return changesService == null ? null : changesService.projectForDelivery(report, view, personalPolicyActive);
@@ -140,13 +145,22 @@ public class NotificationRenderer {
                                        ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
                                        ReportCoverageDTO.View coverage, Audience unavailableAudience,
                                        ReportKeywordDTO.View keywords, ReportChanges changes) {
+        return render(report, channel, view, feedbackUrl, insight, companyPages, coverage, unavailableAudience,
+                keywords, changes, channel.getChannelType() == ChannelType.EMAIL ? projectCompanies(report, view) : List.of());
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
+                                       ReportCoverageDTO.View coverage, Audience unavailableAudience,
+                                       ReportKeywordDTO.View keywords, ReportChanges changes, List<CompanyAttachment> companies) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience, keywords, changes);
+            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience, keywords, changes, companies);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -188,7 +202,7 @@ public class NotificationRenderer {
     private RenderedNotification renderEmail(NewsReport report, ReportEventFeedbackProjection.View view,
                                              ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
                                              ReportCoverageDTO.View coverage, Audience unavailableAudience,
-                                             ReportKeywordDTO.View keywords, ReportChanges changes) {
+                                             ReportKeywordDTO.View keywords, ReportChanges changes, List<CompanyAttachment> companies) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
@@ -219,6 +233,7 @@ public class NotificationRenderer {
                     : coverage.forSources(card.sourceFindingIds());
             html.append("<p style=\"margin:-12px 0 16px;color:#636c78;font-size:12px;line-height:1.7\">")
                     .append(escape(NotificationCoverage.label(counts))).append("</p>");
+            NotificationCompanySection.email(html, card.sourceFindingIds(), companies, companyPages);
             boolean inBrief = briefing.items().stream().anyMatch(item ->
                     new java.util.HashSet<>(item.sourceFindingIds()).equals(new java.util.HashSet<>(card.sourceFindingIds()))
                             && item.summary().equals(card.summary()));
@@ -237,7 +252,7 @@ public class NotificationRenderer {
             html.append("</td></tr></tbody></table>");
         }
         if (cards.isEmpty()) appendSources(html, findings, true);
-        String dartBlock = dartSummary.render(report, reportUrl(report), view, companyPages);
+        String dartBlock = dartSummary.render(reportUrl(report), companyPages, companies);
         if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
         appendReportLink(html, report, true);
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));

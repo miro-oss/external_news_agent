@@ -42,12 +42,18 @@ def prepared(tmp_path, monkeypatch):
 
 
 class FakeSDK:
-    def __init__(self, source, monkeypatch, *, raw=None):
+    def __init__(self, source, monkeypatch, *, raw=None, overlap_first_calls=False):
         self.provider = V4Provider(source)
         self.calls, self.clients = [], []
         self.active, self.peak = 0, 0
         self.lock = threading.Lock()
         self.raw = raw
+        # Only concurrency tests rendezvous the first pair: a short sleep cannot
+        # guarantee overlap when recorder persistence or CI scheduling is slow.
+        # Budget tests may admit just one call, so they must not use this gate.
+        self.first_pair_barrier = (
+            threading.Barrier(2, timeout=10) if overlap_first_calls else None
+        )
         monkeypatch.setattr(operational.openai_provider, "OpenAI", self.client)
 
     def client(self, **kwargs):
@@ -61,7 +67,10 @@ class FakeSDK:
             self.active += 1
             self.peak = max(self.peak, self.active)
             self.calls.append(wire)
+            call_number = len(self.calls)
         try:
+            if self.first_pair_barrier is not None and call_number <= 2:
+                self.first_pair_barrier.wait()
             time.sleep(0.01)
             if self.raw:
                 return self.raw(wire)
@@ -121,7 +130,7 @@ def test_current_native_service_runs_all_stages_with_real_review_admission(prepa
     monkeypatch.setenv("OPENAI_MODEL", "wrong-model")
     monkeypatch.setenv("AGENT_MOCK", "true")
     monkeypatch.setenv("AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS", "1")
-    sdk = FakeSDK(source, monkeypatch)
+    sdk = FakeSDK(source, monkeypatch, overlap_first_calls=True)
     manifest = operational.prepare(cases, policy, output)
     state = operational.run(output, api_key="explicit-test-key")
 
@@ -223,7 +232,7 @@ def test_full_36_findings_use_six_maps_and_normal_reviews_per_audience(prepared,
     cases[0]["event_families"] = {
         finding.id: ["synthetic-production-halt"] for finding in source.findings
     }
-    sdk = FakeSDK(source, monkeypatch)
+    sdk = FakeSDK(source, monkeypatch, overlap_first_calls=True)
     operational.prepare(cases, policy, output)
     state = operational.run(output, api_key="test-key")
     assert state["summary"]["fourAudienceSuccessReports"] == 1, state["results"]

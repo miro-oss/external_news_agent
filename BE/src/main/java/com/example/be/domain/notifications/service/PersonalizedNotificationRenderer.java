@@ -82,9 +82,10 @@ public class PersonalizedNotificationRenderer {
         boolean personalPolicies = feedback.hasActivePersonalPolicies(recipientId);
         var keywords = renderer.projectKeywords(report, delivered, personalPolicies);
         var changes = renderer.projectChanges(report, delivered, personalPolicies);
-        ReportPdfRenderer.Result pdf = pdfRenderer.renderDetailed(report, delivered, insight, coverage, unavailableAudience, keywords, changes);
+        var companies = renderer.projectCompanies(report, delivered);
+        ReportPdfRenderer.Result pdf = pdfRenderer.renderDetailed(report, delivered, insight, coverage, unavailableAudience, keywords, changes, companies);
         RenderedNotification rendered = renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight,
-                pdf.companyPages(), coverage, unavailableAudience, keywords, changes);
+                pdf.companyPages(), coverage, unavailableAudience, keywords, changes, companies);
         return new RenderedNotification(rendered.subject(), rendered.parseMode(), rendered.chunks(),
                 List.of(new NotificationAttachment("news-report-" + report.getId() + ".pdf", "application/pdf", pdf.bytes())));
     }

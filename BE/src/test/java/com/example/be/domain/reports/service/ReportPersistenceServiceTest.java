@@ -51,6 +51,78 @@ class ReportPersistenceServiceTest {
                     notificationAutomation, observationRepository,
                     events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
 
+    @Test
+    void companyEvidenceIsCapturedAtSelectionAndOnlyShrinksAtCompletion() {
+        var capture = mock(com.example.be.domain.reports.dart.ReportIssueCompanyCapture.class);
+        service.setIssueCompanies(capture);
+        var report = NewsReport.builder().id(101L).reportStatus(ReportStatus.PENDING).build();
+        var now = LocalDateTime.of(2026, 10, 30, 9, 0);
+        var snapshot = companySnapshot(now);
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
+        when(capture.captureSelected(report, List.of(1L, 2L), null, null, now)).thenReturn(snapshot);
+        service.freezeCompanySelection(101L, List.of(1L, 2L), null, List.of(), now);
+        assertEquals(2, report.getReportIssueCompanySnapshot().links().size());
+        var document = new ReportDocument("보고서", "본문", "test", null, null, null, null, null, null,
+                ReportStatus.GENERATED, List.of(2L), List.of(1L));
+        service.complete(101L, document, now);
+        assertEquals(List.of(2L), report.getReportIssueCompanySnapshot().links().stream()
+                .map(com.example.be.domain.reports.dart.ReportIssueCompanySnapshot.Link::findingId).toList());
+        verify(capture).captureSelected(report, List.of(1L, 2L), null, null, now);
+        org.mockito.Mockito.verifyNoMoreInteractions(capture);
+    }
+
+    @Test
+    void recoveredDocumentInvalidatesCompanyEvidenceWithoutAnyLiveCapture() {
+        var capture = mock(com.example.be.domain.reports.dart.ReportIssueCompanyCapture.class);
+        service.setIssueCompanies(capture);
+        var now = LocalDateTime.of(2026, 10, 30, 9, 0);
+        var report = NewsReport.builder().id(101L).reportStatus(ReportStatus.PENDING)
+                .reportIssueCompanySnapshot(companySnapshot(now)).build();
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
+        service.completeRecovered(101L, new ReportDocument("복구", "본문", "fallback"), now);
+        assertNull(report.getReportIssueCompanySnapshot());
+        verifyNoInteractions(capture);
+    }
+
+    @Test
+    void retryOfAnAlreadyFrozenSelectionDoesNotReidentifyAfterCaptureFailure() {
+        var capture = mock(com.example.be.domain.reports.dart.ReportIssueCompanyCapture.class);
+        service.setIssueCompanies(capture);
+        var now = LocalDateTime.of(2026, 10, 30, 9, 0);
+        var report = NewsReport.builder().id(101L).reportStatus(ReportStatus.PENDING).build();
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
+        service.freezeCompanySelection(101L, List.of(1L), null, List.of(), now);
+        assertTrue(report.isCompanySelectionRecorded());
+        assertNull(report.getReportIssueCompanySnapshot());
+        when(capture.captureSelected(report, List.of(2L), null, null, now)).thenReturn(companySnapshot(now));
+        service.freezeCompanySelection(101L, List.of(2L), null, List.of(), now);
+        assertNull(report.getReportIssueCompanySnapshot());
+        verify(capture).captureSelected(report, List.of(1L), null, null, now);
+        org.mockito.Mockito.verifyNoMoreInteractions(capture);
+    }
+
+    @Test
+    void replacingCompletedRunDocumentInvalidatesPreviousCompanyEvidence() {
+        var now = LocalDateTime.of(2026, 10, 30, 9, 0);
+        var run = CollectionRun.builder().id(42L).build();
+        var report = NewsReport.builder().id(101L).run(run).reportStatus(ReportStatus.GENERATED)
+                .reportIssueCompanySnapshot(companySnapshot(now)).build();
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
+        service.replace(101L, new ReportDocument("복구", "본문", "fallback"), now);
+        assertNull(report.getReportIssueCompanySnapshot());
+    }
+
+    private com.example.be.domain.reports.dart.ReportIssueCompanySnapshot companySnapshot(LocalDateTime now) {
+        var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
+        return new com.example.be.domain.reports.dart.ReportIssueCompanySnapshot(
+                com.example.be.domain.reports.dart.ReportIssueCompanySnapshot.RULE_VERSION,
+                now.atOffset(java.time.ZoneOffset.ofHours(9)), List.of(
+                new com.example.be.domain.reports.dart.ReportIssueCompanySnapshot.Link(company, 1, 11, 7L,
+                        "삼성전자", "삼성전자는 발표했다.", "https://news.test/11", List.of()),
+                new com.example.be.domain.reports.dart.ReportIssueCompanySnapshot.Link(company, 2, 12, 8L,
+                        "삼성전자", "삼성전자는 발표했다.", "https://news.test/12", List.of())));
+    }
+
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void manualTopicWeeklyCompletionAndRecoveryPreserveCompanyWithoutAutomaticDelivery(boolean recovered) {

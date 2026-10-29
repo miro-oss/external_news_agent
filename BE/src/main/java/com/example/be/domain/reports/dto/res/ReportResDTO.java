@@ -138,7 +138,7 @@ public class ReportResDTO {
         private final ReportKeywordDTO.View keywordStats;
         @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
         private final List<ReportCollectionContext> collectionContexts;
-        @Schema(description = "공시·실적 자료 대상 회사 스냅샷. RUN은 실행 접수 당시 선택한 회사를 중복 제거하고, 주제별 WEEKLY는 보고서 생성 요청 당시 연결한 회사 최대 1개. 전체 DAILY/WEEKLY·회사 미선택·회사 스냅샷 없는 이전 보고서는 []. includeFindings와 관계없이 반환하며 현재 주제 설정을 조회하지 않음", requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "공시·실적 대상의 고정 회사. RUN/주제 WEEKLY 명시 선택 회사와 신규 RUN·DAILY·WEEKLY 기사에서 확인한 회사이며 현재 유효 근거·제외 기준을 적용함. includeFindings와 관계없이 반환하며 과거 자동 연결은 소급하지 않음", requiredMode = Schema.RequiredMode.REQUIRED)
         @Builder.Default
         private final List<Company> dartCompanies = List.of();
         @Schema(description = "RUN은 runId, DAILY/전체 WEEKLY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 주제별 WEEKLY는 저장된 분석 입력 기사의 관측만 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)

@@ -155,6 +155,49 @@ class ReportDartOracleIntegrationTests {
     }
 
     @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"DAILY", "WEEKLY"})
+    void frozenIssueCompaniesRecoverPartialJobsReuseCacheAndRefreshWithoutScopeGaps(ReportScope scope) {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL).startedAt(now).build());
+        runIds.add(run.getId());
+        var date = java.time.LocalDate.of(1600, 1, 1).plusDays(run.getId());
+        if (scope == ReportScope.WEEKLY) date = java.time.LocalDate.of(1600, 1, 1)
+                .with(java.time.DayOfWeek.MONDAY).plusWeeks(run.getId());
+        var second = new Company("99993202", "추가 공시 연결 검증 회사", "");
+        var snapshot = new ReportIssueCompanySnapshot("report-issue-companies.v1", now.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
+                List.of(new ReportIssueCompanySnapshot.Link(COMPANY, 51L, 61L, 71L, COMPANY.corpName(),
+                                COMPANY.corpName() + " 공시", "https://example.com/61", List.of()),
+                        new ReportIssueCompanySnapshot.Link(second, 52L, 62L, 72L, second.corpName(),
+                                second.corpName() + " 공시", "https://example.com/62", List.of())));
+        var builder = NewsReport.builder().reportScope(scope).reportDate(date)
+                .title("자동 기업 DART 통합검증").markdownBody("검증 보고서").modelName("test")
+                .reportStatus(ReportStatus.GENERATED).generatedAt(now).reportIssueCompanySnapshot(snapshot);
+        if (scope == ReportScope.WEEKLY) builder.reportEndDate(date.plusDays(6))
+                .weeklyInput(new WeeklyReportInput(date, date.plusDays(6), List.of(), List.of()));
+        var report = reports.saveAndFlush(builder.build());
+        reportIds.add(report.getId());
+
+        assertTrue(repository.missing().contains(report.getId()));
+        repository.enqueue(report.getId(), COMPANY, true, now);
+        assertTrue(repository.missing().contains(report.getId()), "recover the missing second company too");
+        persistence.enqueue(report.getId());
+        assertEquals(2, repository.find(report.getId()).size());
+        assertFalse(repository.missing().contains(report.getId()));
+        assertTrue(persistence.claim(new ReportDartRepository.Job(report.getId(), second, 0), "auto-company"));
+
+        assertTrue(repository.claimCache(COMPANY.corpCode(), "old-cache", now, now.plusMinutes(30)));
+        assertTrue(repository.saveCache(COMPANY.corpCode(), "old-cache", data(), now.minusDays(2)));
+        assertTrue(repository.reusableReports().contains(report.getId()));
+        persistence.enqueue(report.getId());
+        assertEquals("READY", service.getStored(reports.findById(report.getId()).orElseThrow()).companies().getFirst().status());
+        assertTrue(repository.staleCompanies(now.minusHours(24), now).stream()
+                .anyMatch(company -> company.corpCode().equals(COMPANY.corpCode())));
+        assertTrue(service.get(report.getId()).companies().isEmpty(), "missing current source evidence hides public metadata");
+        verifyNoInteractions(financials);
+    }
+
+    @ParameterizedTest
     @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
     void interruptedWorkIsBoundedAndLateOwnerCannotOverwriteRecoveredAttempt(ReportScope scope) {
         var report = create(scope, true, ReportStatus.GENERATED);

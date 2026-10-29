@@ -35,7 +35,8 @@ import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { refreshReportReading } from './reportRefresh'
 import { ReportInsightsPanel } from './ReportInsightsPanel'
-import { ReportDartPanel } from './ReportDartPanel'
+import { ReportDartPanel, ReportDartProvider } from './ReportDartPanel'
+import { ReportIssueCompanies } from './ReportIssueCompanies'
 import { reportInsightSnapshotKey } from '../../api/reportInsights'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
@@ -413,7 +414,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     }
   }
   return (
-    <article className="report-document report-document-enter" data-report-scope={report.reportScope}>
+    <ReportDartProvider report={report}><article className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
         {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
           {report.topicId != null ? '주제별' : '전체 통합'}
@@ -505,7 +506,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         <ReportSharePanel reportId={report.id} reportScope={report.reportScope} topicId={report.topicId} />
       </div>
       <ReportDisclaimer report={report} audience={audience} />
-    </article>
+    </article></ReportDartProvider>
   )
 }
 
@@ -691,6 +692,7 @@ function IssueCard({ finding, coverage, audience, historical, reportDate, report
       </div>
 
       <ReportCoverageSources coverage={coverage} terms={highlightTerms} />
+      <ReportIssueCompanies sourceFindingIds={[finding.id]} />
 
       {open && (
         <div className="issue-card-details" id={panelId}>

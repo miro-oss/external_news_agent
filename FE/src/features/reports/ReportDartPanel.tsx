@@ -1,11 +1,38 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DART_POLL_WINDOW, reportDartCompanies, reportDartOptions, retryReportDartOptions, type DartCompany, type DartFiling,
-  type DartFinancialData, type DartQuarter, type ReportDartCompany } from '../../api/dart'
+  type DartFinancialData, type DartQuarter, type ReportDartCompany, type DartFilingRow } from '../../api/dart'
 import type { ReportDetail } from '../../api/types'
 import { Segmented } from '../../components/Segmented'
+import { prefersReducedMotion } from '../../lib/motion'
 import { dartAmountUnit, dartChartAmount, dartChartSegments, dartQuarterLabel, formatDartAmount, formatDartMargin, safeDartFilingUrl } from './dartDisplay'
+import { ReportDartContext, reportDartPanelId, type ReportDartNavigation } from './reportDartNavigation'
 import './report-dart.css'
+
+export function ReportDartProvider({ report, children }: { report: ReportDetail; children: ReactNode }) {
+  return <ConnectedReportDartProvider key={report.id} report={report}>{children}</ConnectedReportDartProvider>
+}
+
+function ConnectedReportDartProvider({ report, children }: { report: ReportDetail; children: ReactNode }) {
+  const [selection, setSelection] = useState<ReportDartNavigation['selection']>(null)
+  // Shares the panel's cache without adding another polling loop.
+  const result = useQuery({ ...reportDartOptions(report.id, 0), enabled: reportDartCompanies(report).length > 0 })
+  const allowed = new Set(reportDartCompanies(report).map(company => company.corpCode))
+  const visible = report.findings && new Set(report.findings.map(finding => finding.id))
+  const entries = result.data?.reportId === report.id ? result.data.companies
+    .filter(entry => allowed.has(entry.company.corpCode)).map(entry => ({ ...entry,
+      issueLinks: entry.issueLinks?.filter(link => !visible || visible.has(link.findingId)),
+      filingRows: entry.filingRows?.map(row => {
+        const sourceFindingIds = row.sourceFindingIds.filter(id => !visible || visible.has(id))
+        return { ...row, sourceFindingIds, relevance: row.relevance === 'DIRECT_REFERENCE' && sourceFindingIds.length
+          ? 'DIRECT_REFERENCE' as const : 'COMPANY_REFERENCE' as const }
+      }),
+    })) : []
+  return <ReportDartContext value={{ reportId: report.id, entries, selection,
+    select: (corpCode, findingIds, origin) => setSelection({ corpCode, findingIds, origin: origin ?? null }) }}>
+    {children}
+  </ReportDartContext>
+}
 
 export function ReportDartPanel({ report }: { report: ReportDetail }) {
   const companies = reportDartCompanies(report)
@@ -15,6 +42,7 @@ export function ReportDartPanel({ report }: { report: ReportDetail }) {
 
 function ConnectedReportDartPanel({ reportId, companies }: { reportId: number; companies: DartCompany[] }) {
   const headingId = useId()
+  const navigation = useContext(ReportDartContext)
   const [selectedCode, setSelectedCode] = useState(companies[0].corpCode)
   const [pollUntil, setPollUntil] = useState(() => Date.now() + DART_POLL_WINDOW)
   const [pollExpired, setPollExpired] = useState(false)
@@ -24,9 +52,12 @@ function ConnectedReportDartPanel({ reportId, companies }: { reportId: number; c
   }, [pollUntil])
   const result = useQuery(reportDartOptions(reportId, pollExpired ? 0 : pollUntil))
   const retry = useMutation(retryReportDartOptions(useQueryClient(), reportId))
-  const entries = result.data?.reportId === reportId ? result.data.companies : undefined
-  const selected = entries?.find(entry => entry.company.corpCode === selectedCode) ?? entries?.[0]
+  const entries = result.data?.reportId === reportId ? navigation?.entries ?? result.data.companies : undefined
+  const activeCode = navigation?.selection?.corpCode ?? selectedCode
+  const selected = entries?.find(entry => entry.company.corpCode === activeCode) ?? entries?.[0]
   const choices = entries?.map(entry => entry.company) ?? companies
+  const selectedFindingIds = selected?.company.corpCode === navigation?.selection?.corpCode
+    ? navigation?.selection?.findingIds ?? null : null
   const busy = result.isFetching || retry.isPending
   function refresh() {
     retry.reset()
@@ -41,25 +72,37 @@ function ConnectedReportDartPanel({ reportId, companies }: { reportId: number; c
     } })
   }
   if (entries?.length === 0) return null
-  return <section className="report-dart-panel" aria-labelledby={headingId} aria-busy={busy}>
+  return <section className="report-dart-panel" id={reportDartPanelId(reportId)} tabIndex={-1} aria-labelledby={headingId} aria-busy={busy}>
     <div className="report-dart-heading"><div>
       <h3 id={headingId}>회사 실적 · 공시</h3>
       <p>보고서에 연결된 회사의 최근 12분기 실적과 공시입니다.</p>
     </div></div>
     {choices.length > 1 && <Segmented label="공시 회사 선택" className="report-dart-tabs"
       options={choices.map(company => ({ value: company.corpCode, label: company.corpName }))}
-      value={selected?.company.corpCode ?? selectedCode} onSelect={setSelectedCode} />}
+      value={selected?.company.corpCode ?? selectedCode} onSelect={code => { setSelectedCode(code); navigation?.select(code, null) }} />}
+    {selectedFindingIds && <div className="report-dart-issue-scope"><span>선택한 이슈의 기사 인용 기준으로 공시를 표시합니다.</span>
+      <button type="button" className="text-button" onClick={() => {
+        const origin = navigation?.selection?.origin
+        if (origin?.isConnected) {
+          origin.focus({ preventScroll: true })
+          origin.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' })
+        }
+      }}>이슈로 돌아가기 ↓</button>
+      <button type="button" className="text-button" onClick={() => navigation?.select(activeCode, null)}>보고서 전체 기준 보기</button>
+    </div>}
     {result.isPending && <p className="report-dart-state" role="status">공시 자료를 확인하고 있습니다.</p>}
     {result.isError && <div className="report-dart-state" role="alert"><p>{result.error.message}</p>
       <button type="button" className="text-button" disabled={busy} onClick={refresh}>다시 불러오기</button>
     </div>}
     {retry.isError && <p className="error" role="alert">{retry.error.message}</p>}
-    {selected && <ReportDartCompanyContent entry={selected} busy={busy} pollExpired={pollExpired} onRefresh={refresh} onRetry={retryFailed} />}
+    {selected && <ReportDartCompanyContent entry={selected} sourceFindingIds={selectedFindingIds}
+      busy={busy} pollExpired={pollExpired} onRefresh={refresh} onRetry={retryFailed} />}
   </section>
 }
 
-export function ReportDartCompanyContent({ entry, busy = false, pollExpired = false, onRefresh, onRetry }: {
+export function ReportDartCompanyContent({ entry, sourceFindingIds = null, busy = false, pollExpired = false, onRefresh, onRetry }: {
   entry: ReportDartCompany
+  sourceFindingIds?: number[] | null
   busy?: boolean
   pollExpired?: boolean
   onRefresh: () => void
@@ -79,11 +122,14 @@ export function ReportDartCompanyContent({ entry, busy = false, pollExpired = fa
         {busy ? '확인 중…' : entry.status === 'DISABLED' ? '설정 후 다시 확인' : '공시 자료 다시 준비'}
       </button>}
     </div>}
-    {ready && entry.data && <DartFinancialContent data={entry.data} companyName={entry.company.corpName} />}
+    {ready && entry.data && <DartFinancialContent data={entry.data} companyName={entry.company.corpName}
+      filingRows={entry.filingRows} sourceFindingIds={sourceFindingIds} />}
   </div>
 }
 
-function DartFinancialContent({ data, companyName }: { data: DartFinancialData; companyName: string }) {
+function DartFinancialContent({ data, companyName, filingRows, sourceFindingIds }: {
+  data: DartFinancialData; companyName: string; filingRows?: DartFilingRow[]; sourceFindingIds: number[] | null
+}) {
   const latest = data.quarters.at(-1)
   const unit = dartAmountUnit(data.currency)
   const fetched = new Date(data.fetchedAt)
@@ -119,14 +165,40 @@ function DartFinancialContent({ data, companyName }: { data: DartFinancialData; 
       {data.quarters.some(quarter => quarter.derived) && <p className="report-dart-note">4분기 산출값은 같은 회계 기준의 연간 금액에서 3분기 누적 금액을 뺀 값입니다.</p>}
     </> : <p className="report-dart-note">표시할 분기 실적 자료가 없습니다.</p>}
     {data.notes.length > 0 && <ul className="report-dart-notes">{data.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>}
-    <details className="report-dart-disclosures">
+    {filingRows ? <DartFilingTable rows={filingRows} companyName={companyName} sourceFindingIds={sourceFindingIds} /> : <details className="report-dart-disclosures">
       <summary>최근 공시 보기</summary>
       {data.disclosures.length > 0 ? <ul>{data.disclosures.map(filing => <li key={filing.rceptNo}>
         <DartFilingLink filing={filing} /><time dateTime={filing.filedAt}>{filing.filedAt}</time>
       </li>)}</ul> : <p className="report-dart-note">확인된 공시가 없습니다.</p>}
-    </details>
+    </details>}
     <p className="report-dart-note">공시와 실적은 회사 전체 기준이며 뉴스 키워드로 필터하지 않습니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.</p>
   </>
+}
+
+export function DartFilingTable({ rows, companyName, sourceFindingIds = null }: {
+  rows: DartFilingRow[]; companyName: string; sourceFindingIds?: number[] | null
+}) {
+  const direct = (row: DartFilingRow) => row.relevance === 'DIRECT_REFERENCE' && row.sourceFindingIds.length > 0
+    && (sourceFindingIds === null || row.sourceFindingIds.some(id => sourceFindingIds.includes(id)))
+  return <section className="report-dart-filing-section" aria-label={`${companyName} 공시 상세`}>
+    <h5>공시 상세</h5>
+    <p className="report-dart-note">확인 범위: 저장한 최근 공시 최대 5건과 분기 실적의 근거 공시입니다. 기간 전체 공시 목록이 아닙니다.</p>
+    {!rows.some(direct) && <p className="report-dart-reference-note">확보한 공시에서 직접 인용 확인 안 됨</p>}
+    {rows.length ? <div className="report-dart-table-scroll" tabIndex={0} role="region" aria-label="공시 상세 표 가로 스크롤">
+      <table className="report-dart-table report-dart-filing-table"><caption>{companyName} · {sourceFindingIds ? '선택한 이슈' : '이 보고서'}의 기사 인용 기준</caption>
+        <thead><tr><th scope="col">접수일</th><th scope="col">공시명 · 원문</th><th scope="col">자료 구분</th><th scope="col">기사와의 연결</th></tr></thead>
+        <tbody>{rows.map(row => <tr key={row.filing.rceptNo}>
+          <td><time dateTime={row.filing.filedAt}>{row.filing.filedAt}</time></td>
+          <td><DartFilingLink filing={row.filing} /><small>접수번호 {row.filing.rceptNo}</small></td>
+          <td><span className="report-dart-mobile-label">자료 구분</span>{row.roles.includes('RECENT') && <span>최근 공시</span>}{row.roles.includes('FINANCIAL_SOURCE') && <span>실적 근거</span>}</td>
+          <td><span className="report-dart-mobile-label">기사와의 연결</span><span className={direct(row) ? 'report-dart-direct-reference' : undefined}>
+            {direct(row) ? '기사에서 직접 인용한 공시' : '회사 참고 공시'}</span>
+            {!direct(row) && <small>이슈 관련성 미확인</small>}</td>
+        </tr>)}</tbody>
+      </table>
+    </div> : <p className="report-dart-note">저장된 공시 자료가 없습니다.</p>}
+    <p className="report-dart-note">직접 인용은 기사에 적힌 접수번호와 공시가 같다는 뜻입니다. 기사 내용 전체나 계약 실행·매출 반영을 검증한 것은 아닙니다.</p>
+  </section>
 }
 
 function DartFilingLink({ filing }: { filing: DartFiling }) {

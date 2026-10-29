@@ -43,7 +43,7 @@ public class ReportCreationService {
         var selected = findings.stream().filter(finding -> !suppressed.contains(finding.getId())).toList();
         persistenceService.freezeCompanySelection(reservation.reportId(), selected.stream().map(Finding::getId).toList(),
                 suppressed.stream().sorted().toList(), null, selection.applications(), java.util.Set.of(),
-                selection.comparisonScopeKnown(), generatedAt);
+                selection.comparisonScopeKnown(), generatedAt, selected);
         ReportDocument document = reportOrchestrator.generate(run, selected, generatedAt);
         return persistenceService.complete(reservation.reportId(), document, LocalDateTime.now(ApiTimeZone.ZONE));
     }

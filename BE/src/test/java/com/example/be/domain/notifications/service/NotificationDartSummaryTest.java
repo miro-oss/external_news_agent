@@ -31,7 +31,10 @@ class NotificationDartSummaryTest {
     private static final String REPORT_URL = "https://news.example/#/reports?reportId=17";
     private final ReportDartService service = mock(ReportDartService.class);
     private final NotificationDartSummary summary = new NotificationDartSummary(service);
-    private final NewsReport report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN).build();
+    private final NewsReport report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN)
+            .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L,
+                    List.of(new com.example.be.domain.collection.entity.CollectionTopicSnapshot(29L, "선택 회사", null,
+                            List.of(), List.of(), List.of(), 10, 60, new Company("00126380", "선택 회사", "005930")))))).build();
 
     @Test
     void rendersLatestQuarterAndOneFilingWithActualKoreanFetchDate() {

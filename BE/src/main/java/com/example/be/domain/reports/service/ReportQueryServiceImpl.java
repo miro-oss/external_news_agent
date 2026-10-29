@@ -22,7 +22,7 @@ import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.keyword.ReportKeywordService;
-import com.example.be.domain.reports.dart.ReportDartEligibility;
+import com.example.be.domain.reports.dart.ReportIssueCompanyProjection;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -195,7 +195,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Long runId = report.getRunId();
         boolean aggregate = report.getReportScope() != ReportScope.RUN;
         var reviews = feedbackProjection.reviews(report.getId());
-        boolean loadFindings = report.getStructuredContent() != null || report.getReportCoverageSnapshot() != null || report.getReportKeywordSnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
+        boolean loadFindings = report.getStructuredContent() != null || report.getReportCoverageSnapshot() != null || report.getReportKeywordSnapshot() != null || report.getReportIssueCompanySnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
                 || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
                 || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
         ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
@@ -241,7 +241,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .briefing(ReportBriefing.from(view))
                 .keywordStats(keywordService.project(report, view))
                 .collectionContexts(report.getCollectionContexts())
-                .dartCompanies(ReportDartEligibility.companies(report))
+                .dartCompanies(ReportIssueCompanyProjection.companies(report, view))
                 .articleStats(articleStats(report))
                 .coverage(includeFindings ? coverageService.project(report, view)
                         : coverageService.project(report, view).withoutFindings())

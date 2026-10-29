@@ -94,3 +94,23 @@ test('failed main report refresh keeps its error and does not silently replace t
   assert.equal(comparisonReads, 0)
   assert.deepEqual(client.getQueryData(key), ready)
 })
+
+test('report refresh replaces DART identity and direct filing references without touching another report', async t => {
+  const client = new QueryClient()
+  t.after(() => client.clear())
+  const dartKey = ['report-dart', 17], otherKey = ['report-dart', 18]
+  const previous = { reportId: 17, companies: [{ issueLinks: [{ findingId: 1 }] }] }
+  client.setQueryData(dartKey, previous)
+  client.setQueryData(otherKey, { reportId: 18, companies: ['unchanged'] })
+  const delayed = Promise.withResolvers()
+  const oldRead = client.fetchQuery({ queryKey: dartKey, queryFn: () => delayed.promise }).catch(() => null)
+  const observer = new QueryObserver(client, { queryKey: dartKey, retry: false, staleTime: Infinity,
+    queryFn: async () => ({ reportId: 17, companies: [] }) })
+  t.after(observer.subscribe(() => {}))
+  await refreshReportReading(client, { id: 17, reportScope: 'DAILY' }, async () => ({ id: 17 }))
+  delayed.resolve(previous)
+  await oldRead
+  assert.deepEqual(observer.getCurrentResult().data, { reportId: 17, companies: [] })
+  assert.deepEqual(client.getQueryData(otherKey), { reportId: 18, companies: ['unchanged'] })
+  assert.equal(client.getQueryState(otherKey).isInvalidated, false)
+})

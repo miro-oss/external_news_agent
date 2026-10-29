@@ -287,8 +287,13 @@ final class ReportPdfLayout implements AutoCloseable {
     }
 
     void table(List<String> headers, List<List<String>> rows, float[] weights) throws IOException {
+        linkedTable(headers, rows, weights, java.util.Collections.nCopies(rows.size(), ""));
+    }
+
+    /** The final cell links to the row's original source, including repeated pieces of a long row. */
+    void linkedTable(List<String> headers, List<List<String>> rows, float[] weights, List<String> urls) throws IOException {
         if (headers.isEmpty()) return;
-        if (weights.length != headers.size() || rows.stream().anyMatch(row -> row.size() != headers.size()))
+        if (urls.size() != rows.size() || weights.length != headers.size() || rows.stream().anyMatch(row -> row.size() != headers.size()))
             throw new IllegalArgumentException("PDF 표의 열 수가 일치하지 않습니다.");
         float sum = 0;
         for (float weight : weights) {
@@ -302,7 +307,8 @@ final class ReportPdfLayout implements AutoCloseable {
         float headerHeight = headerCount * 12 + 12;
         ensure(headerHeight + 28);
         tablePart(headerLines, widths, 0, headerCount, true);
-        for (List<String> row : rows) {
+        for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+            List<String> row = rows.get(rowIndex);
             var lines = cells(row, regular, widths);
             int count = maxLines(lines);
             int offset = 0;
@@ -319,7 +325,20 @@ final class ReportPdfLayout implements AutoCloseable {
                     capacity = (int) ((y - BOTTOM - 12) / 12);
                 }
                 int length = Math.min(count - offset, capacity);
-                tablePart(lines, widths, offset, length, false);
+                float top = y;
+                tablePart(lines, widths, offset, length, false, safeUrl(urls.get(rowIndex)));
+                if (safeUrl(urls.get(rowIndex))) {
+                    float lastWidth = widths[widths.length - 1];
+                    PDAnnotationLink annotation = new PDAnnotationLink();
+                    annotation.setRectangle(new PDRectangle(MARGIN + WIDTH - lastWidth, y, lastWidth, top - y));
+                    PDBorderStyleDictionary border = new PDBorderStyleDictionary();
+                    border.setWidth(0);
+                    annotation.setBorderStyle(border);
+                    PDActionURI action = new PDActionURI();
+                    action.setURI(urls.get(rowIndex));
+                    annotation.setAction(action);
+                    page.getAnnotations().add(annotation);
+                }
                 offset += length;
             }
         }
@@ -335,6 +354,10 @@ final class ReportPdfLayout implements AutoCloseable {
     private int maxLines(List<List<String>> cells) { return cells.stream().mapToInt(List::size).max().orElse(1); }
 
     private void tablePart(List<List<String>> cells, float[] widths, int offset, int count, boolean header) throws IOException {
+        tablePart(cells, widths, offset, count, header, false);
+    }
+
+    private void tablePart(List<List<String>> cells, float[] widths, int offset, int count, boolean header, boolean linked) throws IOException {
         float height = count * 12 + 12;
         if (header) {
             stream.setNonStrokingColor(new Color(232, 243, 255));
@@ -345,7 +368,8 @@ final class ReportPdfLayout implements AutoCloseable {
         for (int column = 0; column < cells.size(); column++) {
             List<String> lines = cells.get(column);
             for (int i = 0; i < count && offset + i < lines.size(); i++)
-                draw(lines.get(offset + i), x + 6, y - 14 - i * 12, header ? bold : regular, 8, header ? BLUE : INK);
+                draw(lines.get(offset + i), x + 6, y - 14 - i * 12, header ? bold : regular, 8,
+                        header || linked && column == cells.size() - 1 ? BLUE : INK);
             x += widths[column];
         }
         y -= height;

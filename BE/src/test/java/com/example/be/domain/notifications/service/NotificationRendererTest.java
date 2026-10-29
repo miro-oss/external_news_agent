@@ -60,7 +60,7 @@ class NotificationRendererTest {
         NewsReport report = report("");
         org.springframework.test.util.ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example/");
         String reportUrl = "https://news.example/#/reports?reportId=17";
-        when(dartSummary.render(eq(report), eq(reportUrl), any(), any())).thenReturn("<p>회사 실적 · 공시 · 매출 100억원</p>");
+        when(dartSummary.render(eq(reportUrl), any(), any())).thenReturn("<p>회사 실적 · 공시 · 매출 100억원</p>");
         for (String body : List.of(
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst(),
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),

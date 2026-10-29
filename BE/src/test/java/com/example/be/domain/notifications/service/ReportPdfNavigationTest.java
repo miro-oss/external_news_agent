@@ -24,7 +24,13 @@ import static org.mockito.Mockito.*;
 class ReportPdfNavigationTest {
     @Test
     void offlineCompanyIndexHasResolvedPageNumbersAndRoundTripsToSummary() throws Exception {
-        var report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN).title("가상 뉴스 브리핑").build();
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN)
+                .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L,
+                        List.of(new com.example.be.domain.collection.entity.CollectionTopicSnapshot(29L, "첫 회사", null,
+                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000001", "첫 회사", null)),
+                                new com.example.be.domain.collection.entity.CollectionTopicSnapshot(30L, "둘째 회사", null,
+                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000002", "둘째 회사", null))))))
+                .title("가상 뉴스 브리핑").build();
         var dart = mock(ReportDartService.class);
         when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(
                 company("00000001", "가상 기업 하나"), company("00000002", "긴 회사명 ".repeat(30)))));

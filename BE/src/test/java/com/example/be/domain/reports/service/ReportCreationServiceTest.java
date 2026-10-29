@@ -48,6 +48,50 @@ class ReportCreationServiceTest {
             runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, interests);
 
     @Test
+    void reanalysisDuringCompanySelectionCannotReplaceTheOriginalGenerationCompanyEvidence() {
+        var run = CollectionRun.builder().id(42L).build();
+        var report = NewsReport.builder().id(17L).run(run).reportStatus(ReportStatus.PENDING).build();
+        var original = Finding.builder().id(1L).article(Article.builder().id(11L).title("기사 A")
+                        .canonicalUrl("https://news.test/a").body("삼성전자는 투자 계획 A를 발표했다.").fetchStatus(FetchStatus.FULLTEXT).build())
+                .entities(new com.example.be.domain.analysis.entity.FindingEntities(List.of("삼성전자"), List.of(), List.of())).build();
+        var replacement = Finding.builder().id(1L).article(Article.builder().id(11L).title("기사 B")
+                        .canonicalUrl("https://news.test/a").body("SK하이닉스는 계획 B를 발표했다.").fetchStatus(FetchStatus.FULLTEXT).build())
+                .entities(new com.example.be.domain.analysis.entity.FindingEntities(List.of("SK하이닉스"), List.of(), List.of())).build();
+        var catalog = mock(com.example.be.domain.dart.company.DartCompanyRepository.class);
+        var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
+        when(catalog.findExactCandidates(any())).thenReturn(List.of(company,
+                new com.example.be.domain.dart.model.DartModels.Company("00164779", "SK하이닉스", "000660")));
+        var observations = mock(CollectionRunArticleRepository.class);
+        var persistence = new ReportPersistenceService(runRepository, reportRepository,
+                mock(ReportNotificationAutomationService.class), observations, mock(ApplicationEventPublisher.class), interests,
+                mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class),
+                mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
+        persistence.setIssueCompanies(new com.example.be.domain.reports.dart.ReportIssueCompanyCapture(catalog));
+        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
+        when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
+        when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
+        when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
+        when(reportRepository.save(any())).thenReturn(report);
+        when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(original));
+        when(reportOrchestrator.companySelectionCandidates(List.of(original))).thenReturn(List.of(original));
+        when(interests.select(List.of(original), null)).thenAnswer(ignored -> {
+            // A concurrent analysis B is now available in the database while the generator retains input A.
+            when(findingRepository.findForReportByIdIn(any())).thenReturn(List.of(replacement));
+            return new CompanyInterestSelection.Result(List.of(original), List.of());
+        });
+        when(reportOrchestrator.generate(eq(run), eq(List.of(original)), any())).thenReturn(
+                new ReportDocument("보고서 A", "삼성전자 계획 A", "test", null, null, null, null, null, null,
+                        ReportStatus.GENERATED, List.of(1L), List.of()));
+        assertEquals(17L, creation.generate(42L));
+        assertEquals(List.of(company), report.getReportIssueCompanySnapshot().companies());
+        org.junit.jupiter.api.Assertions.assertTrue(report.getReportIssueCompanySnapshot().links().getFirst().evidenceText().contains("계획 A"));
+        verify(findingRepository, never()).findForReportByIdIn(any());
+        verify(reportOrchestrator).generate(eq(run), eq(List.of(original)), any());
+    }
+
+    @Test
     void freezesActualSuppressionSeparatelyAndRecoversAllOtherFindingsAfterCoverageNarrows() {
         var run = CollectionRun.builder().id(42L).build();
         var report = NewsReport.builder().id(17L).run(run).reportStatus(ReportStatus.PENDING).build();
