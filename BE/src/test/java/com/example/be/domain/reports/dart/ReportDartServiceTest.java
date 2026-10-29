@@ -22,7 +22,10 @@ class ReportDartServiceTest {
     final ReportDartRepository repository = mock(ReportDartRepository.class);
     final ReportDartPersistence persistence = mock(ReportDartPersistence.class);
     final DartProperties properties = new DartProperties();
-    final ReportDartService service = new ReportDartService(reports, repository, persistence, properties);
+    final com.example.be.domain.analysis.repository.FindingRepository findings = mock(com.example.be.domain.analysis.repository.FindingRepository.class);
+    final com.example.be.domain.analysis.relevance.TopicRelevancePolicy relevance = mock(com.example.be.domain.analysis.relevance.TopicRelevancePolicy.class);
+    final com.example.be.domain.reports.service.ReportEventFeedbackProjection feedback = mock(com.example.be.domain.reports.service.ReportEventFeedbackProjection.class);
+    final ReportDartService service = new ReportDartService(reports, repository, persistence, properties, findings, relevance, feedback);
 
     @Test void readsOnlyFrozenCompaniesInSnapshotOrderAndDeduplicatesCodes() {
         properties.setApiKey("unit-test-key");
@@ -109,5 +112,26 @@ class ReportDartServiceTest {
         verifyNoInteractions(reports, persistence);
         verify(repository).find(17L);
         verifyNoMoreInteractions(repository);
+    }
+
+    @Test void aggregatePublicReadRemovesHiddenCompanyAndRetryKeepsTheSameFrozenRawSnapshot() {
+        var link = new ReportIssueCompanySnapshot.Link(SAMSUNG, 51L, 61L, 71L, "삼성전자",
+                "삼성전자 공시", "https://example.com/article", List.of("20261029000001"));
+        var snapshot = new ReportIssueCompanySnapshot("report-issue-companies.v1", java.time.OffsetDateTime.now(), List.of(link));
+        var report = com.example.be.domain.reports.entity.NewsReport.builder().id(17L).reportScope(ReportScope.DAILY)
+                .reportStatus(ReportStatus.GENERATED).reportIssueCompanySnapshot(snapshot).build();
+        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(repository.find(17L)).thenReturn(List.of(new ReportDartRepository.Attachment(17L, SAMSUNG,
+                "READY", ReportDartMessages.READY, data())));
+        var hidden = new com.example.be.domain.reports.service.ReportEventFeedbackProjection.View(List.of(),
+                new com.example.be.domain.reports.service.ReportReadingContent("", null), true, java.util.Set.of(51L), true);
+        when(feedback.project(eq(report), any(), any())).thenReturn(hidden);
+
+        assertTrue(service.get(17L).companies().isEmpty());
+        assertTrue(service.retry(17L).companies().isEmpty());
+        assertEquals(1, service.getStored(report).companies().getFirst().issueLinks().size());
+        assertSame(snapshot, report.getReportIssueCompanySnapshot());
+        verify(persistence).retry(17L);
+        verify(repository, never()).enqueue(anyLong(), any(), anyBoolean(), any());
     }
 }

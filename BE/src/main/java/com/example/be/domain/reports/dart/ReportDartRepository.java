@@ -50,11 +50,16 @@ public class ReportDartRepository {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
                 WHERE report.report_status <> 'PENDING' AND report.deleted_at IS NULL
-                  AND ((report.report_scope = 'RUN'
+                  AND ((((report.report_scope = 'RUN'
                         AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode'))
                        OR (report.report_scope = 'WEEKLY' AND report.topic_id IS NOT NULL
                            AND report.topic_dart_corp_code IS NOT NULL))
-                  AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment WHERE attachment.report_id = report.id)
+                    AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment WHERE attachment.report_id = report.id))
+                    OR (JSON_VALUE(report.report_issue_company_snapshot, '$.version') = 'report-issue-companies.v1'
+                        AND EXISTS (SELECT 1 FROM JSON_TABLE(report.report_issue_company_snapshot,
+                            '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
+                            WHERE NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                                WHERE attachment.report_id = report.id AND attachment.corp_code = linked.corp_code))))
                 ORDER BY report.generated_at, report.id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1));
     }
@@ -69,7 +74,11 @@ public class ReportDartRepository {
                   AND attachment.status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
                   AND cache.payload_json IS NOT NULL
                   AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
-                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code))
+                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code)
+                       OR (JSON_VALUE(report.report_issue_company_snapshot, '$.version') = 'report-issue-companies.v1'
+                           AND EXISTS (SELECT 1 FROM JSON_TABLE(report.report_issue_company_snapshot,
+                               '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
+                               WHERE linked.corp_code = attachment.corp_code)))
                   AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                 ORDER BY attachment.report_id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1));
@@ -106,7 +115,11 @@ public class ReportDartRepository {
                   AND (cache.lease_token IS NULL OR cache.lease_expires_at <= ?)
                   AND attachment.created_at > cache.cached_at
                   AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
-                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code))
+                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code)
+                       OR (JSON_VALUE(report.report_issue_company_snapshot, '$.version') = 'report-issue-companies.v1'
+                           AND EXISTS (SELECT 1 FROM JSON_TABLE(report.report_issue_company_snapshot,
+                               '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
+                               WHERE linked.corp_code = attachment.corp_code)))
                   AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                 GROUP BY attachment.corp_code, cache.cached_at
                 ORDER BY cache.cached_at, attachment.corp_code FETCH FIRST 5 ROWS ONLY

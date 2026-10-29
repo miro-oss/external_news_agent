@@ -45,6 +45,26 @@ export interface ReportDartCompany {
   status: 'PENDING' | 'READY' | 'PARTIAL' | 'FAILED' | 'DISABLED'
   message: string
   data: DartFinancialData | null
+  /** Absent on reports served by versions before M5. */
+  issueLinks?: DartIssueLink[]
+  filingRows?: DartFilingRow[]
+}
+
+export interface DartIssueLink {
+  findingId: number
+  articleId: number
+  issueId: number | null
+  matchedName: string
+  evidenceText: string
+  evidenceUrl: string | null
+  rceptNos: string[]
+}
+
+export interface DartFilingRow {
+  filing: DartFiling
+  roles: Array<'RECENT' | 'FINANCIAL_SOURCE'>
+  relevance: 'DIRECT_REFERENCE' | 'COMPANY_REFERENCE'
+  sourceFindingIds: number[]
 }
 
 export interface ReportDart {
@@ -66,8 +86,6 @@ export function dartCompanySearchOptions(query: string, page = 0) {
 
 /** Use the report's frozen company selection, with a legacy fallback only for RUN snapshots. */
 export function reportDartCompanies(report: Pick<ReportDetail, 'reportScope' | 'topicId' | 'dartCompanies' | 'collectionContexts'>): DartCompany[] {
-  const supported = report.reportScope === 'RUN' || (report.reportScope === 'WEEKLY' && report.topicId != null)
-  if (!supported) return []
   if (report.dartCompanies !== undefined) return report.dartCompanies
   if (report.reportScope !== 'RUN') return []
   const companies = new Map<string, DartCompany>()

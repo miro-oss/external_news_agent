@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.reports.comparison.ReportComparisonSnapshot;
+import com.example.be.domain.reports.dart.ReportIssueCompanySnapshot;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,15 +23,21 @@ public record WeeklyReportInput(
     }
 
     public record DailySource(Long reportId, LocalDate reportDate, String title, String markdownBody,
-                              ReportContent structuredContent, List<Long> reflectedFindingIds, ReportComparisonSnapshot evidenceSnapshot) {
+                              ReportContent structuredContent, List<Long> reflectedFindingIds, ReportComparisonSnapshot evidenceSnapshot,
+                              ReportIssueCompanySnapshot companySnapshot) {
         public DailySource { reflectedFindingIds = List.copyOf(reflectedFindingIds); }
         public DailySource(Long reportId, LocalDate reportDate, String title, String markdownBody,
                            ReportContent structuredContent, List<Long> reflectedFindingIds) {
-            this(reportId, reportDate, title, markdownBody, structuredContent, reflectedFindingIds, null);
+            this(reportId, reportDate, title, markdownBody, structuredContent, reflectedFindingIds, null, null);
+        }
+        public DailySource(Long reportId, LocalDate reportDate, String title, String markdownBody,
+                           ReportContent structuredContent, List<Long> reflectedFindingIds, ReportComparisonSnapshot evidenceSnapshot) {
+            this(reportId, reportDate, title, markdownBody, structuredContent, reflectedFindingIds, evidenceSnapshot, null);
         }
         public static DailySource from(NewsReport report) {
             return new DailySource(report.getId(), report.getReportDate(), report.getTitle(),
-                    report.getMarkdownBody(), report.getStructuredContent(), report.getReflectedFindingIds());
+                    report.getMarkdownBody(), report.getStructuredContent(), report.getReflectedFindingIds(), null,
+                    report.getReportIssueCompanySnapshot());
         }
     }
 

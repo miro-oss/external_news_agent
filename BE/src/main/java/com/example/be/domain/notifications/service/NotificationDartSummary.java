@@ -19,6 +19,7 @@ import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -33,9 +34,15 @@ public class NotificationDartSummary {
 
     public String render(NewsReport report, String reportUrl, ReportEventFeedbackProjection.View view,
                          Map<String, Integer> companyPages) {
+        return render(reportUrl, companyPages, project(report, view));
+    }
+
+    List<CompanyAttachment> project(NewsReport report, ReportEventFeedbackProjection.View view) {
         var stored = reportDartService.getStored(report);
-        if (stored == null) return "";
-        var companies = NotificationCompanyVisibility.visible(report, view, stored.companies());
+        return stored == null ? List.of() : NotificationCompanyVisibility.visible(report, view, stored.companies());
+    }
+
+    String render(String reportUrl, Map<String, Integer> companyPages, List<CompanyAttachment> companies) {
         if (companies.isEmpty()) return "";
         var html = new StringBuilder("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
                 + "style=\"border-collapse:collapse;text-align:left;margin:20px 0\"><tbody><tr><td "
@@ -76,10 +83,14 @@ public class NotificationDartSummary {
         }
         FinancialData data = entry.data();
         html.append(escape(metrics(data))).append("</p>");
+        long direct = entry.filingRows().stream().filter(row -> "DIRECT_REFERENCE".equals(row.relevance())).count();
+        if (!entry.issueLinks().isEmpty()) html.append("<p style=\"margin:2px 0;color:#636c78;font-size:12px;line-height:1.6\">")
+                .append(direct > 0 ? "기사에서 직접 인용한 공시 " + direct + "건" : "확보한 공시에서 직접 인용 확인 안 됨")
+                .append(" · 상세 표는 첨부 PDF</p>");
         if (!data.disclosures().isEmpty()) {
             Filing filing = data.disclosures().getFirst();
             html.append("<p style=\"margin:2px 0 0;color:#4e5968;font-size:12px;line-height:1.6\">최근 공시 · ");
-            if (filing.corrected()) html.append("[정정] ");
+            if (filing.corrected() && (filing.reportName() == null || !filing.reportName().contains("정정"))) html.append("[정정] ");
             String title = escape(limit(filing.reportName(), 70));
             if (DartFilingLinks.isSafe(filing)) html.append("<a href=\"").append(escape(filing.url())).append('"')
                     .append(LINK_STYLE).append('>').append(title).append("</a>");

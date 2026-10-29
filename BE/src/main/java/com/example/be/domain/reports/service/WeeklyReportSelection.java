@@ -43,7 +43,8 @@ public final class WeeklyReportSelection {
             evidence = new ReportComparisonSnapshot(evidence.version(),
                     evidence.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(), evidence.scopes(), evidence.period(), evidence.sourceConditions());
         }
-        return new WeeklyReportInput.DailySource(source.reportId(), source.reportDate(), source.title(), "", content, allowed, evidence);
+        return new WeeklyReportInput.DailySource(source.reportId(), source.reportDate(), source.title(), "", content, allowed, evidence,
+                source.companySnapshot() == null ? null : source.companySnapshot().reflected(allowed));
     }
 
 }

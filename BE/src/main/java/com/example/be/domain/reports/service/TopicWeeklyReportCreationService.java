@@ -35,9 +35,12 @@ public class TopicWeeklyReportCreationService {
             var sourceDates = sources.stream().map(WeeklyReportInput.DailySource::reportDate).toList();
             List<LocalDate> missing = monday.datesUntil(monday.plusWeeks(1)).filter(date -> !sourceDates.contains(date)).toList();
             input = new WeeklyReportInput(monday, monday.plusDays(6), sources, missing, topicId, input.topicName());
+            var selectedFindings = selection.selections().stream()
+                    .filter(day -> availableDates.contains(day.source().reportDate()))
+                    .flatMap(day -> day.findings().stream()).distinct().toList();
             persistence.freezeCompanySelection(reservation.reportId(), input.sourceFindingIds(),
                     selection.companySuppressedFindingIds(), input, selection.applications(), java.util.Set.of(),
-                    selection.comparisonScopeKnown(), now);
+                    selection.comparisonScopeKnown(), now, selectedFindings);
         }
         ReportDocument document;
         try {

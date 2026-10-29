@@ -109,7 +109,8 @@ public class WeeklyReportPersistenceService {
                 saved.version(), saved.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(),
                 saved.scopes(), saved.period(), saved.sourceConditions())).orElse(null);
         return new WeeklyReportInput.DailySource(source.getId(), source.getReportDate(), source.getTitle(),
-                markdown, content, allowed, snapshot);
+                markdown, content, allowed, snapshot, source.getReportIssueCompanySnapshot() == null ? null
+                        : source.getReportIssueCompanySnapshot().reflected(allowed));
     }
 
     private WeeklyReportInput excludeDailyErrors(WeeklyReportInput input) {
