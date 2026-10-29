@@ -18,12 +18,12 @@ type Page = (typeof PAGES)[number] | 'feedback'
 
 const DEFAULT_PAGE: Page = 'settings'
 
-/* 회사 관심 기준은 알림 관리 바로 옆에서 관리한다. */
+/* 피드백 관리는 알림 관리 바로 옆에 둔다. */
 const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
   { value: 'settings', label: '수집 설정' },
   { value: 'reports', label: '리포트' },
   { value: 'notifications', label: '알림 관리' },
-  { value: 'company-interests', label: '회사 관심 기준' },
+  { value: 'company-interests', label: '피드백 관리' },
 ]
 
 function hashValue() {

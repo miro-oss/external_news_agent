@@ -457,13 +457,13 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>}
       </header>
 
+      <ReportDartPanel report={report} />
+
       <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
         beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined}
         afterBriefing={<ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
           selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
           onEvidenceSelect={onEvidenceSelect} />} />
-
-      <ReportDartPanel report={report} />
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
