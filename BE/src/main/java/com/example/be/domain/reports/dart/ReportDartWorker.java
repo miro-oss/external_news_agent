@@ -24,6 +24,10 @@ public class ReportDartWorker {
     private final ReportDartPersistence persistence;
     private final DartFinancialService financials;
     private final DartProperties properties;
+    // Recovery candidates are only a SQL prefilter. Invalid frozen evidence must
+    // not permanently occupy the first page; restart and each completed sweep start at zero.
+    private long missingCursor;
+    private long reusableCursor;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void completed(ReportCompleted event) { enqueueSafely(event.reportId()); }
@@ -31,8 +35,12 @@ public class ReportDartWorker {
     @Scheduled(fixedDelayString = "${news.dart.poll-interval-ms:5000}", scheduler = "dartScheduler")
     public void poll() {
         persistence.recover();
-        repository.missing().forEach(this::enqueueSafely);
-        repository.reusableReports().forEach(this::enqueueSafely);
+        var missing = repository.missing(missingCursor);
+        missing.forEach(this::enqueueSafely);
+        missingCursor = missing.isEmpty() ? 0L : missing.getLast();
+        var reusable = repository.reusableReports(reusableCursor);
+        reusable.forEach(this::enqueueSafely);
+        reusableCursor = reusable.isEmpty() ? 0L : reusable.getLast();
         if (!properties.isEnabled() || repository.paused(now())) return;
         for (var job : repository.pending(now())) {
             if (repository.paused(now())) return;

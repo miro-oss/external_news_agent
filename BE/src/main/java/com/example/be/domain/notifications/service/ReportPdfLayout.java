@@ -174,6 +174,10 @@ final class ReportPdfLayout implements AutoCloseable {
      * Groups must contain at least one item; oversized items continue through the line paginator.
      */
     void readingSection(String heading, String notice, List<ReadingGroup> groups) throws IOException {
+        readingSection(heading, notice, groups, null);
+    }
+
+    void readingSection(String heading, String notice, List<ReadingGroup> groups, String destination) throws IOException {
         if (groups.isEmpty()) return;
         ReadingGroup first = groups.getFirst();
         float prefix = 38 + readingTextHeight(heading, bold, 15, 22)
@@ -182,6 +186,7 @@ final class ReportPdfLayout implements AutoCloseable {
         float complete = prefix + readingHeight(first.items().getFirst());
         boolean keepFirstTogether = complete <= TOP - BOTTOM;
         ensure(keepFirstTogether ? complete : Math.min(prefix + 90, TOP - BOTTOM));
+        if (destination != null) anchor(destination);
         section(heading);
         muted(notice);
         for (int index = 0; index < groups.size(); index++) {

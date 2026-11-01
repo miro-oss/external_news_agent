@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 
-let server, emptyEnvDir, Panel, Selector
+let server, emptyEnvDir, Panel, Selector, EmailPreview
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'report-share-render-'))
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
@@ -20,6 +20,7 @@ before(async () => {
   const module = await server.ssrLoadModule('/src/features/notifications/ReportSharePanel.tsx')
   Panel = module.ReportSharePanel
   Selector = module.ReportShareInsightSelector
+  EmailPreview = (await server.ssrLoadModule('/src/features/notifications/EmailMessagePreview.tsx')).EmailMessagePreview
 })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 3 }) })
 
@@ -51,4 +52,19 @@ test('the perspective picker provides every existing audience and locks while se
     assert.ok(html.includes(`for="${id}"`), 'the visible label is connected to the picker')
     assert.ok(html.includes(`aria-describedby="${id}-help"`))
   }
+})
+
+test('email preview provides width controls and an isolated, titled frame without execution privileges', () => {
+  const html = renderToStaticMarkup(createElement(EmailPreview, { body: '<script>parent.probe=1</script>' }))
+  assert.match(html, /넓은 화면/)
+  assert.match(html, /좁은 화면 · 360px/)
+  assert.match(html, /공용 본문 미리보기/)
+  assert.match(html, /<iframe[^>]*title="이메일 본문 미리보기"/)
+  const sandbox = html.match(/sandbox="([^"]*)"/)[1]
+  assert.equal(sandbox, 'allow-popups allow-popups-to-escape-sandbox')
+  assert.doesNotMatch(sandbox, /allow-scripts|allow-same-origin|allow-forms|allow-top-navigation/)
+  assert.match(html, /referrerPolicy="no-referrer"/)
+  assert.doesNotMatch(html, /<script>|parent\.probe/)
+  const id = html.match(/<iframe id="([^"]+)"/)[1]
+  assert.equal(html.match(new RegExp(`aria-controls="${id}"`, 'g')).length, 2)
 })

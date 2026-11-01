@@ -40,8 +40,18 @@ public class ReportDeliveryWorker {
             finish(work, type, "SKIPPED", null, "보고서 수신이 해제되었거나 수신 채널 연결이 변경되었습니다.", false);
             return;
         }
-        NotificationSender sender = senders.get(channel.getChannelType());
-        if (!sender.isConfigured(channel)) {
+        final NotificationSender sender;
+        final boolean configured;
+        try {
+            sender = senders.get(channel.getChannelType());
+            configured = sender.isConfigured(channel);
+        } catch (RuntimeException failure) {
+            // No transport has started. Do not leave a preflight failure as an
+            // uncertain PROCESSING delivery or block the next recipient.
+            finish(work, type, "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
+            return;
+        }
+        if (!configured) {
             finish(work, type, "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
             return;
         }

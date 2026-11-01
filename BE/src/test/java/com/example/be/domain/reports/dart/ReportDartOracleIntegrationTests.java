@@ -5,6 +5,7 @@ import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.dart.financial.DartFinancialService;
+import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -62,12 +64,18 @@ class ReportDartOracleIntegrationTests {
     }
 
     private NewsReport create(ReportScope scope, boolean selected, ReportStatus status) {
+        return create(scope, selected, status, null);
+    }
+
+    private NewsReport create(ReportScope scope, boolean selected, ReportStatus status,
+                              ReportIssueCompanySnapshot issueCompanies) {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
                 .triggerType(TriggerType.MANUAL).startedAt(now).build());
         runIds.add(run.getId());
         var builder = NewsReport.builder().reportScope(scope)
-                .title("DART 첨부 통합검증").markdownBody("검증 보고서").modelName("test").reportStatus(status).generatedAt(now);
+                .title("DART 첨부 통합검증").markdownBody("검증 보고서").modelName("test").reportStatus(status).generatedAt(now)
+                .reportIssueCompanySnapshot(issueCompanies);
         if (scope == ReportScope.WEEKLY) {
             var monday = now.toLocalDate().with(java.time.DayOfWeek.MONDAY).minusWeeks(1);
             builder.topicId(run.getId()).topicName("주제 주간 검증").reportDate(monday).reportEndDate(monday.plusDays(6))
@@ -84,6 +92,50 @@ class ReportDartOracleIntegrationTests {
         var value = reports.saveAndFlush(builder.build());
         reportIds.add(value.getId());
         return value;
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unusableFirstPageCannotStarveLaterMissingOrCachedCompanyRecovery(boolean existingAttachments) {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var links = List.of(new ReportIssueCompanySnapshot.Link(COMPANY, 51L, 61L, 71L,
+                COMPANY.corpName(), COMPANY.corpName() + " 공시", "https://example.com/61", List.of()));
+        // This snapshot passes SQL's version/company prefilter but has no trusted capture time.
+        var invalid = new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION, null, links);
+        var valid = new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION,
+                now.atZone(ApiTimeZone.ZONE).toOffsetDateTime(), links);
+        var unusable = new ArrayList<NewsReport>();
+        for (int index = 0; index < 20; index++)
+            unusable.add(create(ReportScope.RUN, false, ReportStatus.GENERATED, invalid));
+        var eligible = create(ReportScope.RUN, false, ReportStatus.GENERATED, valid);
+        if (existingAttachments) {
+            for (var report : unusable) repository.enqueue(report.getId(), COMPANY, true, now);
+            repository.enqueue(eligible.getId(), COMPANY, true, now);
+            seedCache(data(), now);
+        }
+        long start = unusable.getFirst().getId() - 1;
+        assertEquals(unusable.stream().map(NewsReport::getId).toList(), existingAttachments
+                ? repository.reusableReports(start) : repository.missing(start));
+        var worker = new ReportDartWorker(repository, persistence, financials, new DartProperties());
+        // Isolate this fixture's ID range from other tests' reports; the worker restart/wrap is tested separately.
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "missingCursor", start);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "reusableCursor", start);
+
+        worker.poll();
+        worker.poll();
+
+        var recovered = repository.find(eligible.getId());
+        assertEquals(1, recovered.size());
+        assertEquals(existingAttachments ? "READY" : "PENDING", recovered.getFirst().status());
+        if (existingAttachments) assertEquals(data(), recovered.getFirst().data());
+        for (var report : unusable) {
+            var stored = reports.findById(report.getId()).orElseThrow();
+            assertEquals(invalid, stored.getReportIssueCompanySnapshot(), "Recovery must never repair historical evidence");
+            assertTrue(ReportDartEligibility.companies(stored).isEmpty());
+            if (existingAttachments) assertNull(repository.find(report.getId()).getFirst().data());
+            else assertTrue(repository.find(report.getId()).isEmpty());
+        }
+        verifyNoInteractions(financials);
     }
 
     @ParameterizedTest

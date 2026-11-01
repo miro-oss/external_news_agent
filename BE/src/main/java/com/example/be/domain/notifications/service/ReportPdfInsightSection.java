@@ -85,6 +85,7 @@ final class ReportPdfInsightSection {
         // The aggregate headline and importance have no claim bindings and can repeat excluded evidence.
         if (overview.isEmpty() && watches.isEmpty()) {
             pdf.reserve(110);
+            pdf.anchor("insight-detail");
             pdf.section(heading);
             pdf.muted(NotificationInsightBrief.AI_NOTICE);
             pdf.paragraph(NotificationInsightBrief.UNAVAILABLE);
@@ -102,7 +103,7 @@ final class ReportPdfInsightSection {
                             new ReportPdfLayout.ReadingField("확인할 지표", separateQuotedText(item.indicator())),
                             new ReportPdfLayout.ReadingField("판단 기준", separateQuotedText(item.trigger()))))).toList()));
         }
-        pdf.readingSection(heading, NotificationInsightBrief.AI_NOTICE, groups);
+        pdf.readingSection(heading, NotificationInsightBrief.AI_NOTICE, groups, "insight-detail");
     }
 
     /** Separate the generated source quotation from its prose without changing either text. */
