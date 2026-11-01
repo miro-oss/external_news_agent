@@ -146,7 +146,7 @@ class ReportDeliveryArtifactIntegrationTest {
                     assertTrue(text.contains("관련 기사 1건 · 1개 매체"));
                     String compact = text.replaceAll("\\s", "");
                     if (index == 0) assertTrue(compact.contains("2건/전체2건·100%"));
-                    else assertTrue(compact.contains("개인수신기준을전체후보에확인할수없어"));
+                    else assertFalse(text.contains("키워드로 보는 이슈"));
                     assertEquals(mode == Mode.MANUAL_INSIGHT || mode == Mode.AUTOMATIC_READY, text.contains("허용 판단"));
                     if (mode == Mode.AUTOMATIC_UNAVAILABLE)
                         assertTrue(compact.contains("관점분석이준비되지않아기본보고서만전달합니다."));

@@ -75,13 +75,15 @@ class M4ChangesRenderingTest {
                 new ReportChanges.KeywordChanges(ReportChanges.KeywordStatus.UNAVAILABLE, "PERSONALIZATION_UNVERIFIED",
                         "이전 자료에 개인 수신 기준을 확인할 수 없어 비교를 제공하지 않습니다.", null, null, false, List.of()));
         String html = renderEmail(missing);
-        assertTrue(html.contains("개인 수신 기준"));
+        assertFalse(html.contains("개인 수신 기준"));
+        assertFalse(html.contains("지난 보고서와 달라진 점"));
         assertFalse(html.contains("0건"));
         assertFalse(html.contains("공급 계획"));
         try (var doc = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, null, missing).bytes())) {
             String text = new PDFTextStripper().getText(doc);
             assertFalse(text.contains("0건"));
             assertFalse(text.contains("변화 비교 상세"));
+            assertFalse(text.contains("지난 보고서와 달라진 점"));
         }
         var telegram = NotificationChannel.builder().channelType(ChannelType.TELEGRAM).maxLength(3500).build();
         assertEquals(email.render(report, telegram, view, null, null, Map.of(), null, null, null).chunks(),
@@ -99,6 +101,18 @@ class M4ChangesRenderingTest {
                 if (annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink link
                         && link.getAction() instanceof org.apache.pdfbox.pdmodel.interactive.action.PDActionURI uri)
                     assertFalse(uri.getURI().startsWith("javascript:"));
+            }
+        }
+    }
+
+    @Test void noComparisonItemsOrKeywordRowsOmitsTheWholeSection() throws Exception {
+        for (var status : ReportChanges.Status.values()) {
+            var empty = new ReportChanges(17, null, 16L, null, status, status.message, false, List.of(), List.of());
+            assertFalse(renderEmail(empty).contains("지난 보고서와 달라진 점"));
+            try (var doc = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, null, empty).bytes())) {
+                String text = new PDFTextStripper().getText(doc);
+                assertFalse(text.contains("지난 보고서와 달라진 점"));
+                assertFalse(text.lines().anyMatch(line -> line.strip().equals("키워드 변화")));
             }
         }
     }

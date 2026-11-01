@@ -71,7 +71,7 @@ class ReportCreationServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
-        when(reportRepository.save(any())).thenReturn(report);
+        when(reportRepository.saveAndFlush(any())).thenReturn(report);
         when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
         when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(original));
@@ -105,7 +105,7 @@ class ReportCreationServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
-        when(reportRepository.save(any())).thenReturn(report);
+        when(reportRepository.saveAndFlush(any())).thenReturn(report);
         when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
         when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(all);
@@ -249,7 +249,7 @@ class ReportCreationServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
-        when(reportRepository.save(any())).thenReturn(report);
+        when(reportRepository.saveAndFlush(any())).thenReturn(report);
         when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
         when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of());
@@ -261,7 +261,7 @@ class ReportCreationServiceTest {
         assertEquals(17L, run.getReportId());
         assertEquals("# 완료 보고서", report.getMarkdownBody());
         assertEquals(document.status(), report.getReportStatus());
-        verify(reportRepository).save(any());
+        verify(reportRepository).saveAndFlush(any());
         if (recovery) {
             verifyNoInteractions(notifications, events);
         } else {

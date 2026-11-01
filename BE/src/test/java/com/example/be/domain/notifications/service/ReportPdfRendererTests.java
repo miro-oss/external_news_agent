@@ -413,7 +413,7 @@ class ReportPdfRendererTests {
                 new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-15T09:00:00+09:00"),
                         quarters, List.of(filing, filing("주요사항보고서 (시설투자)", FILING_URL, true)),
                         List.of("2024년 4분기는 비교 가능한 금액이 없어 비워 두었습니다."))))));
-        var fact = new ReportInsightDTO.Fact("1:0", "회사는 생산라인 투자를 계획하고 있다고 발표했다.", "FORECAST", "회사 발표", 1L, 101L, List.of(0), "grounded");
+        var fact = new ReportInsightDTO.Fact("1:0", "회사는 생산라인 투자를 계획하고 있다고 발표했다.", "FORECAST", null, 1L, 101L, List.of(0), "grounded");
         var insight = new ReportInsightDTO.AudienceInsight(Audience.EQUIPMENT_MAKER, "장비 수요의 집행 시점 점검", "high",
                 List.of(new AgentReportInsightResponse.Overview("투자 계획은 장비 공급사의 수요 증가로 이어질 수 있습니다.", List.of("1:0"), "투자 계획이 실제 발주로 전환되는 경우")),
                 List.of(new ReportInsightDTO.Issue(1L, "high", "생산라인 증설은 장비 반입과 설치 수요에 직접 연결됩니다.", List.of("1:0"), new AgentReportInsightResponse.Axes(3, 2, null, null), 1)),
@@ -426,7 +426,7 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             assertWithinPageBounds(document);
             String text = new PDFTextStripper().getText(document);
-            for (String expected : List.of("리포트 관점 분석 · 장비·소재사", "리포트 종합 판단", "다음 확인 항목"))
+            for (String expected : List.of("관점 한눈에 · 장비·소재사", "업무상 의미", "다음 확인점"))
                 assertTrue(text.contains(expected), expected);
             for (String omitted : List.of("먼저 살펴볼 이슈", "생산라인 증설은 장비 반입과 설치 수요에 직접 연결됩니다.",
                     "기타 분석", "우선순위", "중요도", "직접 관련성", "영향 크기", "조건부 해석"))

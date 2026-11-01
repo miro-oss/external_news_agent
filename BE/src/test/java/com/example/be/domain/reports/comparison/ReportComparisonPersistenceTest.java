@@ -26,19 +26,18 @@ class ReportComparisonPersistenceTest {
                 .reportDate(date).generatedAt(date.plusDays(1).atStartOfDay()).reflectedFindingIds(reflected).build();
     }
 
-    @Test void enqueueFreezesChronologicalBaselineAndOnlyFinalReflectedInputs() {
+    @Test void enqueueFreezesPreviousDayAndOnlyFinalReflectedInputs() {
         var current = report(101, date, List.of(20L));
-        var baseline = report(100, date.minusDays(3), List.of(10L));
+        var baseline = report(100, date.minusDays(1), List.of(10L));
         when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
-        when(reports.findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
-                ReportScope.DAILY, date, ReportStatus.PENDING)).thenReturn(Optional.of(baseline));
+        when(reports.findByReportScopeAndReportDate(ReportScope.DAILY, date.minusDays(1))).thenReturn(Optional.of(baseline));
         when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(1, 20, "현재"), side(2, 30, "반영되지 않음"))));
         when(comparisons.findInput(100)).thenReturn(Optional.of(snapshot(side(1, 10, "과거"))));
         persistence.enqueue(101);
         var work = ArgumentCaptor.forClass(ComparisonWork.class);
         verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.PENDING), work.capture(), any());
         assertEquals(100, work.getValue().baseReportId());
-        assertEquals(date.minusDays(3), work.getValue().baseReportDate());
+        assertEquals(date.minusDays(1), work.getValue().baseReportDate());
         assertEquals(1, work.getValue().current().issues().size());
         assertEquals(20, work.getValue().current().issues().getFirst().findingId());
         when(comparisons.find(101)).thenReturn(Optional.of(new ReportComparisonRepository.Job(101, ReportChanges.Status.PENDING, work.getValue(), null)));
@@ -55,8 +54,7 @@ class ReportComparisonPersistenceTest {
         var laterMerge = new ComparisonWork.IdentityLink(99, 2, "MERGED");
         var laterRefutation = new ComparisonWork.IdentityLink(98, 2, "REFUTES");
         when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
-        when(reports.findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
-                ReportScope.DAILY, capturedDate, ReportStatus.PENDING)).thenReturn(Optional.of(baseline));
+        when(reports.findByReportScopeAndReportDate(ReportScope.DAILY, capturedDate.minusDays(1))).thenReturn(Optional.of(baseline));
         when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(2, 20, "현재"))));
         when(comparisons.findInput(100)).thenReturn(Optional.of(snapshot(side(1, 10, "과거"))));
         // Model a delayed registration after both relationships were added to the live issue graph.
@@ -94,6 +92,67 @@ class ReportComparisonPersistenceTest {
         verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.NO_BASELINE), isNull(), any());
     }
 
+    @Test void missingPreviousDayDoesNotSkipToAnOlderDailyReport() {
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(report(101, date, List.of(20L))));
+        when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(1, 20, "현재"))));
+
+        persistence.enqueue(101);
+
+        verify(reports).findByReportScopeAndReportDate(ReportScope.DAILY, date.minusDays(1));
+        verify(reports, never()).findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
+                any(), any(), any());
+        verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.NO_BASELINE
+                && value.baseReportId() == null), isNull(), any());
+    }
+
+    @Test void pendingPreviousDayIsRetriedAfterCompletionWithoutFreezingNoBaseline() {
+        var previous = report(100, date.minusDays(1), List.of(10L));
+        var pending = NewsReport.builder().id(100L).reportScope(ReportScope.DAILY)
+                .reportDate(date.minusDays(1)).reportStatus(ReportStatus.PENDING).build();
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(report(101, date, List.of(20L))));
+        when(reports.findByReportScopeAndReportDate(ReportScope.DAILY, date.minusDays(1)))
+                .thenReturn(Optional.of(pending), Optional.of(previous));
+        when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(1, 20, "현재"))));
+        when(comparisons.findInput(100)).thenReturn(Optional.of(snapshot(side(1, 10, "이전"))));
+
+        persistence.enqueue(101);
+        verify(comparisons, never()).insert(any(), any(), any());
+        persistence.enqueue(101);
+
+        verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.PENDING
+                && value.baseReportId().equals(100L)), any(), any());
+    }
+
+    @Test void integratedWeeklyUsesOnlyExactPreviousIntegratedWeek() {
+        var current = NewsReport.builder().id(101L).reportScope(ReportScope.WEEKLY).reportDate(date)
+                .reportEndDate(date.plusDays(6)).reportStatus(ReportStatus.GENERATED)
+                .reflectedFindingIds(List.of(20L)).build();
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(1, 20, "이번 주"))));
+
+        persistence.enqueue(101);
+
+        verify(reports).findByReportScopeAndReportDate(ReportScope.WEEKLY, date.minusWeeks(1));
+        verify(reports, never()).findByReportScopeAndReportDateAndTopicId(any(), any(), any());
+        verify(reports, never()).findPreviousComparisonReports(any(), any(), any(), any());
+        verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.NO_BASELINE), isNull(), any());
+    }
+
+    @Test void missingPreviousTopicWeekDoesNotUseAnOlderOrIntegratedReport() {
+        var current = NewsReport.builder().id(101L).reportScope(ReportScope.WEEKLY).topicId(7L).reportDate(date)
+                .reportEndDate(date.plusDays(6)).reportStatus(ReportStatus.GENERATED)
+                .reflectedFindingIds(List.of(20L)).build();
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(1, 20, "이번 주"))));
+
+        persistence.enqueue(101);
+
+        verify(reports).findByReportScopeAndReportDateAndTopicId(ReportScope.WEEKLY, date.minusWeeks(1), 7L);
+        verify(reports, never()).findByReportScopeAndReportDate(any(), any());
+        verify(reports, never()).findPreviousComparisonReports(any(), any(), any(), any());
+        verify(comparisons).insert(argThat(value -> value.status() == ReportChanges.Status.NO_BASELINE), isNull(), any());
+    }
+
     @Test void claimChecksVisibilityAndCannotPublishBaselineDeletedDuringProviderCall() {
         var work = work(snapshot(side(1, 10, "과거")), snapshot(side(1, 20, "현재")));
         var result = new ReportComparisonEngine().prepare(work).result();
@@ -107,7 +166,7 @@ class ReportComparisonPersistenceTest {
         verify(comparisons, times(2)).finish(eq(101L), argThat(value -> value.status() == ReportChanges.Status.UNAVAILABLE && value.items().isEmpty()), any());
     }
 
-    @Test void runDoesNotSkipImmediateSameTopicExecutionWithoutReport() {
+    @Test void runSkipsReportlessExecutionsToPreviousGeneratedReportOfSameSavedTopics() {
         var started = date.atTime(9, 0);
         var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();
         var current = NewsReport.builder().id(101L).run(run).reportScope(ReportScope.RUN)
@@ -120,9 +179,36 @@ class ReportComparisonPersistenceTest {
         when(comparisons.previousRuns(started, 90L)).thenReturn(List.of(
                 new ReportComparisonRepository.RunCandidate(89L, null, started.minusWeeks(1), java.util.Set.of(1L), java.util.Set.of(1L), true),
                 new ReportComparisonRepository.RunCandidate(88L, 98L, started.minusWeeks(2), java.util.Set.of(1L), java.util.Set.of(1L), true)));
+        var baseRun = com.example.be.domain.collection.entity.CollectionRun.builder().id(88L).startedAt(started.minusWeeks(2)).build();
+        var previous = NewsReport.builder().id(98L).run(baseRun).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(10L)).build();
+        when(reports.findById(98L)).thenReturn(Optional.of(previous));
+        when(comparisons.findInput(98L)).thenReturn(Optional.of(snapshot(side(1, 10, "이전"))));
         persistence.enqueue(101L);
-        verify(comparisons).insert(argThat(result -> result.status() == ReportChanges.Status.NO_BASELINE
-                && result.reportDate() == null && result.baseReportId() == null), isNull(), any());
+        verify(comparisons).insert(argThat(result -> result.status() == ReportChanges.Status.PENDING
+                && result.reportDate() == null && result.baseReportId().equals(98L)), any(), any());
+        verify(reports).findById(98L);
+    }
+
+    @Test void runWaitsForPreviousSameTopicPendingReportInsteadOfSkippingIt() {
+        var started = date.atTime(9, 0);
+        var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();
+        var current = NewsReport.builder().id(101L).run(run).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(20L)).build();
+        var input = snapshot(side(1, 20, "현재"));
+        input = new ReportComparisonSnapshot(input.version(), input.issues(), input.scopes(),
+                ReportComparisonSnapshot.Period.from(current), List.of());
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(comparisons.findInput(101L)).thenReturn(Optional.of(input));
+        when(comparisons.previousRuns(started, 90L)).thenReturn(List.of(
+                new ReportComparisonRepository.RunCandidate(89L, 99L, started.minusDays(1), java.util.Set.of(1L), java.util.Set.of(1L), true),
+                new ReportComparisonRepository.RunCandidate(88L, 98L, started.minusDays(2), java.util.Set.of(1L), java.util.Set.of(1L), true)));
+        when(reports.findById(99L)).thenReturn(Optional.of(NewsReport.builder().id(99L).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.PENDING).build()));
+
+        persistence.enqueue(101L);
+
+        verify(comparisons, never()).insert(any(), any(), any());
         verify(reports, never()).findById(98L);
     }
 
@@ -157,7 +243,7 @@ class ReportComparisonPersistenceTest {
         var base = NewsReport.builder().id(100L).reportScope(ReportScope.WEEKLY).topicId(1L).reportDate(date.minusWeeks(1))
                 .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(10L)).build();
         when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
-        when(reports.findPreviousComparisonReports(eq(ReportScope.WEEKLY), eq(1L), eq(date), any())).thenReturn(List.of(base));
+        when(reports.findByReportScopeAndReportDateAndTopicId(ReportScope.WEEKLY, date.minusWeeks(1), 1L)).thenReturn(Optional.of(base));
         when(comparisons.findInput(101L)).thenReturn(Optional.of(snapshot(side(1, 20, "초반"), side(1, 30, "최종"), side(1, 40, "미반영"))));
         when(comparisons.findInput(100L)).thenReturn(Optional.of(snapshot(side(1, 10, "전주"))));
         persistence.enqueue(101L);

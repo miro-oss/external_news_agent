@@ -66,9 +66,11 @@ class M2BriefingRenderingTest {
             assertTrue(normalized.contains(LONG_TEXT.replaceAll("\\s", "")));
             assertTrue(text.indexOf("핵심 브리핑") < text.indexOf("중요 이벤트"));
             assertTrue(text.indexOf("관점 한눈에") < text.indexOf("중요 이벤트"));
-            assertTrue(text.contains("원문: 「")); // Quotes remain available in the full analysis.
+            assertFalse(text.contains("원문: 「"));
+            assertFalse(text.contains("리포트 관점 분석"));
+            assertFalse(text.contains("관점 분석 자세히 보기"));
             var destinations = document.getDocumentCatalog().getNames().getDests().getNames();
-            assertTrue(destinations.keySet().containsAll(Set.of("summary", "report-detail", "insight-detail")));
+            assertTrue(destinations.keySet().containsAll(Set.of("summary", "report-detail")));
             Path directory = Path.of("build/reports/notifications/m2");
             Files.createDirectories(directory);
             Files.write(directory.resolve("briefing.pdf"), rendered.bytes());
@@ -76,6 +78,51 @@ class M2BriefingRenderingTest {
             var renderer = new PDFRenderer(document);
             for (int page = 0; page < document.getNumberOfPages(); page++)
                 ImageIO.write(renderer.renderImageWithDPI(page, 110), "png", directory.resolve("briefing-" + (page + 1) + ".png").toFile());
+        }
+    }
+
+    @Test
+    void collectionTotalsAppearInMailAndPdfIndependentlyOfKeywordOrCoverageSnapshots() throws Exception {
+        var statistics = mock(NotificationArticleStatistics.class);
+        org.mockito.Mockito.when(statistics.summary(report)).thenReturn("수집 기사 128건 · 신규 96건 · 기존 32건");
+        email.setArticleStatistics(statistics);
+        pdf.setArticleStatistics(statistics);
+        var view = view(false);
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        assertTrue(Jsoup.parse(html).text().contains("수집 기사 128건 · 신규 96건 · 기존 32건"));
+        assertFalse(html.contains("키워드로 보는 이슈"));
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("수집 기사 128건 · 신규 96건 · 기존 32건"));
+            assertFalse(text.contains("키워드로 보는 이슈"));
+        }
+    }
+
+    @Test
+    void emailKeepsTwoIssuesAndOneFollowUpWhilePdfRetainsTheRemainingReportContent() throws Exception {
+        var findings = java.util.stream.LongStream.rangeClosed(11, 15).mapToObj(this::finding).toList();
+        var events = findings.stream().map(finding -> new ReportContent.ImportantEvent(
+                "핵심 사건 " + finding.getId(), "사건의 확인된 요약 " + finding.getId(),
+                "추가 의미 " + finding.getId(), List.of(finding.getId()))).toList();
+        var content = new ReportContent(List.of(), events, List.of(
+                new ReportContent.WatchItem("첫 확인점", "먼저 확인할 조건", List.of(11L)),
+                new ReportContent.WatchItem("추가 확인점", "추가로 확인할 조건", List.of(12L))), List.of());
+        var view = new ReportEventFeedbackProjection.View(findings, new ReportReadingContent("", content), false);
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        String text = Jsoup.parse(html).text();
+        assertTrue(text.contains("핵심 사건 11"));
+        assertTrue(text.contains("핵심 사건 12"));
+        assertTrue(text.contains("먼저 확인할 조건"));
+        assertFalse(text.contains("핵심 사건 13"));
+        assertFalse(text.contains("추가로 확인할 조건"));
+        assertFalse(text.contains("추가 의미"));
+        assertTrue(text.contains("나머지 4개 항목은 첨부 PDF"));
+        assertTrue(text.length() < 1100);
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            String full = new PDFTextStripper().getText(document);
+            assertTrue(full.contains("핵심 사건 15"));
+            assertTrue(full.contains("추가로 확인할 조건"));
+            assertTrue(full.contains("추가 의미 15"));
         }
     }
 

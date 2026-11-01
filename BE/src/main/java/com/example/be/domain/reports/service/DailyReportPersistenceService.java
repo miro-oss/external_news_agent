@@ -37,6 +37,7 @@ public class DailyReportPersistenceService {
     private final CollectionRunRepository runRepository;
     private final ReportComparisonRepository comparisons;
     private final CompanyInterestSelection companyInterests;
+    private final DailyReportSelector selector;
     private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
     private final com.example.be.domain.reports.keyword.ReportKeywordCapture reportKeywords;
     private final com.example.be.domain.reports.comparison.ReportComparisonCapture comparisonCapture;
@@ -78,6 +79,14 @@ public class DailyReportPersistenceService {
                 .orElse(null);
         if (existing != null) {
             return new ReportPersistenceService.Reservation(existing.getId(), false);
+        }
+        // Every new reservation needs the complete pre-ranking universe, including legacy callers.
+        // Existing reports return above so retries never reconstruct historical inputs.
+        if (prepared == null) {
+            var input = selector.prepare(date, 1);
+            prepared = new DailyReportSelector.Prepared(input.candidates().stream()
+                    .filter(finding -> sourceRunIds.contains(finding.getRun().getId())).toList(),
+                    input.stubExcluded(), input.evidenceExcluded(), input.issues(), input.limit());
         }
         NewsReport report = reportRepository.saveAndFlush(NewsReport.builder()
                 .reportScope(ReportScope.DAILY).reportDate(date).sourceRunIds(sourceRunIds)

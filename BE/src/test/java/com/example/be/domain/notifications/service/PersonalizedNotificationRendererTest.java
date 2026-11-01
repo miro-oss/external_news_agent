@@ -83,7 +83,8 @@ class PersonalizedNotificationRendererTest {
         when(changesService.projectForDelivery(eq(fixture.report()), any(), eq(true))).thenReturn(changes);
         var channel = NotificationChannel.builder().channelType(ChannelType.EMAIL).maxLength(3500).build();
         var result = personalized.render(fixture.report(), channel, RECIPIENT_ID);
-        assertTrue(result.chunks().getFirst().contains(changes.message()));
+        assertFalse(result.chunks().getFirst().contains(changes.message()));
+        assertFalse(result.chunks().getFirst().contains("지난 보고서와 달라진 점"));
         verify(changesService, times(1)).projectForDelivery(eq(fixture.report()), any(), eq(true));
         verify(pdfRenderer).renderDetailed(eq(fixture.report()), any(), any(), any(), any(), any(), same(changes), any());
         verify(changesService, never()).get(anyLong());
@@ -408,7 +409,7 @@ class PersonalizedNotificationRendererTest {
             String pdfText = new PDFTextStripper().getText(document);
             for (var text : List.of(org.jsoup.Jsoup.parse(result.chunks().getFirst()).text(), pdfText)) {
                 if (active) {
-                    assertTrue(text.replaceAll("\\s", "").contains("개인수신기준을전체후보에확인할수없어"));
+                    assertFalse(text.contains("키워드로 보는 이슈"));
                     assertFalse(text.contains("HBM"));
                 } else assertTrue(text.replaceAll("\\s", "").contains("4건/전체10건·40%"));
             }

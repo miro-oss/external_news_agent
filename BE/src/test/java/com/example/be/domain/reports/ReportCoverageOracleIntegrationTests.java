@@ -5,6 +5,7 @@ import com.example.be.domain.collection.entity.*;
 import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.issues.entity.*;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
+import com.example.be.domain.reports.keyword.ReportKeywordDTO;
 import com.example.be.domain.reports.entity.*;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.*;
@@ -61,6 +62,7 @@ class ReportCoverageOracleIntegrationTests {
         assertEquals(List.of("집계", "확인한"), keywordInput.candidates().getFirst().matchedKeywordKeys());
         assertEquals(fixture.issue().getId(), keywordInput.candidates().getFirst().issueId());
         assertEquals(1, keywordInput.candidates().size(), "an unanalysed member adds coverage but not a candidate issue");
+        assertDisplayedKeywords(stored.getId());
         assertEquals(ZoneOffset.ofHours(9), original.capturedAt().getOffset());
         assertEquals(2, original.observations().size());
         assertEquals(2, queries.getReport(stored.getId(), true).getCoverage().events().getFirst().articleCount());
@@ -90,12 +92,16 @@ class ReportCoverageOracleIntegrationTests {
         assertEquals(2, reports.findById(stored.getId()).orElseThrow().getReportCoverageSnapshot().observations().size());
     }
 
-    @Test void dailyAndWeeklyScopesPersistObservationQueriesWithoutDependingOnCandidateRunIds() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void dailyAndWeeklyScopesPersistObservationQueriesWithoutDependingOnCandidateRunIds(boolean suppliedPreparation) {
         Fixture fixture = fixture();
         var prepared = selector.prepare(MONDAY, 10);
         assertEquals(1, prepared.candidates().size());
-        var dailyReservation = daily.reserveWithSnapshot(MONDAY, List.of(fixture.run().getId()),
-                List.of(fixture.finding().getId()), NOW, null, prepared);
+        var dailyReservation = suppliedPreparation
+                ? daily.reserveWithSnapshot(MONDAY, List.of(fixture.run().getId()),
+                        List.of(fixture.finding().getId()), NOW, null, prepared)
+                : daily.reserve(MONDAY, List.of(fixture.run().getId()), List.of(fixture.finding().getId()), NOW);
         persistence.complete(dailyReservation.reportId(), document(fixture.finding().getId()), NOW);
         em.flush(); // JDBC weekly readiness must see the completed DAILY inside this rollback-only test transaction.
         var weeklyReservation = weekly.reserve(MONDAY, NOW);
@@ -126,6 +132,25 @@ class ReportCoverageOracleIntegrationTests {
             assertEquals(1, keywords.candidates().size());
             assertEquals(List.of("집계", "확인한"), keywords.candidates().getFirst().matchedKeywordKeys());
             assertEquals(fixture.finding().getId(), keywords.candidates().getFirst().findingId());
+            assertDisplayedKeywords(reportId);
+        }
+    }
+
+    private void assertDisplayedKeywords(Long reportId) {
+        for (boolean includeFindings : List.of(false, true)) {
+            var displayed = queries.getReport(reportId, includeFindings).getKeywordStats();
+            assertNotNull(displayed);
+            assertEquals(ReportKeywordDTO.Status.AVAILABLE, displayed.status());
+            assertNull(displayed.unavailableReason());
+            assertEquals(1, displayed.denominatorIssueCount());
+            assertEquals(List.of("집계", "확인한"), displayed.items().stream()
+                    .map(ReportKeywordDTO.Item::keyword).toList());
+            displayed.items().forEach(item -> {
+                assertEquals(1, item.issueCount());
+                assertEquals(100.0, item.sharePercent());
+                assertEquals(1, item.relatedKeywords().size());
+                assertEquals(1, item.relatedKeywords().getFirst().issueCount());
+            });
         }
     }
 

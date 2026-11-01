@@ -325,11 +325,13 @@ class NotificationRendererTest {
                 var cards = document.select("td.email-card").stream()
                         .filter(card -> !card.select("h2:containsOwn(첫 번째 사건), h2:containsOwn(두 번째 사건)").isEmpty()).toList();
                 assertEquals(2, cards.size());
+                assertFalse(document.text().contains("첫 확인 이유"));
+                assertFalse(document.text().contains("읽을 포인트"));
                 assertTrue(cards.getFirst().html().contains("https://example.com/first"));
                 assertFalse(cards.getFirst().html().contains("https://example.com/second"));
                 assertTrue(cards.getLast().html().contains("https://example.com/second"));
                 assertFalse(cards.getLast().html().contains("https://example.com/first"));
-                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용", "첫 확인 이유", "둘째 확인 이유", "읽을 포인트"))
+                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용", "둘째 확인 이유"))
                     assertTrue(document.text().contains(visible));
                 assertFalse(body.contains("저장된 보고서의 핵심 결론")); // Unbound executive summary is not relabeled as a linked brief.
                 continue;
@@ -392,7 +394,7 @@ class NotificationRendererTest {
                     "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "표시 금지")) {
                 assertFalse(body.contains(unsupported), unsupported + " must be omitted");
             }
-            assertEquals(type == ChannelType.EMAIL, body.contains("다른 사건의 확인"));
+            assertFalse(body.contains("다른 사건의 확인"));
             assertFalse(body.contains("https://example.com/unrelated"));
         }
     }
@@ -409,7 +411,7 @@ class NotificationRendererTest {
             assertTrue(body.contains("저장된 주요 내용"));
             assertFalse(body.contains("후속 확인"));
             assertFalse(body.contains("확인할 점"));
-            assertEquals(type == ChannelType.EMAIL, body.contains("사용하지 않을 관점"));
+            assertFalse(body.contains("사용하지 않을 관점"));
         }
     }
 
@@ -465,7 +467,7 @@ class NotificationRendererTest {
 
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
-            int expectedCount = Math.min(type == ChannelType.EMAIL ? 5 : 3, eventCount);
+            int expectedCount = Math.min(type == ChannelType.EMAIL ? 2 : 3, eventCount);
             List<String> expectedHeadings = new ArrayList<>();
             for (int i = 1; i <= expectedCount; i++) {
                 expectedHeadings.add(type == ChannelType.EMAIL ? "사건 " + i : i + ". 사건 " + i);

@@ -26,7 +26,7 @@ final class NotificationBriefingSection {
     static void emailInsight(StringBuilder html, ReportInsightDTO.AudienceInsight insight,
                              ReportEventFeedbackProjection.View view) {
         if (insight == null) return;
-        var brief = ReportInsightBriefing.from(insight, view.findings(), view.excludedEvidenceFindingIds());
+        var brief = insightBrief(insight, view);
         html.append("<section style=\"margin:24px 0\"><h2 style=\"margin:0 0 8px;color:#1b64da;font-size:16px\">")
                 .append(escape("관점 인사이트 · " + audience(insight.audience())))
                 .append("</h2><p style=\"color:#636c78;font-size:12px\">")
@@ -60,8 +60,23 @@ final class NotificationBriefingSection {
         if (brief.overview().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
             paragraph(html, NotificationInsightBrief.UNAVAILABLE);
         if (brief.omittedItemCount() > 0)
-            field(html, "상세 안내", "긴 내용과 나머지 " + brief.omittedItemCount() + "개 항목은 첨부 PDF의 관점 분석에서 확인하세요.");
+            field(html, "상세 안내", "전체 관점 분석은 보고서 화면에서 확인하세요.");
         html.append("</section>");
+    }
+
+    /** Keep interpretation, assumption and observation criteria together while selecting fewer items. */
+    static ReportInsightBriefing insightBrief(ReportInsightDTO.AudienceInsight insight,
+                                              ReportEventFeedbackProjection.View view) {
+        var brief = ReportInsightBriefing.from(insight, view.findings(), view.excludedEvidenceFindingIds());
+        var overview = brief.overview().stream().limit(1).toList();
+        var watches = brief.watchItems().stream().limit(1).toList();
+        var cited = new java.util.HashSet<String>();
+        overview.forEach(item -> cited.addAll(item.basisClaimIds()));
+        watches.forEach(item -> cited.addAll(item.basisClaimIds()));
+        var facts = brief.facts().stream().filter(fact -> cited.contains(fact.id())).limit(1).toList();
+        return new ReportInsightBriefing(brief.version(), facts, overview, watches,
+                brief.omittedItemCount() + brief.overview().size() - overview.size()
+                        + brief.watchItems().size() - watches.size());
     }
 
     static void label(StringBuilder html, String value) {

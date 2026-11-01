@@ -38,7 +38,7 @@ class NotificationInsightRenderingTest {
         assertTrue(body.contains("AI 해석"));
         assertTrue(body.contains("장비 &lt;수요&gt; &amp; 해석 😀"));
         assertTrue(body.contains("투자가 실제 집행되는 경우 &amp; &lt;전제&gt;"));
-        assertTrue(body.contains("두 번째 판단"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("두 번째 판단"));
         assertFalse(body.contains("세 번째 판단"));
         assertFalse(body.contains("숨겨진 헤드라인"));
     }
@@ -95,13 +95,13 @@ class NotificationInsightRenderingTest {
                         List.of("12:0"), "별도로 저장한 조건")), List.of());
         String body = render(ChannelType.EMAIL, 3500, List.of(finding(11), finding(12)), insight);
         assertTrue(body.contains(interpretation));
-        assertTrue(body.contains(second));
+        assertFalse(body.contains(second));
         assertFalse(body.contains("원문: 「"));
         assertFalse(body.contains("해석:"));
         assertFalse(body.contains("전제:"));
         assertFalse(body.contains("공통 IP가 일부 발견됐다는 원문 문장"));
         assertTrue(body.contains("동일 공격군"));
-        assertTrue(body.contains("별도로 저장한 조건"));
+        assertFalse(body.contains("별도로 저장한 조건"));
         assertFalse(body.contains("\\"));
     }
 
@@ -113,7 +113,7 @@ class NotificationInsightRenderingTest {
                 new Overview("원문 인용 없는 기존 판단은 유지합니다.", List.of("12:0"), null)), List.of());
         String body = render(ChannelType.EMAIL, 3500, List.of(finding(11), finding(12)), insight);
         assertTrue(body.contains("「운영 해석: 조건부」 지침은 C:\\ops 경로의 &lt;설정&gt; &amp; 로그를 확인할 경우에만 적용할 수 있습니다."));
-        assertTrue(body.contains("원문 인용 없는 기존 판단은 유지합니다."));
+        assertFalse(body.contains("원문 인용 없는 기존 판단은 유지합니다."));
         assertFalse(body.contains("기사 속"));
     }
 

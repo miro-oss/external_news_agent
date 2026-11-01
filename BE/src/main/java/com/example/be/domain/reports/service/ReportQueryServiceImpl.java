@@ -259,14 +259,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private ReportResDTO.ArticleStats articleStats(NewsReport report) {
-        Set<Long> allowedArticles = report.getTopicId() == null || report.getWeeklyInput() == null ? null
-                : report.getWeeklyInput().sources().stream().filter(source -> source.evidenceSnapshot() != null)
-                        .flatMap(source -> source.evidenceSnapshot().issues().stream())
-                        .flatMap(issue -> issue.side().claims().stream()).flatMap(claim -> claim.evidence().stream())
-                        .map(evidence -> evidence.articleId()).collect(Collectors.toSet());
-        return ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
-                .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream())
-                .filter(observation -> allowedArticles == null || allowedArticles.contains(observation.getArticleId())).toList());
+        return ReportArticleStatistics.forReport(report, runArticleRepository);
     }
 
     private Map<Long, Long> issueIdsByFinding(List<Finding> findings, Long reportTopicId) {

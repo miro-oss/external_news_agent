@@ -45,6 +45,9 @@ import java.util.regex.Pattern;
 @Component
 @RequiredArgsConstructor
 public class ReportPdfRenderer {
+    private NotificationArticleStatistics articleStatistics;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setArticleStatistics(NotificationArticleStatistics articleStatistics) { this.articleStatistics = articleStatistics; }
     private final ReportDartService dart;
     private ReportCoverageService coverageService;
     @org.springframework.beans.factory.annotation.Autowired
@@ -123,6 +126,7 @@ public class ReportPdfRenderer {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
             pdf.title(report.getTitle());
+            if (articleStatistics != null) pdf.muted(articleStatistics.summary(report));
             if (report.getGeneratedAt() != null) pdf.muted("보고서 작성 " + report.getGeneratedAt().format(DATE_TIME) + " (한국시간)");
             if (report.getReportDate() != null) pdf.muted("보고서 기간 " + report.getReportDate()
                     + (report.getReportEndDate() == null ? "" : " ~ " + report.getReportEndDate()));
@@ -141,13 +145,11 @@ public class ReportPdfRenderer {
             NotificationKeywordSection.pdf(pdf, keywords);
             if (content != null) {
                 pdf.internalLink("이슈와 근거 자세히 보기", "report-detail");
-                if (insight != null) pdf.internalLink("관점 분석 자세히 보기", "insight-detail");
                 pdf.pageBreak();
             }
             pdf.anchor("report-detail");
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
             else body(pdf, content, findings, coverage, companies);
-            ReportPdfInsightSection.write(pdf, insight, view);
             NotificationChangesSection.pdfDetails(pdf, changes);
             Map<String, Integer> companyPages = companyData(pdf, companies);
             return new Result(pdf.save(), companyPages);

@@ -97,7 +97,7 @@ public class ReportComparisonRepository {
                 """, (rs, row) -> rs.getLong(1), Timestamp.valueOf(from), Timestamp.valueOf(before));
     }
 
-    /** Page executions, not reports, so a reportless immediate run can never be silently skipped. */
+    /** Page accepted executions so report order and saved topic identity never depend on live topic settings. */
     public List<RunCandidate> previousRuns(LocalDateTime before, long beforeId) {
         var rows = jdbc.query("""
                 SELECT run.id, run.report_id, run.started_at, item.topic_id, item.topic_snapshot
