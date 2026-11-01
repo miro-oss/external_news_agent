@@ -30,8 +30,8 @@ class ReportDartWorkerTest {
     }
 
     @Test void pollHydratesCachedReportsBeforeDisabledOrPausedProviderStopsExternalWork() {
-        when(repository.missing()).thenReturn(List.of(17L));
-        when(repository.reusableReports()).thenReturn(List.of(18L));
+        when(repository.missing(anyLong())).thenReturn(List.of(17L));
+        when(repository.reusableReports(anyLong())).thenReturn(List.of(18L));
         worker.poll();
         var order = inOrder(persistence);
         order.verify(persistence).recover();
@@ -44,6 +44,49 @@ class ReportDartWorkerTest {
         verify(persistence, times(2)).enqueue(18L);
         verify(repository, never()).pending(any());
         verify(repository, never()).staleCompanies(any(), any());
+        verifyNoInteractions(financials);
+    }
+
+    @Test void missingRecoveryAdvancesPastUnusablePageWrapsAndSurvivesWorkerRestart() {
+        var unusable = java.util.stream.LongStream.rangeClosed(1, 20).boxed().toList();
+        when(repository.missing(0L)).thenReturn(unusable);
+        when(repository.missing(20L)).thenReturn(List.of(21L));
+        when(repository.missing(21L)).thenReturn(List.of());
+        doThrow(new IllegalStateException("unusable snapshot")).when(persistence).enqueue(1L);
+
+        worker.poll();
+        worker.poll();
+        worker.poll();
+        worker.poll();
+
+        verify(repository, times(2)).missing(0L);
+        verify(repository).missing(20L);
+        verify(repository).missing(21L);
+        verify(persistence).enqueue(21L);
+        // Each worker owns only a scan cursor; idempotent enqueue remains the shared authority.
+        var restarted = new ReportDartWorker(repository, persistence, financials, properties);
+        restarted.poll();
+        restarted.poll();
+        verify(repository, times(3)).missing(0L);
+        verify(persistence, times(2)).enqueue(21L);
+        verifyNoInteractions(financials);
+    }
+
+    @Test void cacheRecoveryUsesItsOwnCursorAndWrapsAfterTheLastPage() {
+        var unusable = java.util.stream.LongStream.rangeClosed(31, 50).boxed().toList();
+        when(repository.reusableReports(0L)).thenReturn(unusable);
+        when(repository.reusableReports(50L)).thenReturn(List.of(51L));
+        when(repository.reusableReports(51L)).thenReturn(List.of());
+
+        worker.poll();
+        worker.poll();
+        worker.poll();
+        worker.poll();
+
+        verify(repository, times(2)).reusableReports(0L);
+        verify(repository).reusableReports(50L);
+        verify(repository).reusableReports(51L);
+        verify(persistence).enqueue(51L);
         verifyNoInteractions(financials);
     }
 

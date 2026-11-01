@@ -147,10 +147,6 @@ public class ReportPdfRenderer {
             pdf.anchor("report-detail");
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
             else body(pdf, content, findings, coverage, companies);
-            if (insight != null) {
-                pdf.reserve(110);
-                pdf.anchor("insight-detail");
-            }
             ReportPdfInsightSection.write(pdf, insight, view);
             NotificationChangesSection.pdfDetails(pdf, changes);
             Map<String, Integer> companyPages = companyData(pdf, companies);

@@ -8,6 +8,7 @@ import { MutationStatus } from '../settings/MutationStatus'
 import { MessagePreviewSkeleton } from './NotificationSkeletons'
 import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareInsightGuidance, reportShareRequestKey } from './reportShareFeedback'
 import { ReportShareDeliveryLogs } from './ReportShareDeliveryLogs'
+import { EmailMessagePreview } from './EmailMessagePreview'
 import './notifications-refinement.css'
 
 const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '전달 중', SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외', UNKNOWN: '수신 확인 필요' }
@@ -62,7 +63,9 @@ export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId:
     {insightGuidance && <p className="report-share-insight-guidance" role="status">{insightGuidance}</p>}
     {resultBatchId && <ReportShareDeliveryLogs key={resultBatchId} reportId={reportId} deliveryBatchId={resultBatchId} />}
     {preview.isPending && !preview.data && <MessagePreviewSkeleton />}
-    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.channelType === 'EMAIL' && <p className="muted">이메일 본문 미리보기입니다. 실제 이메일에는 수신자별 표시 기준을 적용한 상세 PDF도 첨부됩니다.</p>}{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
+    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.channelType === 'EMAIL' && <p className="muted">이메일 본문 미리보기입니다. 실제 이메일에는 수신자별 표시 기준을 적용한 상세 PDF도 첨부됩니다.</p>}{preview.data.chunks.map((chunk) => preview.data.channelType === 'EMAIL'
+      ? <EmailMessagePreview key={chunk.seq} body={chunk.body} />
+      : <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
   </section>
 }
 export function ReportShareInsightSelector({ value, disabled, onChange }: {

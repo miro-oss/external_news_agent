@@ -47,9 +47,13 @@ public class ReportDartRepository {
     }
 
     List<Long> missing() {
+        return missing(0L);
+    }
+
+    List<Long> missing(long afterReportId) {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
-                WHERE report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                WHERE report.id > ? AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                   AND ((((report.report_scope = 'RUN'
                         AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode'))
                        OR (report.report_scope = 'WEEKLY' AND report.topic_id IS NOT NULL
@@ -60,17 +64,21 @@ public class ReportDartRepository {
                             '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
                             WHERE NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
                                 WHERE attachment.report_id = report.id AND attachment.corp_code = linked.corp_code))))
-                ORDER BY report.generated_at, report.id FETCH FIRST 20 ROWS ONLY
-                """, (rs, row) -> rs.getLong(1));
+                ORDER BY report.id FETCH FIRST 20 ROWS ONLY
+                """, (rs, row) -> rs.getLong(1), afterReportId);
     }
 
     List<Long> reusableReports() {
+        return reusableReports(0L);
+    }
+
+    List<Long> reusableReports(long afterReportId) {
         return jdbc.query("""
                 SELECT DISTINCT attachment.report_id
                 FROM news_report_dart_attachments attachment
                 JOIN news_reports report ON report.id = attachment.report_id
                 JOIN news_dart_financial_cache cache ON cache.corp_code = attachment.corp_code
-                WHERE attachment.payload_json IS NULL
+                WHERE attachment.report_id > ? AND attachment.payload_json IS NULL
                   AND attachment.status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
                   AND cache.payload_json IS NOT NULL
                   AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
@@ -81,7 +89,7 @@ public class ReportDartRepository {
                                WHERE linked.corp_code = attachment.corp_code)))
                   AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                 ORDER BY attachment.report_id FETCH FIRST 20 ROWS ONLY
-                """, (rs, row) -> rs.getLong(1));
+                """, (rs, row) -> rs.getLong(1), afterReportId);
     }
 
     /** A cache's age controls refresh, not whether already verified data can be displayed. */

@@ -44,6 +44,38 @@ class ReportDeliveryWorkerTest {
         verify(sender,never()).openSession(any());
         verify(store,never()).finish(any(),any(),any(),any(),any(),anyBoolean());
     }
+    @Test void senderLookupFailureIsRetryableBeforeTransportAndDoesNotExposeDetails(CapturedOutput output) {
+        ready();
+        when(senders.get(ChannelType.EMAIL)).thenThrow(new IllegalStateException("synthetic-private-channel"));
+
+        worker.deliver(work);
+
+        verify(store).finish(work, "EMAIL", "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
+        verifyNoInteractions(automaticInsights, personalized, session);
+        assertFalse(output.getAll().contains("synthetic-private-channel"));
+    }
+    @Test void configurationFailureDoesNotStrandNextRecipientInThePollingBatch(CapturedOutput output) {
+        ready();
+        var second = new ReportDeliveryOutboxStore.Work(2L, 2L, 5L, 4L, "second-batch", "다음 수신자",
+                "second@invalid.test", "제목", "요약", 1);
+        when(store.claim()).thenReturn(List.of(work), List.of(second), List.of());
+        when(store.destinationStillActive(second)).thenReturn(true);
+        when(sender.isConfigured(any())).thenThrow(new IllegalStateException("synthetic-private-config"))
+                .thenReturn(true);
+        var attachment = List.of(new NotificationAttachment("news-report-2.pdf", "application/pdf", new byte[]{2}));
+        when(personalized.renderAutomatic(eq(2L), any(), eq(5L), any()))
+                .thenReturn(new RenderedNotification("다음 제목", null, List.of("다음 내용"), attachment));
+        when(session.send(any(), any(), any(), any())).thenReturn("second-id");
+
+        worker.deliverPending();
+
+        verify(store).finish(work, "EMAIL", "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
+        verify(store).finish(second, "EMAIL", "SENT", "second-id", null, false);
+        verify(personalized, never()).renderAutomatic(eq(2L), any(), eq(3L), any());
+        verify(sender, times(1)).openSession(any());
+        verify(session).send(second.address(), "다음 제목", "다음 내용", attachment);
+        assertFalse(output.getAll().contains("synthetic-private-config"));
+    }
     @Test void sendsOnlyRecipientSpecificPreparedContent() {
         ready();
         when(personalized.renderAutomatic(eq(2L),any(),eq(3L),any())).thenReturn(new RenderedNotification("개인 제목",null,List.of("개인 내용")));

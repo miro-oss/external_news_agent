@@ -35,6 +35,12 @@ public final class StoredReportDartFixture {
 
     public void ready(NewsReport report) { stored(report, "READY", financials()); }
 
+    public void ready(NewsReport report, List<Company> companies) {
+        when(attachments.find(report.getId())).thenReturn(companies.stream().map(company ->
+                new ReportDartRepository.Attachment(report.getId(), company, "READY",
+                        "공시 자료를 확인했습니다.", financials())).toList());
+    }
+
     public void stored(NewsReport report, String status, FinancialData data) {
         when(attachments.find(report.getId())).thenReturn(List.of(new ReportDartRepository.Attachment(
                 report.getId(), COMPANY, status, "공시 자료를 확인했습니다.", data)));
