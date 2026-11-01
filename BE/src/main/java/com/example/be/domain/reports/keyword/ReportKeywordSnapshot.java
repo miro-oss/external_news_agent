@@ -8,6 +8,7 @@ public record ReportKeywordSnapshot(String ruleVersion, OffsetDateTime capturedA
                                     String unavailableReason, List<Definition> definitions,
                                     List<Candidate> candidates) {
     public static final String RULE_VERSION = "report-keywords.v1";
+    public static final String RECOVERED_SELECTED_RULE_VERSION = "report-keywords.recovered-selected.v1";
 
     public ReportKeywordSnapshot {
         definitions = List.copyOf(definitions);

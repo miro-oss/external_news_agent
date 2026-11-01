@@ -1,10 +1,14 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.reports.insight.ReportInsightBriefing;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.web.util.HtmlUtils;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** Short, shared reading content. Prose is selected whole by the report projection, never clipped here. */
 final class NotificationBriefingSection {
@@ -31,22 +35,10 @@ final class NotificationBriefingSection {
                 .append(escape("관점 인사이트 · " + audience(insight.audience())))
                 .append("</h2><p style=\"color:#636c78;font-size:12px\">")
                 .append(escape(NotificationInsightBrief.AI_NOTICE)).append("</p>");
-        if (!brief.facts().isEmpty()) {
-            label(html, "원문에서 확인한 내용");
-            for (var fact : brief.facts()) {
-                String type = switch (fact.claimType()) {
-                    case "FORECAST" -> "계획·전망";
-                    case "OPINION" -> "의견·발언";
-                    default -> "확인된 사실";
-                };
-                field(html, type + (fact.attributedTo() == null ? "" : " · " + fact.attributedTo()), fact.text());
-            }
-        }
         if (!brief.overview().isEmpty()) {
             label(html, "업무상 의미");
             for (var item : brief.overview()) {
                 paragraph(html, item.text());
-                field(html, "해석의 조건", item.assumption());
             }
         }
         if (!brief.watchItems().isEmpty()) {
@@ -54,27 +46,39 @@ final class NotificationBriefingSection {
             for (var item : brief.watchItems()) {
                 paragraph(html, item.topic());
                 field(html, "확인할 지표", item.indicator());
-                field(html, "판단 기준", item.trigger());
             }
         }
         if (brief.overview().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
             paragraph(html, NotificationInsightBrief.UNAVAILABLE);
-        if (brief.omittedItemCount() > 0)
-            field(html, "상세 안내", "전체 관점 분석은 보고서 화면에서 확인하세요.");
         html.append("</section>");
     }
 
-    /** Keep interpretation, assumption and observation criteria together while selecting fewer items. */
+    /** Select delivery titles independently of summary length, preserving the final evidence boundary. */
+    static List<String> reportTitles(ReportEventFeedbackProjection.View view) {
+        var content = view.readingContent();
+        var findings = view.findings().stream()
+                .filter(finding -> !view.excludedEvidenceFindingIds().contains(finding.getId())).toList();
+        if (content.structuredContent() == null) return findings.stream()
+                .filter(finding -> finding.getArticle() != null)
+                .map(finding -> finding.getArticle().getTitle()).filter(NotificationBriefingSection::shortTitle)
+                .distinct().limit(2).toList();
+        var allowed = findings.stream().map(Finding::getId).collect(Collectors.toSet());
+        return content.structuredContent().importantEvents().stream()
+                .filter(event -> !event.sourceFindingIds().isEmpty() && allowed.containsAll(event.sourceFindingIds()))
+                .map(event -> event.title()).filter(NotificationBriefingSection::shortTitle).distinct().limit(2).toList();
+    }
+
+    private static boolean shortTitle(String value) {
+        return value != null && !value.isBlank() && value.codePointCount(0, value.length()) <= 100;
+    }
+
+    /** Validate complete source-bound items before selecting delivery-only fields. */
     static ReportInsightBriefing insightBrief(ReportInsightDTO.AudienceInsight insight,
                                               ReportEventFeedbackProjection.View view) {
         var brief = ReportInsightBriefing.from(insight, view.findings(), view.excludedEvidenceFindingIds());
         var overview = brief.overview().stream().limit(1).toList();
         var watches = brief.watchItems().stream().limit(1).toList();
-        var cited = new java.util.HashSet<String>();
-        overview.forEach(item -> cited.addAll(item.basisClaimIds()));
-        watches.forEach(item -> cited.addAll(item.basisClaimIds()));
-        var facts = brief.facts().stream().filter(fact -> cited.contains(fact.id())).limit(1).toList();
-        return new ReportInsightBriefing(brief.version(), facts, overview, watches,
+        return new ReportInsightBriefing(brief.version(), List.of(), overview, watches,
                 brief.omittedItemCount() + brief.overview().size() - overview.size()
                         + brief.watchItems().size() - watches.size());
     }

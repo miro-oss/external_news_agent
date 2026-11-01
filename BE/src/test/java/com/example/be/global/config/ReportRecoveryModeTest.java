@@ -44,6 +44,18 @@ class ReportRecoveryModeTest {
     }
 
     @Test
+    void snapshotRecoveryAlsoDisablesSchedulingReapingAndArticleReanalysis() {
+        runner.withPropertyValues(ReportRecoveryMode.SNAPSHOT_REPORT_IDS_PROPERTY + "=17,18",
+                        ReportRecoveryMode.RUN_IDS_PROPERTY + "=99")
+                .run(context -> {
+                    assertTrue(context.getBeansOfType(ReportRecoveryRunner.class).isEmpty());
+                    assertTrue(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class).isEmpty());
+                    assertTrue(context.getBeansOfType(TaskScheduler.class).isEmpty());
+                    assertTrue(context.getBeansOfType(CollectionRunReaper.class).isEmpty());
+                });
+    }
+
+    @Test
     void ordinaryStartupKeepsSchedulingAndReapingWithoutRecoveryRunner() {
         runner.run(context -> {
             assertTrue(context.getBeansOfType(ReportRecoveryRunner.class).isEmpty());

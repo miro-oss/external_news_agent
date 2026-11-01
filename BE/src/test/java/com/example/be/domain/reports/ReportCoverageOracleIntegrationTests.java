@@ -46,6 +46,147 @@ class ReportCoverageOracleIntegrationTests {
     @Autowired TopicWeeklyReportPersistenceService topicWeekly;
     @Autowired WeeklyReportPersistenceService weekly;
     @Autowired ReportQueryService queries;
+    @Autowired ReportSnapshotRecoveryService recovery;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired com.example.be.domain.reports.comparison.ReportComparisonRepository comparisonInputs;
+
+    @Test void recoveringInvalidatedInputDropsItsStaleReadyComparisonInsteadOfReactivatingIt() {
+        Fixture fixture = fixture();
+        var reservation = persistence.reserve(fixture.run().getId(), NOW);
+        persistence.complete(reservation.reportId(), document(fixture.finding().getId()), NOW);
+        var original = reports.findById(reservation.reportId()).orElseThrow();
+        original.invalidateComparisonInput();
+        em.flush();
+        comparisonInputs.insert(new com.example.be.domain.reports.comparison.ReportChanges(original.getId(), null,
+                null, null, com.example.be.domain.reports.comparison.ReportChanges.Status.READY,
+                "stale", false, List.of(), List.of()), null, NOW);
+        em.clear();
+
+        recovery.recover(List.of(original.getId()), true, NOW.plusHours(1));
+        em.flush(); em.clear();
+
+        assertTrue(comparisonInputs.findInput(original.getId()).isPresent());
+        assertTrue(comparisonInputs.find(original.getId()).isEmpty());
+    }
+
+    @Test void explicitRecoveryReplacesOldGapBaselineWithoutReplacingValidComparisonEvidence() {
+        Fixture fixture = fixture();
+        var prepared = selector.prepare(MONDAY, 10);
+        var reservation = daily.reserveWithSnapshot(MONDAY, List.of(fixture.run().getId()),
+                List.of(fixture.finding().getId()), NOW, selector.preview(prepared).comparisonSnapshot(), prepared);
+        persistence.complete(reservation.reportId(), document(fixture.finding().getId()), NOW);
+        var older = reports.saveAndFlush(NewsReport.builder().reportScope(ReportScope.DAILY)
+                .reportDate(MONDAY.minusDays(3)).reportStatus(ReportStatus.GENERATED).title("이전 날짜")
+                .markdownBody("이전 보고서").modelName("fixture").generatedAt(NOW).build());
+        comparisonInputs.insert(new com.example.be.domain.reports.comparison.ReportChanges(reservation.reportId(), MONDAY,
+                older.getId(), MONDAY.minusDays(3), com.example.be.domain.reports.comparison.ReportChanges.Status.READY,
+                "과거 날짜 공백 비교", false, List.of(), List.of()), null, NOW);
+        em.flush(); em.clear();
+        var before = comparisonInputs.findInput(reservation.reportId()).orElseThrow();
+
+        recovery.recover(List.of(reservation.reportId()), true, NOW.plusHours(1));
+        em.flush(); em.clear();
+
+        assertEquals(before, comparisonInputs.findInput(reservation.reportId()).orElseThrow());
+        assertTrue(comparisonInputs.find(reservation.reportId()).isEmpty());
+    }
+
+    @Test void explicitRecoveryRestoresMissingReadingDataWithoutChangingReportOrCollectionConditions() {
+        Fixture fixture = fixture();
+        var reservation = persistence.reserve(fixture.run().getId(), NOW);
+        persistence.complete(reservation.reportId(), document(fixture.finding().getId()), NOW);
+        em.flush(); em.clear();
+        var original = reports.findById(reservation.reportId()).orElseThrow();
+        String title = original.getTitle();
+        String body = original.getMarkdownBody();
+        var selected = original.getReflectedFindingIds();
+        var contexts = original.getCollectionContexts();
+        var generated = original.getGeneratedAt();
+        jdbc.update("UPDATE news_reports SET report_coverage_snapshot = NULL, report_keyword_snapshot = NULL WHERE id = ?",
+                original.getId());
+        jdbc.update("DELETE FROM news_report_comparison_inputs WHERE report_id = ?", original.getId());
+        em.clear();
+
+        var preview = recovery.recover(List.of(original.getId()), false, NOW.plusHours(1));
+        assertTrue(preview.getFirst().keywordsRestored());
+        assertNull(reports.findById(original.getId()).orElseThrow().getReportKeywordSnapshot());
+        recovery.recover(List.of(original.getId()), true, NOW.plusHours(1));
+        em.flush(); em.clear();
+
+        var repaired = reports.findById(original.getId()).orElseThrow();
+        assertEquals(title, repaired.getTitle());
+        assertEquals(body, repaired.getMarkdownBody());
+        assertEquals(selected, repaired.getReflectedFindingIds());
+        assertEquals(contexts, repaired.getCollectionContexts());
+        assertEquals(generated, repaired.getGeneratedAt());
+        assertEquals(NOW.plusHours(1).atZone(com.example.be.global.config.ApiTimeZone.ZONE).toOffsetDateTime(),
+                repaired.getReportKeywordSnapshot().capturedAt());
+        assertTrue(repaired.getReportKeywordSnapshot().periodLabel().contains("저장 자료 복원"));
+        assertDisplayedKeywords(repaired.getId());
+        var unchanged = repaired.getReportKeywordSnapshot();
+        recovery.recover(List.of(original.getId()), true, NOW.plusHours(2));
+        em.flush(); em.clear();
+        assertEquals(unchanged, reports.findById(original.getId()).orElseThrow().getReportKeywordSnapshot());
+    }
+
+    @Test void weeklyRecoveryIncludesItsHiddenDailyInputWithoutRestoringVisibility() {
+        Fixture fixture = fixture();
+        var dailyReservation = daily.reserve(MONDAY, List.of(fixture.run().getId()),
+                List.of(fixture.finding().getId()), NOW);
+        persistence.complete(dailyReservation.reportId(), document(fixture.finding().getId()), NOW);
+        em.flush();
+        var weeklyReservation = weekly.reserve(MONDAY, NOW);
+        persistence.complete(weeklyReservation.reportId(), document(fixture.finding().getId()), NOW);
+        em.flush();
+        reports.findById(dailyReservation.reportId()).orElseThrow().hide(NOW.plusMinutes(1));
+        em.flush();
+        for (Long id : List.of(dailyReservation.reportId(), weeklyReservation.reportId())) {
+            jdbc.update("UPDATE news_reports SET report_coverage_snapshot = NULL, report_keyword_snapshot = NULL WHERE id = ?", id);
+            jdbc.update("DELETE FROM news_report_comparison_inputs WHERE report_id = ?", id);
+        }
+        // Legacy JSON spacing and raw prose must survive recovery byte for byte. A managed-entity
+        // full-row UPDATE would normalize every converter-backed CLOB even if its value was untouched.
+        List<String> originalClobs = jdbc.queryForObject("""
+                SELECT collection_contexts, weekly_input, structured_content, markdown_body
+                FROM news_reports WHERE id = ?
+                """, (rs, row) -> List.of(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)),
+                weeklyReservation.reportId());
+        List<String> legacyClobs = originalClobs.stream().map(value -> "\n  " + value + "  \n").toList();
+        jdbc.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    UPDATE news_reports SET collection_contexts = ?, weekly_input = ?, structured_content = ?,
+                    markdown_body = ? WHERE id = ?
+                    """);
+            for (int index = 0; index < legacyClobs.size(); index++) {
+                String value = legacyClobs.get(index);
+                statement.setCharacterStream(index + 1, new java.io.StringReader(value), value.length());
+            }
+            statement.setLong(5, weeklyReservation.reportId());
+            return statement;
+        });
+        em.clear();
+
+        var results = recovery.recover(List.of(weeklyReservation.reportId()), true, NOW.plusHours(1));
+        em.flush(); em.clear();
+
+        assertEquals(List.of(dailyReservation.reportId(), weeklyReservation.reportId()),
+                results.stream().map(ReportSnapshotRecoveryService.Outcome::reportId).toList());
+        assertTrue(results.getFirst().hiddenDependency());
+        assertNotNull(reports.findById(dailyReservation.reportId()).orElseThrow().getDeletedAt());
+        var restored = reports.findById(weeklyReservation.reportId()).orElseThrow().getReportKeywordSnapshot();
+        assertNotNull(restored);
+        assertNull(restored.unavailableReason());
+        assertEquals(1, restored.candidates().size());
+        List<String> afterClobs = jdbc.queryForObject("""
+                SELECT collection_contexts, weekly_input, structured_content, markdown_body
+                FROM news_reports WHERE id = ?
+                """, (rs, row) -> List.of(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)),
+                weeklyReservation.reportId());
+        for (int index = 0; index < legacyClobs.size(); index++) assertArrayEquals(
+                legacyClobs.get(index).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                afterClobs.get(index).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "snapshot repair must not rewrite original CLOB column " + index);
+    }
 
     @Test void runClobSnapshotSurvivesLaterMembershipMovesAndNewArticlesWhileVisibilityMayShrink() {
         Fixture fixture = fixture();

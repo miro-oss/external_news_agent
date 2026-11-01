@@ -39,7 +39,7 @@ export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId:
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
     <div className="report-share-heading">
       <h3>다른 사람에게 공유</h3>
-        <p className="muted">이메일은 요약과 상세 PDF를 함께 전달합니다. PDF에는 핵심 요약·중요 이벤트·관찰 항목과 준비된 회사 실적이 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
+        <p className="muted">이메일은 짧은 브리핑과 상세 PDF를 함께 전달합니다. PDF에는 핵심 브리핑·중요 이벤트·관찰 항목과 준비된 회사 실적이 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
     </div>
     {!!deliveries.data?.length && <details className="auto-delivery-status"><summary>자동 전달 상태</summary>
       <ul>{deliveries.data.map((delivery) => <li key={delivery.id}>{delivery.recipientName} · {delivery.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LABELS[delivery.status] ?? delivery.status}{delivery.message && <p className="muted">{delivery.message}</p>}</li>)}</ul>
@@ -75,7 +75,7 @@ export function ReportShareInsightSelector({ value, disabled, onChange }: {
   return <div className="report-share-insight">
     <div className="report-share-insight-description">
       <label htmlFor={id}>함께 보낼 관점 분석</label>
-      <p id={`${id}-help`}>선택한 관점 하나의 저장된 분석을 함께 보냅니다. 이메일·텔레그램에는 요약을, 이메일 PDF에는 상세 분석을 담습니다. 이번 전달에만 적용됩니다.</p>
+      <p id={`${id}-help`}>선택한 관점 하나의 저장된 분석을 함께 보냅니다. 이메일과 PDF에는 업무상 의미와 다음 확인점을 간단히, 텔레그램에는 관점 요약을 담습니다. 이번 전달에만 적용됩니다.</p>
     </div>
     <select id={id} value={value} disabled={disabled} aria-describedby={`${id}-help`}
       onChange={(event) => onChange(event.target.value as Audience | '')}>

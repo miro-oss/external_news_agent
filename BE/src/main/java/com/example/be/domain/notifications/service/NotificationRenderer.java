@@ -3,7 +3,6 @@ package com.example.be.domain.notifications.service;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Audience;
-import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.reports.comparison.ReportChanges;
 import com.example.be.domain.reports.comparison.ReportChangesQueryService;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -214,8 +213,7 @@ public class NotificationRenderer {
         html.append("<p style=\"margin:0 0 16px;color:#636c78;font-size:12px\">보도량: ")
                 .append(escape(coverage == null ? ReportCoverageService.periodLabel(report) : coverage.periodLabel()))
                 .append(" · 매체 수는 원문 사이트 기준입니다.</p>");
-        var briefing = ReportBriefing.from(view);
-        appendEmailBriefing(html, briefing, content, findings);
+        appendEmailBriefing(html, view);
         if (unavailableAudience != null)
             NotificationBriefingSection.field(html, "관점 준비 상태", NotificationBriefingSection.unavailable(unavailableAudience));
         NotificationBriefingSection.emailInsight(html, insight, view);
@@ -238,12 +236,9 @@ public class NotificationRenderer {
             html.append("<p style=\"margin:-12px 0 16px;color:#636c78;font-size:12px;line-height:1.7\">")
                     .append(escape(NotificationCoverage.label(counts))).append("</p>");
             NotificationCompanySection.email(html, card.sourceFindingIds(), companies, companyPages);
-            boolean inBrief = briefing.items().stream().anyMatch(item ->
-                    new java.util.HashSet<>(item.sourceFindingIds()).equals(new java.util.HashSet<>(card.sourceFindingIds()))
-                            && item.summary().equals(card.summary()));
-            if (!inBrief && card.summary().codePointCount(0, card.summary().length()) <= 180)
+            if (card.summary().codePointCount(0, card.summary().length()) <= 180)
                 NotificationBriefingSection.paragraph(html, card.summary());
-            else if (!inBrief)
+            else
                 NotificationBriefingSection.field(html, "상세 안내", "긴 요약과 후속 확인 내용은 첨부 PDF에서 확인하세요.");
             appendRepresentativeArticles(html, counts);
             appendCardSources(html, card.urls(), true);
@@ -256,40 +251,15 @@ public class NotificationRenderer {
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));
     }
 
-    private void appendEmailBriefing(StringBuilder html, ReportBriefing brief, ReportReadingContent content,
-                                     List<Finding> findings) {
+    private void appendEmailBriefing(StringBuilder html, ReportEventFeedbackProjection.View view) {
         html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
                 + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
                 + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:15px\">핵심 브리핑</h2>");
         int number = 0;
-        for (var item : brief.items().stream().limit(EMAIL_MAX_ISSUES).toList()) {
-            NotificationBriefingSection.label(html, (++number) + ". " + item.title());
-            NotificationBriefingSection.paragraph(html, item.summary());
-        }
-        if (!brief.watchItems().isEmpty()) {
-            NotificationBriefingSection.label(html, "다음 확인점");
-            for (var item : brief.watchItems().stream().limit(1).toList()) NotificationBriefingSection.field(html, item.topic(), item.reason());
-        }
-        int omitted = brief.omittedItemCount() + Math.max(0, brief.items().size() - EMAIL_MAX_ISSUES)
-                + Math.max(0, brief.watchItems().size() - 1);
-        if (omitted > 0)
-            NotificationBriefingSection.field(html, "상세 안내", "나머지 " + omitted + "개 항목은 첨부 PDF에서 확인하세요.");
-        if (brief.items().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0) {
-            if (content.structuredContent() == null) {
-                // Legacy prose has no per-sentence source bindings; keep it separate from the linked brief.
-                NotificationBriefingSection.label(html, "저장된 요약");
-                var legacy = digest(content, findings, Integer.MAX_VALUE).stream()
-                        .filter(line -> line.codePointCount(0, line.length()) <= 180).limit(EMAIL_MAX_ISSUES).toList();
-                legacy.forEach(line -> NotificationBriefingSection.paragraph(html, line));
-                if (legacy.isEmpty()) NotificationBriefingSection.paragraph(html, "긴 요약은 첨부 PDF에서 확인하세요.");
-            } else {
-                NotificationBriefingSection.paragraph(html, findings.isEmpty()
-                        ? "이번 수집에서 새롭게 정리할 주요 내용이 없습니다."
-                        : "짧은 브리핑의 연결 근거가 없습니다. 첨부 PDF의 저장된 내용을 확인하세요.");
-            }
-        }
-        html.append("<p style=\"margin:16px 0 0;color:#636c78;font-size:12px\">근거 기사와 자세한 내용은 아래 이슈 및 첨부 PDF에서 확인하세요.</p>")
-                .append("</td></tr></tbody></table>");
+        var titles = NotificationBriefingSection.reportTitles(view);
+        for (String title : titles) NotificationBriefingSection.label(html, (++number) + ". " + title);
+        if (titles.isEmpty()) NotificationBriefingSection.paragraph(html, "이번 수집에서 새롭게 정리할 주요 내용이 없습니다.");
+        html.append("</td></tr></tbody></table>");
     }
 
     /** An interpretation and its assumptions are indivisible; budget pressure drops whole items. */

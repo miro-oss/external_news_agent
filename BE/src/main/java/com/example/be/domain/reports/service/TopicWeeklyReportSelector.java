@@ -39,7 +39,14 @@ public class TopicWeeklyReportSelector {
     }
 
     public Prepared prepare(Long topicId, String topicName, LocalDate date) {
+        return prepare(topicId, topicName, date, null);
+    }
+
+    /** Historical repair cannot admit runs outside the report's original saved inputs. */
+    public Prepared prepare(Long topicId, String topicName, LocalDate date, java.util.Set<Long> savedRunIds) {
         List<Finding> candidates = findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay());
+        if (savedRunIds != null) candidates = candidates.stream()
+                .filter(finding -> savedRunIds.contains(finding.getRun().getId())).toList();
         var links = OracleInClause.batches(candidates.stream().map(f -> f.getArticle().getId()).distinct().toList())
                 .stream().flatMap(ids -> memberships.findByArticleIds(ids).stream())
                 .filter(link -> link.getIssue().getArticleCount() > 0 && link.getIssue().getTopic().getId().equals(topicId))

@@ -108,7 +108,7 @@ class PersonalizedNotificationRendererTest {
         assertFalse(body.contains("공용 제외"));
         assertFalse(body.contains("숨겨진 헤드라인"));
         assertTrue(body.contains("허용된 관점 해석"));
-        assertTrue(body.contains("허용된 전제"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
     }
 
     @ParameterizedTest
@@ -122,7 +122,7 @@ class PersonalizedNotificationRendererTest {
             assertRejectedContentAbsent(body);
             assertTrue(body.contains("정상 사건 제목"));
             assertTrue(body.contains("정상 사건 주요 내용"));
-            assertTrue(body.contains("정상 후속 확인"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("정상 후속 확인"));
             assertTrue(body.contains("https://example.com/source-12"));
             assertTrue(body.contains("https://example.com/source-13"));
             assertTrue(body.contains("https://news.example.com/#/reports?reportId=17"));
@@ -368,7 +368,7 @@ class PersonalizedNotificationRendererTest {
                 assertTrue(text.contains("정상 사건"));
                 if (ready) {
                     assertTrue(text.contains("자동 전달에서 허용된 판단"));
-                    assertTrue(text.contains("자동 전달에서 유지할 조건"));
+                    assertFalse(text.contains("자동 전달에서 유지할 조건"));
                 } else {
                     assertTrue(text.replaceAll("\\s", "").contains("관점분석이준비되지않아기본보고서만전달합니다."));
                 }

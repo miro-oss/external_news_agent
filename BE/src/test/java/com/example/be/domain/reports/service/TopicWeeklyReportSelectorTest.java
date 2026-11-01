@@ -32,6 +32,16 @@ class TopicWeeklyReportSelectorTest {
     private final LocalDate date = LocalDate.of(2026, 9, 21);
 
     @Test
+    void recoveryRestrictsSavedRunsBeforeChoosingLatestTopicObservation() {
+        Finding saved = finding(1, 1L, 1);
+        Finding later = finding(2, 1L, 2);
+        inputs(List.of(saved, later), List.of(link(saved, 10, 1L, 10), link(later, 10, 1L, 10)));
+
+        assertEquals(List.of(saved), selector.prepare(1L, "HBM", date, Set.of(1L)).candidates());
+        verify(memberships).findByArticleIds(List.of(1L));
+    }
+
+    @Test
     void companySelectionRefillsTopicTopNAndFreezesOneEvaluationForTheWholeWeek() {
         var interests = mock(CompanyInterestSelection.class);
         var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests);

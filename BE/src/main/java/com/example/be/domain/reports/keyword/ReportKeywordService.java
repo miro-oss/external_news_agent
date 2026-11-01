@@ -24,7 +24,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Projects only frozen candidates. Final top-N selection must not become the denominator. */
+/** Projects frozen candidates; explicitly labeled historical repairs may use the original included issues. */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -55,7 +55,9 @@ public class ReportKeywordService {
     public FullAggregation aggregate(NewsReport report, ReportEventFeedbackProjection.View view, boolean delivery) {
         var snapshot = report.getReportKeywordSnapshot();
         if (snapshot == null) return unavailableAggregation(report, "NO_SNAPSHOT");
-        if (!ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())) return unavailableAggregation(report, "INVALID_SNAPSHOT");
+        if (!ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())
+                && !ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION.equals(snapshot.ruleVersion()))
+            return unavailableAggregation(report, "INVALID_SNAPSHOT");
         if (snapshot.unavailableReason() != null) return unavailableAggregation(report, snapshot.unavailableReason());
         if (!valid(snapshot)) return unavailableAggregation(report, "INVALID_SNAPSHOT");
 

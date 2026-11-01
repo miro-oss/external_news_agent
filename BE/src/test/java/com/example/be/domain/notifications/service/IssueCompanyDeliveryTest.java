@@ -81,7 +81,7 @@ class IssueCompanyDeliveryTest {
                     if (link.getAction() instanceof PDActionURI action && action.getURI().startsWith("https://dart.fss.or.kr/")) filingLinks++;
                 }
             }
-            assertTrue(issueLinks >= 3); // briefing, issue detail, company index
+            assertTrue(issueLinks >= 2); // issue detail and company index; title-only briefing has no company links
             assertEquals(2, filingLinks); // receipts deduplicate recent + financial sources
         }
         var renderer = new NotificationRenderer(null, null, null, summary);

@@ -89,6 +89,24 @@ class M3KeywordRenderingTest {
         }
     }
 
+    @Test void recoveredSelectedIssuesUseAnExplicitReportOnlyBasisInBothFormats() throws Exception {
+        var stats = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null,
+                "report-keywords.recovered-selected.v1", OffsetDateTime.parse("2026-11-02T09:00:00+09:00"),
+                "2026-10-26 ~ 2026-11-01 수집 기준 (한국시간)", 4,
+                List.of(new ReportKeywordDTO.Item("HBM", 3, 75.0, List.of())), 0);
+        String emailText = Jsoup.parse(renderEmail(stats)).text();
+        try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, stats).bytes())) {
+            for (String text : List.of(emailText, new PDFTextStripper().getText(document))) {
+                String compact = text.replaceAll("\\s", "");
+                assertTrue(compact.contains("보고서포함이슈4건"));
+                assertTrue(compact.contains("이보고서에포함된유효이슈기준입니다."));
+                assertTrue(compact.contains("3건/보고서포함4건·75%"));
+                assertFalse(compact.contains("상위선정전"));
+                assertFalse(compact.contains("3건/전체4건"));
+            }
+        }
+    }
+
     @Test void telegramKeepsItsExistingOutputWhenKeywordDataIsProvided() {
         var channel = NotificationChannel.builder().channelType(ChannelType.TELEGRAM).maxLength(3500).build();
         var withKeywords = email.render(report, channel, view, null, null, Map.of(), null, null, available(10, List.of()));

@@ -41,7 +41,7 @@ class M2BriefingRenderingTest {
             + "다만 공급 계약이나 실제 납품은 확정되지 않았습니다.";
 
     @Test
-    void sameBoundedBriefPreservesForecastConditionsAndMovesWholeLongItemsIntoOfflineDetail() throws Exception {
+    void titleOnlyBriefKeepsLongEventTitlesAndMovesTheirProseIntoOfflineDetail() throws Exception {
         var view = view(false);
         var insight = insight();
         var brief = ReportBriefing.from(view);
@@ -51,13 +51,18 @@ class M2BriefingRenderingTest {
         assertEquals(1, brief.omittedItemCount());
         assertTrue(html.indexOf("핵심 브리핑") < html.indexOf("관점 인사이트"));
         assertTrue(html.indexOf("관점 인사이트") < html.indexOf("주요 이슈"));
-        assertTrue(dom.text().contains("계획·전망"));
-        assertTrue(dom.text().contains("고객 인증이 완료되고 투자가 집행되는 경우"));
-        assertTrue(dom.text().contains("계약 공시가 확인되면 공급 일정을 다시 검토"));
+        assertFalse(dom.text().contains("계획·전망"));
+        assertFalse(dom.text().contains("고객 인증이 완료되고 투자가 집행되는 경우"));
+        assertFalse(dom.text().contains("계약 공시가 확인되면 공급 일정을 다시 검토"));
         assertFalse(html.contains("원문: 「"));
         assertFalse(html.contains("공급사별 인증 진행 상황"));
         assertFalse(html.contains("자유 서술 헤드라인"));
-        assertEquals(1, dom.select("p").stream().filter(p -> p.text().equals(brief.items().getFirst().summary())).count());
+        var titleBox = dom.selectFirst("td[bgcolor='#e8f3ff']");
+        assertNotNull(titleBox);
+        assertEquals(List.of("1. 후속 생산 계획 발표", "2. 공급 준비 현황"), titleBox.select("h3").eachText());
+        assertTrue(titleBox.select("p").isEmpty());
+        assertFalse(titleBox.text().contains("다음 확인점"));
+        assertFalse(titleBox.text().contains("상세 안내"));
 
         var rendered = pdf.renderDetailed(report, view, insight);
         try (var document = Loader.loadPDF(rendered.bytes())) {
@@ -68,6 +73,10 @@ class M2BriefingRenderingTest {
             assertTrue(text.indexOf("관점 한눈에") < text.indexOf("중요 이벤트"));
             assertFalse(text.contains("원문: 「"));
             assertFalse(text.contains("리포트 관점 분석"));
+            assertFalse(text.contains("핵심 요약"));
+            assertFalse(text.contains("원문에서 확인한 내용"));
+            assertFalse(text.contains("해석의 조건"));
+            assertFalse(text.contains("판단 기준"));
             assertFalse(text.contains("관점 분석 자세히 보기"));
             var destinations = document.getDocumentCatalog().getNames().getDests().getNames();
             assertTrue(destinations.keySet().containsAll(Set.of("summary", "report-detail")));
@@ -99,7 +108,7 @@ class M2BriefingRenderingTest {
     }
 
     @Test
-    void emailKeepsTwoIssuesAndOneFollowUpWhilePdfRetainsTheRemainingReportContent() throws Exception {
+    void emailKeepsOnlyTwoBriefingTitlesWhilePdfRetainsEventAndWatchDetails() throws Exception {
         var findings = java.util.stream.LongStream.rangeClosed(11, 15).mapToObj(this::finding).toList();
         var events = findings.stream().map(finding -> new ReportContent.ImportantEvent(
                 "핵심 사건 " + finding.getId(), "사건의 확인된 요약 " + finding.getId(),
@@ -112,11 +121,11 @@ class M2BriefingRenderingTest {
         String text = Jsoup.parse(html).text();
         assertTrue(text.contains("핵심 사건 11"));
         assertTrue(text.contains("핵심 사건 12"));
-        assertTrue(text.contains("먼저 확인할 조건"));
+        assertFalse(text.contains("먼저 확인할 조건"));
         assertFalse(text.contains("핵심 사건 13"));
         assertFalse(text.contains("추가로 확인할 조건"));
         assertFalse(text.contains("추가 의미"));
-        assertTrue(text.contains("나머지 4개 항목은 첨부 PDF"));
+        assertFalse(text.contains("나머지 4개 항목은 첨부 PDF"));
         assertTrue(text.length() < 1100);
         try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
             String full = new PDFTextStripper().getText(document);
@@ -139,6 +148,18 @@ class M2BriefingRenderingTest {
             assertFalse(text.contains("설비 준비 일정"));
             assertFalse(text.contains("계약 공시가"));
         }
+    }
+
+    @Test
+    void titleOnlyProjectionRejectsMixedOrExcludedEvidenceEvenWhenFindingRemainsVisible() {
+        var content = new ReportContent(List.of(), List.of(
+                new ReportContent.ImportantEvent("혼합 근거 제목", "요약", "", List.of(11L, 12L)),
+                new ReportContent.ImportantEvent("제외된 제목", "요약", "", List.of(11L)),
+                new ReportContent.ImportantEvent("허용 제목", LONG_TEXT, "", List.of(12L))), List.of(), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11), finding(12)),
+                new ReportReadingContent("", content), true, Set.of(11L));
+
+        assertEquals(List.of("허용 제목"), NotificationBriefingSection.reportTitles(view));
     }
 
     @Test

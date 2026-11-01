@@ -22,18 +22,17 @@ import static org.mockito.Mockito.*;
 
 class ReportPdfInsightSectionTest {
     @Test
-    void compactOverviewKeepsTheFirstCompleteInterpretationConditionAndObservation() throws Exception {
+    void compactOverviewShowsOnlyMeaningAndObservationIndicator() throws Exception {
         var insight = insight(List.of(fact(11), fact(12)), List.of(
                         new Overview("첫 번째 종합 판단", List.of("11:0"), "첫 번째 조건"),
                         new Overview("두 번째 종합 판단", List.of("12:0"), "두 번째 조건")),
                 List.of(new WatchItem("후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", List.of("11:0")),
                         new WatchItem("두 번째 확인점", "두 번째 지표", "두 번째 기준", List.of("12:0"))));
         String text = render(insight, view(Set.of()));
-        for (String expected : List.of("관점 한눈에 · 장비·소재사", "확인된 사실", "확인된 원문 11",
-                "업무상 의미", "첫 번째 종합 판단", "해석의 조건", "첫 번째 조건", "다음 확인점",
-                "후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", "전체 관점 분석은 보고서 화면에서"))
+        for (String expected : List.of("관점 한눈에 · 장비·소재사", "업무상 의미", "첫 번째 종합 판단", "다음 확인점",
+                "후속 투자 일정", "분기별 발주 규모"))
             assertTrue(text.contains(expected), expected + "\n" + text);
-        for (String hidden : List.of("두 번째", "확인된 원문 12", "리포트 관점 분석", "뒤쪽 관점 분석", "내부 모델"))
+        for (String hidden : List.of("원문에서 확인한 내용", "확인된 원문", "해석의 조건", "첫 번째 조건", "판단 기준", "발주 증가 여부", "두 번째", "리포트 관점 분석", "뒤쪽 관점 분석", "내부 모델"))
             assertFalse(text.contains(hidden), hidden + "\n" + text);
     }
 
@@ -47,12 +46,12 @@ class ReportPdfInsightSectionTest {
                         new WatchItem("독립 확인점", "독립 지표", "독립 기준", List.of("12:0"))));
         String text = render(insight, view(Set.of(11L)));
         for (String hidden : List.of("제외된", "혼합된", "확인된 원문 11")) assertFalse(text.contains(hidden));
-        for (String expected : List.of("독립 판단", "독립 조건", "독립 확인점", "독립 지표", "독립 기준"))
+        for (String expected : List.of("독립 판단", "독립 확인점", "독립 지표"))
             assertTrue(text.contains(expected));
     }
 
     @Test
-    void sourceWrappersAreRemovedWithoutChangingNestedProseOrConditions() throws Exception {
+    void sourceWrappersAreRemovedWhileOnlySelectedDisplayFieldsRemain() throws Exception {
         var insight = insight(List.of(fact(11)), List.of(new Overview(
                         "원문: 「회사 측은 「검토 중」이라고 밝혔다.」 해석: 실제 발주를 확인해야 합니다.",
                         List.of("11:0"), "원문: 「일정 미정」 미확인 가정: 투자가 집행되는 경우")),
@@ -61,8 +60,7 @@ class ReportPdfInsightSectionTest {
                         List.of("11:0"))));
         String text = render(insight, view(Set.of()));
         assertFalse(text.contains("원문: 「"));
-        for (String expected : List.of("실제 발주를 확인해야 합니다.", "투자가 집행되는 경우", "공식 투자 일정",
-                "분기별 발주 금액", "발주 취소 여부")) assertTrue(text.contains(expected));
+        for (String expected : List.of("실제 발주를 확인해야 합니다.", "공식 투자 일정", "분기별 발주 금액")) assertTrue(text.contains(expected));
     }
 
     @Test

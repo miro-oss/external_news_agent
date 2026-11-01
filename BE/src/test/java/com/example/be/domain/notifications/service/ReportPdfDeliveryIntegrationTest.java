@@ -85,13 +85,13 @@ class ReportPdfDeliveryIntegrationTest {
         try (var document = Loader.loadPDF(result.bytes())) {
             String text = boundedText(document);
             for (String section : List.of("핵심 브리핑", "관점 한눈에", "지난 보고서와 달라진 점", "키워드 변화",
-                    "키워드로 보는 이슈", "핵심 요약", "중요 이벤트", "관련 기사 7건", "3개 매체",
+                    "키워드로 보는 이슈", "중요 이벤트", "관련 기사 7건", "3개 매체",
                     "변화 비교 상세", "회사별 부록 바로가기", "회사 실적 · 공시", "공시 상세", "기사에서 직접 인용"))
                 assertTrue(text.contains(section), section);
             for (String hidden : List.of("숨긴", "javascript:", "file:///", "알 수 없는 자유 헤드라인"))
                 assertFalse(text.contains(hidden), hidden);
-            assertTrue(text.contains("해석의 조건"));
-            assertTrue(text.contains("발주가 확정되고 투자 집행이 유지되는 경우"));
+            assertFalse(text.contains("해석의 조건"));
+            assertFalse(text.contains("발주가 확정되고 투자 집행이 유지되는 경우"));
             assertTrue(text.contains("자료 없음은 0이 아닙니다."));
             assertTrue(text.contains("산출값"));
             assertTrue(text.contains("신규 집계"));

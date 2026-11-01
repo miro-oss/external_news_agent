@@ -138,7 +138,7 @@ public class ReportPdfRenderer {
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
-            if (content != null) briefing(pdf, ReportBriefing.from(view), companies);
+            if (content != null) briefing(pdf, view);
             if (unavailableAudience != null) pdf.muted(NotificationBriefingSection.unavailable(unavailableAudience));
             ReportPdfInsightSection.brief(pdf, insight, view);
             NotificationChangesSection.pdfBrief(pdf, changes);
@@ -158,31 +158,17 @@ public class ReportPdfRenderer {
         }
     }
 
-    private void briefing(ReportPdfLayout pdf, ReportBriefing brief, List<CompanyAttachment> companies) throws IOException {
+    private void briefing(ReportPdfLayout pdf, ReportEventFeedbackProjection.View view) throws IOException {
         pdf.section("핵심 브리핑");
         int number = 0;
-        for (var item : brief.items()) {
-            pdf.reserve(110);
-            pdf.subheading((++number) + ". " + item.title());
-            pdf.paragraph(item.summary());
-            NotificationCompanySection.pdf(pdf, item.sourceFindingIds(), companies);
-            if (item.significance() != null && !item.significance().isBlank()) pdf.muted("읽을 포인트 · " + item.significance());
-        }
-        if (!brief.watchItems().isEmpty()) {
-            pdf.subheading("다음 확인점");
-            for (var item : brief.watchItems()) pdf.bullet(item.topic() + " · " + item.reason());
-        }
-        if (brief.omittedItemCount() > 0) pdf.muted("나머지 " + brief.omittedItemCount() + "개 항목은 뒤쪽 이슈와 근거에서 확인하세요.");
-        if (brief.items().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
-            pdf.muted("짧은 브리핑의 연결 근거가 없습니다. 뒤쪽의 저장된 요약을 확인하세요.");
+        var titles = NotificationBriefingSection.reportTitles(view);
+        for (String title : titles) pdf.subheading((++number) + ". " + title);
+        if (titles.isEmpty()) pdf.muted("이번 수집에서 새롭게 정리할 주요 내용이 없습니다.");
     }
 
     private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
                       ReportCoverageDTO.View coverage, List<CompanyAttachment> companies) throws IOException {
-        pdf.section("핵심 요약");
         pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
-        if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
-        for (String summary : content.executiveSummary()) pdf.bullet(summary);
         pdf.reserve(140);
         pdf.section("중요 이벤트");
         var events = content.importantEvents().stream().filter(event -> !event.sourceFindingIds().isEmpty()
@@ -251,7 +237,7 @@ public class ReportPdfRenderer {
             pdf.section("회사 실적 · 공시");
             pdf.subheading(entry.company().corpName());
             pdf.muted(entry.company().stockCode() == null || entry.company().stockCode().isBlank() ? "비상장" : entry.company().stockCode());
-            pdf.internalLink("핵심 요약으로 돌아가기", "summary");
+            pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
             if (!("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) || entry.data() == null) {
                 pdf.paragraph("표시할 저장된 실적·공시 자료가 없습니다.");
                 continue;

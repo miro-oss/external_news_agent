@@ -97,6 +97,18 @@ class ReportKeywordChangesServiceTest {
         verifyNoInteractions(keywords, criteria);
     }
 
+    @Test void recoveredIncludedIssueBasisCannotBeComparedAsACompletePreRankingUniverse() {
+        var before = report(1);
+        var known = report(2).getReportKeywordSnapshot();
+        var now = NewsReport.builder().id(2L).companySelectionRecorded(true).reportKeywordSnapshot(
+                new ReportKeywordSnapshot(ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION,
+                        known.capturedAt(), "보고서 포함 이슈 기준 · 저장 자료 복원", null,
+                        known.definitions(), known.candidates())).build();
+        assertEquals("CONDITIONS_UNVERIFIED", service.project(before, now,
+                work(snapshot(1), snapshot(2)), VIEW, VIEW, false).reason());
+        verifyNoInteractions(keywords, criteria);
+    }
+
     @Test void sourceConditionsMustCoverEveryFrozenKeywordRunAndTopic() {
         var before = report(1);
         var known = report(2).getReportKeywordSnapshot();

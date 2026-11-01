@@ -188,21 +188,24 @@ class NotificationRendererTest {
                 .generatedAt(LocalDateTime.of(2026, 9, 4, 0, 5)).build();
         when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(List.of(finding()));
         for (ChannelType type : ChannelType.values()) {
-            assertTrue(renderer.render(daily, channel(type, 3500)).chunks().getFirst().contains("검증된 핵심 요약"));
+            String body = renderer.render(daily, channel(type, 3500)).chunks().getFirst();
+            if (type == ChannelType.EMAIL) assertTrue(body.contains("HBM 공급 계약 확대"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("검증된 핵심 요약"));
         }
         org.mockito.Mockito.verify(findingRepository, org.mockito.Mockito.never())
                 .findForReportByRunId(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void emailContainsOnlySummaryAndSourceLink() {
+    void legacyEmailContainsOnlyFindingTitleAndSourceLink() {
         NewsReport report = report("# 내부 보고서\n기사 전문을 그대로 싣지 말 것");
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding()));
 
         RenderedNotification rendered = renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE));
 
         String body = rendered.chunks().getFirst();
-        assertTrue(body.contains("검증된 핵심 요약"));
+        assertTrue(body.contains("HBM 공급 계약 확대"));
+        assertFalse(body.contains("검증된 핵심 요약"));
         assertTrue(body.contains("https://example.com/article"));
         assertFalse(body.contains("기사 전문을 그대로 싣지 말 것"));
         assertFalse(body.contains("원문 전체 내용"));
@@ -331,7 +334,7 @@ class NotificationRendererTest {
                 assertFalse(cards.getFirst().html().contains("https://example.com/second"));
                 assertTrue(cards.getLast().html().contains("https://example.com/second"));
                 assertFalse(cards.getLast().html().contains("https://example.com/first"));
-                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용", "둘째 확인 이유"))
+                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용"))
                     assertTrue(document.text().contains(visible));
                 assertFalse(body.contains("저장된 보고서의 핵심 결론")); // Unbound executive summary is not relabeled as a linked brief.
                 continue;
@@ -387,8 +390,8 @@ class NotificationRendererTest {
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
             assertTrue(body.contains("유효 사건 내용"));
-            assertTrue(body.contains("유효 확인 주제"));
-            assertTrue(body.contains("유효 확인 이유"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("유효 확인 주제"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("유효 확인 이유"));
             assertTrue(body.contains("https://example.com/valid"));
             for (String unsupported : List.of("없는 ID 사건", "기사 ID 사건", "배열 위치 사건", "일부만 유효 사건",
                     "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "표시 금지")) {
@@ -445,8 +448,8 @@ class NotificationRendererTest {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
             assertTrue(body.contains("&lt;script&gt;사건&lt;/script&gt;"));
             assertTrue(body.contains("내용 &amp; &lt;img src=x&gt;"));
-            assertTrue(body.contains("&lt;b&gt;확인 주제&lt;/b&gt;"));
-            assertTrue(body.contains("이유 &amp; &lt;iframe&gt;"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("&lt;b&gt;확인 주제&lt;/b&gt;"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("이유 &amp; &lt;iframe&gt;"));
             assertTrue(body.contains("https://example.com/safe?a=1&amp;b=2"));
             assertFalse(body.contains("javascript:"));
             assertTrue(org.jsoup.Jsoup.parse(body).select("script, img, iframe").isEmpty());

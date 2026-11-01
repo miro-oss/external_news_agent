@@ -48,6 +48,17 @@ public class ReportKeywordCapture {
     }
 
     public ReportKeywordSnapshot mergeWeekly(NewsReport report, List<NewsReport> sources, LocalDateTime now) {
+        return mergeWeekly(report, sources, now, null);
+    }
+
+    /** Explicit historical recovery uses recorded policy applications, never today's active criteria. */
+    public ReportKeywordSnapshot mergeRecoveredWeekly(NewsReport report, List<NewsReport> sources,
+            LocalDateTime now, Set<Long> recordedCriterionTopics) {
+        return mergeWeekly(report, sources, now, Set.copyOf(recordedCriterionTopics));
+    }
+
+    private ReportKeywordSnapshot mergeWeekly(NewsReport report, List<NewsReport> sources, LocalDateTime now,
+            Set<Long> recordedCriterionTopics) {
         if (sources.isEmpty() || sources.stream().anyMatch(source -> source.getReportKeywordSnapshot() == null
                 || !ReportKeywordSnapshot.RULE_VERSION.equals(source.getReportKeywordSnapshot().ruleVersion())
                 || source.getReportKeywordSnapshot().unavailableReason() != null))
@@ -81,11 +92,16 @@ public class ReportKeywordCapture {
         Set<Long> unassessedTopics = kept.stream().filter(candidate -> !selected.contains(candidate.findingId()))
                 .map(ReportKeywordSnapshot.Candidate::topicId).collect(Collectors.toSet());
         if (!unassessedTopics.isEmpty()) {
-            try {
-                if (!companyInterests.activeForTopics(unassessedTopics).isEmpty())
+            if (recordedCriterionTopics != null) {
+                if (unassessedTopics.stream().anyMatch(recordedCriterionTopics::contains))
                     return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
-            } catch (RuntimeException unavailable) {
-                return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+            } else {
+                try {
+                    if (!companyInterests.activeForTopics(unassessedTopics).isEmpty())
+                        return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+                } catch (RuntimeException unavailable) {
+                    return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+                }
             }
         }
         return snapshot(report, now, null, List.copyOf(definitions.values()), kept);

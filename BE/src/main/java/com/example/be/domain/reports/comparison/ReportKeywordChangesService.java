@@ -35,6 +35,9 @@ public class ReportKeywordChangesService {
         if (incompatible != null) return unavailable(incompatible);
         var priorSnapshot = previous.getReportKeywordSnapshot();
         var currentSnapshot = current.getReportKeywordSnapshot();
+        if (ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION.equals(priorSnapshot.ruleVersion())
+                || ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION.equals(currentSnapshot.ruleVersion()))
+            return unavailable("CONDITIONS_UNVERIFIED");
         if ("COMPANY_SCOPE_UNVERIFIED".equals(priorSnapshot.unavailableReason())
                 || "COMPANY_SCOPE_UNVERIFIED".equals(currentSnapshot.unavailableReason()))
             return unavailable("CONDITIONS_UNVERIFIED");

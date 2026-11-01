@@ -101,7 +101,7 @@ class DailyFeedbackNotificationPropagationTest {
                 assertRejectedContentAbsent(body);
                 assertTrue(body.contains("정상 주간 사건"));
                 assertTrue(body.contains("정상 주간 요약"));
-                assertTrue(body.contains("정상 후속 확인"));
+                assertEquals(channelType == ChannelType.TELEGRAM, body.contains("정상 후속 확인"));
                 assertTrue(body.contains("https://example.com/source-22"));
             }
 

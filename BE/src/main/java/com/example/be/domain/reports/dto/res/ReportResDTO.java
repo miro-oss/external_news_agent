@@ -134,7 +134,7 @@ public class ReportResDTO {
         @Schema(description = "최종 표시 근거에 연결된 짧은 브리핑. 저장 이슈 최대 3개·관찰 최대 2개, 긴 항목은 상세에 보존. includeFindings=false에도 반환")
         @Builder.Default
         private final ReportBriefing briefing = ReportBriefing.empty();
-        @Schema(description = "상위 선정 전 고유 이슈의 등록 키워드 비중·동시 등장 단어. includeFindings=false에도 반환. 당시 근거가 없거나 전체 후보 제외 기준을 확인할 수 없으면 UNAVAILABLE이며 숫자를 추정하지 않음")
+        @Schema(description = "상위 선정 전 고유 이슈의 등록 키워드 비중·동시 등장 단어. 명시적 과거 복원의 제한 집계는 ruleVersion=report-keywords.recovered-selected.v1 및 periodLabel로 보고서 포함 이슈 기준임을 표시. includeFindings=false에도 반환. 당시 근거 또는 적용 제외 기준을 검증할 수 없으면 UNAVAILABLE이며 숫자를 추정하지 않음")
         private final ReportKeywordDTO.View keywordStats;
         @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
         private final List<ReportCollectionContext> collectionContexts;

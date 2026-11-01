@@ -102,6 +102,9 @@ class ReportCoverageCaptureTest {
         when(memberships.findByArticleIds(anyCollection())).thenReturn(List.of(link(representative, issue), link(additional, issue)));
         var snapshot = capture.captureTopicWeek(report, List.of(prepared), now);
         assertEquals(List.of(7L, 99L), snapshot.observations().stream().map(ReportCoverageSnapshot.Observation::runId).toList());
+        var restored = capture.captureTopicWeek(report, List.of(prepared), now, Set.of(7L));
+        assertEquals(List.of(7L), restored.observations().stream().map(ReportCoverageSnapshot.Observation::runId).toList(),
+                "explicit recovery stays within the report's stored source runs");
         verify(observations, never()).findReportCoverageByRunIds(anyCollection());
         assertEquals(List.of(7L), report.getSourceRunIds(), "legacy sourceRunIds contract stays intact");
     }

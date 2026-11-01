@@ -39,7 +39,7 @@ class ReportPdfNavigationTest {
         var result = new ReportPdfRenderer(dart).renderDetailed(report, view, null);
         try (var document = Loader.loadPDF(result.bytes())) {
             String text = new PDFTextStripper().getText(document);
-            assertTrue(text.indexOf("핵심 내용을 먼저") < text.indexOf("회사별 부록 바로가기"));
+            assertTrue(text.indexOf("핵심 브리핑") < text.indexOf("회사별 부록 바로가기"));
             assertTrue(text.indexOf("회사별 부록 바로가기") < text.indexOf("회사 실적 · 공시"));
             assertEquals(Set.of("00000001", "00000002"), result.companyPages().keySet());
             assertTrue(result.companyPages().get("00000002") > result.companyPages().get("00000001"));
@@ -57,7 +57,8 @@ class ReportPdfNavigationTest {
             }
             assertTrue(links >= 4);
             result.companyPages().values().forEach(page -> assertTrue(text.contains("p. " + page)));
-            assertTrue(text.contains("핵심 요약으로 돌아가기"));
+            assertTrue(text.contains("핵심 브리핑으로 돌아가기"));
+            assertFalse(text.contains("핵심 요약"));
             assertTrue(text.contains("표시할 저장된 실적·공시 자료가 없습니다."));
         }
         verify(dart).getStored(report);

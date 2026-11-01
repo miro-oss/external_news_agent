@@ -63,11 +63,17 @@ public class ReportCoverageCapture {
 
     public ReportCoverageSnapshot captureTopicWeek(NewsReport report,
             List<TopicWeeklyReportSelector.Prepared> prepared, LocalDateTime now) {
+        return captureTopicWeek(report, prepared, now, null);
+    }
+
+    public ReportCoverageSnapshot captureTopicWeek(NewsReport report,
+            List<TopicWeeklyReportSelector.Prepared> prepared, LocalDateTime now, Set<Long> savedRunIds) {
         var candidates = prepared.stream().flatMap(day -> day.candidates().stream()).distinct().toList();
         Map<Long, NewsIssue> byFinding = new LinkedHashMap<>();
         prepared.forEach(day -> day.issues().forEach(byFinding::putIfAbsent));
         return capture(report, observations.findTopicReportCoverage(report.getTopicId(),
-                        report.getReportDate().atStartOfDay(), report.getReportEndDate().plusDays(1).atStartOfDay()),
+                        report.getReportDate().atStartOfDay(), report.getReportEndDate().plusDays(1).atStartOfDay()).stream()
+                        .filter(row -> savedRunIds == null || savedRunIds.contains(row.getRun().getId())).toList(),
                 candidates, byFinding, now);
     }
 

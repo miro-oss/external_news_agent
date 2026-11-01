@@ -22,8 +22,8 @@ final class NotificationKeywordSection {
                 + "style=\"table-layout:fixed;border-collapse:collapse;margin-top:20px\"><tbody><tr><td class=\"email-card\" "
                 + "bgcolor=\"#f8fafc\" style=\"padding:24px;border:1px solid #dde3eb;background:#f8fafc;border-radius:12px\">"
                 + "<h2 style=\"margin:0 0 10px;color:#191f28;font-size:18px\">").append(TITLE).append("</h2>");
-        note(html, "유효 이슈 " + stats.denominatorIssueCount() + "건 · " + stats.periodLabel());
-        note(html, BASIS);
+        note(html, denominator(stats));
+        note(html, basis(stats));
         for (var item : stats.items().stream().limit(3).toList()) {
             html.append("<p style=\"margin:16px 0 3px;font-size:14px;line-height:1.6;color:#191f28;overflow-wrap:anywhere;word-break:break-word\"><strong>")
                     .append(escape(item.keyword())).append("</strong><br><span style=\"color:#4e5968;font-size:12px\">")
@@ -50,8 +50,8 @@ final class NotificationKeywordSection {
         if (!hasContent(stats)) return;
         pdf.reserve(180);
         pdf.section(TITLE);
-        pdf.muted("유효 이슈 " + stats.denominatorIssueCount() + "건 · " + stats.periodLabel());
-        pdf.muted(BASIS);
+        pdf.muted(denominator(stats));
+        pdf.muted(basis(stats));
         for (var item : stats.items()) pdf.keywordBar(item.keyword(), amount(stats, item), bounded(item.sharePercent()),
                 item.relatedKeywords().isEmpty() ? "" : related(item));
         if (stats.omittedKeywordCount() > 0) pdf.muted("관련 이슈 수가 많은 키워드부터 " + stats.items().size()
@@ -66,8 +66,22 @@ final class NotificationKeywordSection {
     }
 
     private static String amount(ReportKeywordDTO.View stats, ReportKeywordDTO.Item item) {
-        return item.issueCount() + "건 / 전체 " + stats.denominatorIssueCount() + "건 · "
+        return item.issueCount() + "건 / " + (selectedRecovery(stats) ? "보고서 포함 " : "전체 ")
+                + stats.denominatorIssueCount() + "건 · "
                 + (item.sharePercent() == null ? "비중 계산 안 함" : number(item.sharePercent()) + "%");
+    }
+
+    private static boolean selectedRecovery(ReportKeywordDTO.View stats) {
+        return "report-keywords.recovered-selected.v1".equals(stats.ruleVersion());
+    }
+
+    private static String denominator(ReportKeywordDTO.View stats) {
+        return (selectedRecovery(stats) ? "보고서 포함 이슈 " : "유효 이슈 ")
+                + stats.denominatorIssueCount() + "건 · " + stats.periodLabel();
+    }
+
+    private static String basis(ReportKeywordDTO.View stats) {
+        return selectedRecovery(stats) ? "이 보고서에 포함된 유효 이슈 기준입니다." : BASIS;
     }
 
     private static String related(ReportKeywordDTO.Item item) {
