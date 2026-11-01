@@ -3,6 +3,8 @@ package com.example.be.domain.reports.entity;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.converter.ReportContentConverter;
+import com.example.be.domain.reports.converter.ReportIssueCompanySnapshotConverter;
+import com.example.be.domain.reports.dart.ReportIssueCompanySnapshot;
 import com.example.be.domain.reports.converter.ReportCoverageSnapshotConverter;
 import com.example.be.domain.reports.coverage.ReportCoverageSnapshot;
 import com.example.be.domain.reports.keyword.ReportKeywordSnapshot;
@@ -191,6 +193,23 @@ public class NewsReport {
     private List<ReportCollectionContext> collectionContexts = List.of();
 
     public void recordStructuredContent(ReportContent content) { this.structuredContent = content; }
+
+    @Convert(converter = ReportIssueCompanySnapshotConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "report_issue_company_snapshot")
+    private ReportIssueCompanySnapshot reportIssueCompanySnapshot;
+
+    public void freezeReportIssueCompanySnapshot(ReportIssueCompanySnapshot snapshot) {
+        if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("생성 중인 보고서만 기업 근거를 고정할 수 있습니다.");
+        if (reportIssueCompanySnapshot == null) reportIssueCompanySnapshot = snapshot;
+    }
+
+    /** Completion can discard rejected inputs, but never add a company or refresh its evidence. */
+    public void retainIssueCompanyFindings(List<Long> findingIds) {
+        if (reportIssueCompanySnapshot != null) reportIssueCompanySnapshot = reportIssueCompanySnapshot.reflected(findingIds);
+    }
+
+    public void invalidateIssueCompanySnapshot() { reportIssueCompanySnapshot = null; }
 
     @Builder.Default
     @Convert(converter = YnBooleanConverter.class)

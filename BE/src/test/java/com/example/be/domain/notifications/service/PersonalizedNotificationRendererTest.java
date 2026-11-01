@@ -65,7 +65,7 @@ class PersonalizedNotificationRendererTest {
 
     @BeforeEach
     void configurePublicLinks() {
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(new ReportPdfRenderer.Result(new byte[]{'%', 'P', 'D', 'F'}, Map.of()));
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
         ReflectionTestUtils.setField(personalized, "publicBaseUrl", "https://news.example.com");
     }
@@ -85,7 +85,7 @@ class PersonalizedNotificationRendererTest {
         var result = personalized.render(fixture.report(), channel, RECIPIENT_ID);
         assertTrue(result.chunks().getFirst().contains(changes.message()));
         verify(changesService, times(1)).projectForDelivery(eq(fixture.report()), any(), eq(true));
-        verify(pdfRenderer).renderDetailed(eq(fixture.report()), any(), any(), any(), any(), any(), same(changes));
+        verify(pdfRenderer).renderDetailed(eq(fixture.report()), any(), any(), any(), any(), any(), same(changes), any());
         verify(changesService, never()).get(anyLong());
     }
 
@@ -268,7 +268,7 @@ class PersonalizedNotificationRendererTest {
         assertEquals("application/pdf", attachment.contentType());
         assertArrayEquals(new byte[]{'%', 'P', 'D', 'F'}, attachment.content());
         var view = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
-        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any(), any(), any(), any());
+        verify(pdfRenderer).renderDetailed(eq(fixture.report()), view.capture(), same(insight), any(), any(), any(), any(), any());
         assertEquals(List.of("정상 사건 제목"), eventTitles(view.getValue()));
         assertEquals(List.of(12L, 13L), view.getValue().findings().stream().map(Finding::getId).toList());
         assertTrue(view.getValue().excludedEvidenceFindingIds().containsAll(Set.of(11L, 12L, 14L)));
@@ -312,8 +312,8 @@ class PersonalizedNotificationRendererTest {
                     .retrievePageNumber() + 1;
             assertTrue(html.contains("첨부 PDF p. " + companyPage + "에서 상세 확인"));
             for (String expected : List.of("회사 실적 · 공시", "SK하이닉스", "최근 공시",
-                    "[정정] 반기보고서 (가상 검증 자료)", "공시일 2026-08-14", "이전 공시 (가상 검증 자료)",
-                    "공시일 2026-05-15")) assertTrue(text.contains(expected), expected);
+                    "[정정] 반기보고서 (가상 검증 자료)", "2026-08-14", "이전 공시 (가상 검증 자료)",
+                    "2026-05-15")) assertTrue(text.contains(expected), expected);
             var links = new ArrayList<String>();
             for (var page : document.getPages()) for (var annotation : page.getAnnotations())
                 if (annotation instanceof PDAnnotationLink link && link.getAction() instanceof PDActionURI uri)
@@ -326,7 +326,7 @@ class PersonalizedNotificationRendererTest {
         verify(reports, times(queuedDelivery ? 1 : 0)).findById(report.getId());
         verifyNoMoreInteractions(reports, feedback);
         verifyNoInteractions(pdfRenderer, findings, snapshots);
-        stored.verifyStoredReads(report.getId(), 2);
+        stored.verifyStoredReads(report.getId(), 1);
     }
 
     @Test
@@ -335,7 +335,7 @@ class PersonalizedNotificationRendererTest {
         prepare(fixture, List.of(), Set.of());
         var channel = NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL).maxLength(3500).active(true).build();
         var failure = new IllegalStateException("synthetic PDF preparation failure");
-        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any())).thenThrow(failure);
+        when(pdfRenderer.renderDetailed(any(), any(), any(), any(), any(), any(), any(), any())).thenThrow(failure);
 
         assertSame(failure, assertThrows(IllegalStateException.class,
                 () -> personalized.render(fixture.report(), channel, RECIPIENT_ID)));

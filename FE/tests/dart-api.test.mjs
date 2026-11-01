@@ -70,9 +70,13 @@ test('RUN and topic weekly reports use explicit company selections, including an
   assert.deepEqual(reportDartCompanies({ reportScope: 'WEEKLY', topicId: 29, collectionContexts }), [])
 })
 
-test('aggregate reports cannot opt into DART through companies or source collection snapshots', () => {
+test('aggregate reports use server-confirmed M5 companies but never infer companies from source collection snapshots', () => {
   for (const reportScope of ['DAILY', 'WEEKLY']) {
     assert.deepEqual(reportDartCompanies({ reportScope, topicId: null, dartCompanies: [company],
+      collectionContexts: [{ topics: [{ dartCompany: company }] }] }), [company])
+    assert.deepEqual(reportDartCompanies({ reportScope, topicId: null,
+      collectionContexts: [{ topics: [{ dartCompany: company }] }] }), [])
+    assert.deepEqual(reportDartCompanies({ reportScope, topicId: null, dartCompanies: [],
       collectionContexts: [{ topics: [{ dartCompany: company }] }] }), [])
   }
 })

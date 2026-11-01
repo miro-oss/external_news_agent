@@ -178,7 +178,7 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void allCompaniesHaveReadableFinancialTablesAndRecentFilingsWithoutQuarterSourceAppendix() throws Exception {
+    void allCompaniesHaveReadableFinancialTablesAndDeduplicatedRecentAndQuarterSourceFilings() throws Exception {
         var report = report(ReportScope.RUN);
         var filing = filing("반기보고서", FILING_URL, true);
         String sourceUrl = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260331000001";
@@ -198,12 +198,12 @@ class ReportPdfRendererTests {
                     "동일한 재무 기준으로 비교합니다", "차트 단위: 억원", "표 금액 단위: 억원", "매출액 (억원)", "영업이익 (억원)",
                     "소수 둘째 자리까지 반올림", "100,000,000.05", "1,234.57", "-12.35", "-0.01 < 값 < 0")) assertTrue(text.contains(expected), expected);
             assertFalse(text.replaceAll("\\s", "").contains("10,000,000,005,000,001.20"));
-            for (String expected : List.of("회사 실적 · 공시", "최근 공시", "최근 주요사항보고서", "반기보고서", "[정정]", "2026-08-14"))
+            for (String expected : List.of("회사 실적 · 공시", "최근 공시", "분기 실적 근거 전용", "반기보고서", "[정정]", "2026-08-14"))
                 assertTrue(text.contains(expected), expected);
-            for (String hidden : List.of("근거 공시", "실적 근거 공시", "분기 실적 근거 전용", "[1]"))
-                assertFalse(text.contains(hidden), hidden);
+            assertTrue(text.contains("실적 근거"));
+            assertFalse(text.contains("최근 주요사항보고서")); // Same receipt is one filing, not two rows.
             assertTrue(urls(document).contains(FILING_URL));
-            assertFalse(urls(document).contains(sourceUrl));
+            assertTrue(urls(document).contains(sourceUrl));
             assertWithinPageBounds(document);
         }
     }
@@ -264,7 +264,7 @@ class ReportPdfRendererTests {
             for (String expected : List.of("회사 실적 · 공시", "최근 공시", "[정정]", "2026-10-19",
                     "표시할 분기 실적 자료가 없습니다.", "비교 가능한 분기 실적은 확보하지 못했습니다."))
                 assertTrue(text.contains(expected), expected);
-            for (String absent : List.of("공시 항목 6", "공시 끝 6", "저장된 최근 공시가 없습니다.", "차트 단위"))
+            for (String absent : List.of("공시 항목 6", "공시 끝 6", "저장된 공시 자료가 없습니다.", "차트 단위"))
                 assertFalse(text.contains(absent), absent);
             assertFalse(urls(document).contains(filings.get(5).url()));
             assertWithinPageBounds(document);
@@ -292,7 +292,7 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(new ReportPdfRenderer(stored.service()).render(report,
                 view(emptyContent(), List.of(), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
-            for (String expected : List.of("차트 단위: 억원", "최근 공시", "저장된 최근 공시가 없습니다."))
+            for (String expected : List.of("차트 단위: 억원", "최근 공시", "저장된 공시 자료가 없습니다."))
                 assertTrue(text.contains(expected), expected);
             assertTrue(urls(document).isEmpty());
             assertWithinPageBounds(document);
@@ -470,7 +470,11 @@ class ReportPdfRendererTests {
     }
 
     private static NewsReport report(ReportScope scope) {
-        return NewsReport.builder().id(17L).reportScope(scope).title("반도체 산업 동향 · 상세 뉴스 리포트")
+        return NewsReport.builder().id(17L).reportScope(scope)
+                .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L,
+                        List.of(new com.example.be.domain.collection.entity.CollectionTopicSnapshot(29L, "선택 회사", null,
+                                List.of(), List.of(), List.of(), 10, 60, new DartModels.Company("00126380", "선택 회사", "005930"))))))
+                .title("반도체 산업 동향 · 상세 뉴스 리포트")
                 .generatedAt(LocalDateTime.of(2026, 10, 15, 9, 0)).markdownBody("원본 보고서에만 남은 비공개 내용").build();
     }
 

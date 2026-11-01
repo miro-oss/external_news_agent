@@ -25,6 +25,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ReportPersistenceService {
 
+    private com.example.be.domain.reports.dart.ReportIssueCompanyCapture issueCompanies;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setIssueCompanies(com.example.be.domain.reports.dart.ReportIssueCompanyCapture value) {
+        issueCompanies = value;
+    }
+
     private static final String PENDING_TITLE = "보고서 생성 중";
     private static final String PENDING_BODY = "보고서 생성이 진행 중입니다.";
     private static final String PENDING_MODEL = "pending-report-v1";
@@ -63,13 +70,25 @@ public class ReportPersistenceService {
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
                                        WeeklyReportInput weeklyInput, List<CompanyInterestSelection.Application> applications,
                                        Set<Long> criterionTopicIds, boolean comparisonScopeKnown, LocalDateTime now) {
+        freezeCompanySelection(reportId, findingIds, suppressedFindingIds, weeklyInput, applications,
+                criterionTopicIds, comparisonScopeKnown, now, null);
+    }
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput weeklyInput, List<CompanyInterestSelection.Application> applications,
+                                       Set<Long> criterionTopicIds, boolean comparisonScopeKnown, LocalDateTime now,
+                                       List<com.example.be.domain.analysis.entity.Finding> generationInput) {
         NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
         Set<Long> activeTopics = new java.util.HashSet<>(criterionTopicIds);
         applications.forEach(application -> activeTopics.add(application.criterion().topicId()));
         if (hasUnassessedWeeklyKeywordCandidates(report, activeTopics)) report.markKeywordCompanyScopeUnverified();
         if (!comparisonScopeKnown) report.markKeywordCompanyScopeUnverified();
+        boolean firstSelection = !report.isCompanySelectionRecorded();
         report.freezeCompanySelection(findingIds, suppressedFindingIds, weeklyInput);
+        if (firstSelection && issueCompanies != null) report.freezeReportIssueCompanySnapshot(
+                issueCompanies.captureSelected(report, findingIds, weeklyInput, generationInput, now));
         companyInterests.record(reportId, applications, now);
     }
 
@@ -117,6 +136,7 @@ public class ReportPersistenceService {
         if (report.getReportStatus() != ReportStatus.PENDING) return report.getId();
         // Flag travels in the report completion write itself, without a separate fallible comparison DB write.
         report.invalidateComparisonInput();
+        report.invalidateIssueCompanySnapshot();
         return completeLocked(report, document, generatedAt);
     }
 
@@ -134,6 +154,7 @@ public class ReportPersistenceService {
         }
         // A replacement document has no matching reservation-time comparison evidence.
         report.invalidateComparisonInput();
+        report.invalidateIssueCompanySnapshot();
         String title = ReportTitles.forReport(report, document.title(), generatedAt);
         report.complete(
                 title,
@@ -170,6 +191,7 @@ public class ReportPersistenceService {
         // Recovery before company selection has no final criterion provenance for the larger keyword universe.
         if (!report.isCompanySelectionRecorded() && hasUnassessedWeeklyKeywordCandidates(report, null))
             report.markKeywordCompanyScopeUnverified();
+        report.retainIssueCompanyFindings(document.reflectedFindingIds());
         String title = ReportTitles.forReport(report, document.title(), generatedAt);
         report.complete(
                 title,

@@ -26,7 +26,10 @@ public final class StoredReportDartFixture {
     private final NewsReportRepository reports = mock(NewsReportRepository.class);
     private final ReportDartRepository attachments = mock(ReportDartRepository.class);
     private final ReportDartPersistence writes = mock(ReportDartPersistence.class);
-    private final ReportDartService service = new ReportDartService(reports, attachments, writes, new DartProperties());
+    private final ReportDartService service = new ReportDartService(reports, attachments, writes, new DartProperties(),
+            mock(com.example.be.domain.analysis.repository.FindingRepository.class),
+            mock(com.example.be.domain.analysis.relevance.TopicRelevancePolicy.class),
+            mock(com.example.be.domain.reports.service.ReportEventFeedbackProjection.class));
 
     public ReportDartService service() { return service; }
 

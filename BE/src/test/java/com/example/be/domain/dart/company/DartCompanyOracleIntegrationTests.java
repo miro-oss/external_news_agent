@@ -92,6 +92,29 @@ class DartCompanyOracleIntegrationTests {
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM news_dart_companies", Integer.class));
     }
 
+    @Test void identityLookupPreservesAmbiguityAndNeverReturnsPrefixOrPartialMatches() {
+        repository.replace(List.of(entry("00164779", "SK하이닉스", "000660"),
+                entry("99999001", "SK 하이닉스서비스", "000001"),
+                entry("99999002", "SK 하이닉스", ""), entry("00126380", "삼성전자", "005930")));
+        assertEquals(List.of("00164779", "99999002"), repository.findExactCandidates(List.of("sk 하이닉스")).stream()
+                .map(DartModels.Company::corpCode).toList());
+        assertTrue(repository.findExactCandidates(List.of("SK", "하이닉스", "삼성", "0059")).isEmpty());
+        assertTrue(repository.findExactCandidates(List.of()).isEmpty());
+    }
+
+    @Test void identityLookupNormalizesTheEntireCorpusAndRejectsLegacyMissingKeys() {
+        repository.replace(List.of(entry("99999001", "ABC기업", "000001"),
+                entry("99999002", "ＡＢＣ기업", "000002"), entry("99999003", "ABC 기업서비스", "000003")));
+        for (String query : List.of("ABC기업", "ＡＢＣ기업", "abc 기업"))
+            assertEquals(List.of("99999001", "99999002"), repository.findExactCandidates(List.of(query)).stream()
+                    .map(DartModels.Company::corpCode).toList(), "NFKC-equivalent names must remain ambiguous");
+        jdbc.update("UPDATE news_dart_companies SET identity_name = NULL WHERE corp_code = '99999002'");
+        var unavailable = assertThrows(org.springframework.dao.InvalidDataAccessApiUsageException.class,
+                () -> repository.findExactCandidates(List.of("ABC기업")),
+                "An unnormalized row must not make another corporation falsely unique");
+        assertInstanceOf(IllegalStateException.class, unavailable.getCause());
+    }
+
     @Test void storesAndSearchesPublishedAlphanumericStockCodesAfterMigration() {
         repository.replace(List.of(entry("01933981", "비엔케이제3호스팩", "0068Y0"),
                 entry("01817920", "페스카로", "0015S0")));

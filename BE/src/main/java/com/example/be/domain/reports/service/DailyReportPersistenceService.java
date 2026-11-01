@@ -25,6 +25,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DailyReportPersistenceService {
 
+    private com.example.be.domain.reports.dart.ReportIssueCompanyCapture issueCompanies;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setIssueCompanies(com.example.be.domain.reports.dart.ReportIssueCompanyCapture value) {
+        issueCompanies = value;
+    }
+
     private final DailyReportJdbcRepository dailyRepository;
     private final NewsReportRepository reportRepository;
     private final CollectionRunRepository runRepository;
@@ -37,8 +44,11 @@ public class DailyReportPersistenceService {
     @Transactional
     public void freezeSelection(Long reportId, DailyReportSelector.Selection selection, LocalDateTime now) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId).orElseThrow();
+        boolean firstSelection = !report.isCompanySelectionRecorded();
         report.freezeCompanySelection(selection.findings().stream().map(com.example.be.domain.analysis.entity.Finding::getId).toList(),
                 selection.companySuppressedFindingIds(), null);
+        if (firstSelection && issueCompanies != null) report.freezeReportIssueCompanySnapshot(
+                issueCompanies.captureFindings(report, selection.findings(), now));
         if (!selection.comparisonScopeKnown()) report.markKeywordCompanyScopeUnverified();
         companyInterests.record(reportId, selection.applications(), now);
         if (selection.comparisonSnapshot() != null) {

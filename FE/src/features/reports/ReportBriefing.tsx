@@ -3,6 +3,7 @@ import { prefersReducedMotion } from '../../lib/motion'
 import { ReportCoverageSummary } from './ReportCoverage'
 import { eventCoverage } from './reportCoverageDisplay'
 import { ReportKeywordText } from './ReportKeywordText'
+import { ReportIssueCompanies } from './ReportIssueCompanies'
 import { reportEventElementId } from './reportBriefingDisplay'
 import './report-briefing.css'
 
@@ -39,6 +40,7 @@ export function ReportBriefing({ report, terms }: { report: ReportDetail; terms:
         <span className="report-briefing-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
         <div className="report-briefing-item-content"><h4><ReportKeywordText text={item.title} terms={terms} /></h4>
           <ReportCoverageSummary coverage={eventCoverage(report.coverage, item.sourceFindingIds)} />
+          <ReportIssueCompanies sourceFindingIds={item.sourceFindingIds} />
           <p><ReportKeywordText text={item.summary} terms={terms} /></p>
           {item.significance && <p className="report-briefing-significance"><span>살펴볼 이유</span><ReportKeywordText text={item.significance} terms={terms} /></p>}
           {eventIndex >= 0 && <button type="button" className="text-button report-briefing-source"

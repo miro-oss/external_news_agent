@@ -8,12 +8,22 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** Explicit RUN or topic weekly company snapshots only; live topics are never consulted. */
+/** Frozen company selections and verified issue-company links only; live topics are never consulted. */
 public final class ReportDartEligibility {
     private ReportDartEligibility() { }
 
     public static List<Company> companies(NewsReport report) {
         if (report.getReportStatus() == ReportStatus.PENDING || report.getDeletedAt() != null) return List.of();
+        var companies = new LinkedHashMap<String, Company>();
+        selectedCompanies(report).forEach(company -> companies.putIfAbsent(company.corpCode(), company));
+        var snapshot = report.getReportIssueCompanySnapshot();
+        if (snapshot != null && snapshot.valid()) snapshot.companies()
+                .forEach(company -> companies.putIfAbsent(company.corpCode(), company));
+        return List.copyOf(companies.values());
+    }
+
+    /** Historical explicit choices are separate from automatically identified issue companies. */
+    static List<Company> selectedCompanies(NewsReport report) {
         if (report.getReportScope() == ReportScope.WEEKLY && report.getTopicId() != null) {
             Company company = report.getTopicDartCompany();
             return valid(company) ? List.of(company) : List.of();

@@ -10,7 +10,7 @@ import java.util.List;
 public final class DartModels {
     private DartModels() { }
 
-    @Schema(description = "DART 고유번호로 명시적으로 선택한 공시 회사")
+    @Schema(description = "DART 고유번호로 명시 선택하거나 보고서 기사에서 식별하여 고정한 공시 회사")
     public record Company(
             @Schema(description = "8자리 DART 고유번호", example = "00126380", pattern = "[0-9]{8}") String corpCode,
             @Schema(description = "법인명", example = "삼성전자") String corpName,

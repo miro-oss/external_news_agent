@@ -110,6 +110,15 @@ public class ReportPdfRenderer {
     public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
                                  ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
                                  Audience unavailableAudience, ReportKeywordDTO.View keywords, ReportChanges changes) {
+        var stored = dart.getStored(report);
+        var companies = NotificationCompanyVisibility.visible(report, view, stored == null ? List.of() : stored.companies());
+        return renderDetailed(report, view, insight, coverage, unavailableAudience, keywords, changes, companies);
+    }
+
+    public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
+                                 ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
+                                 Audience unavailableAudience, ReportKeywordDTO.View keywords, ReportChanges changes,
+                                 List<CompanyAttachment> companies) {
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
@@ -121,14 +130,11 @@ public class ReportPdfRenderer {
                     + " · 매체 수는 원문 사이트 기준이며 독립 검증 건수가 아닙니다.");
             pdf.reserve(100);
             pdf.anchor("summary");
-            var stored = dart.getStored(report);
-            List<CompanyAttachment> companies = NotificationCompanyVisibility.visible(report, view,
-                    stored == null ? List.of() : stored.companies());
 
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
-            if (content != null) briefing(pdf, ReportBriefing.from(view));
+            if (content != null) briefing(pdf, ReportBriefing.from(view), companies);
             if (unavailableAudience != null) pdf.muted(NotificationBriefingSection.unavailable(unavailableAudience));
             ReportPdfInsightSection.brief(pdf, insight, view);
             NotificationChangesSection.pdfBrief(pdf, changes);
@@ -140,7 +146,7 @@ public class ReportPdfRenderer {
             }
             pdf.anchor("report-detail");
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
-            else body(pdf, content, findings, coverage);
+            else body(pdf, content, findings, coverage, companies);
             if (insight != null) {
                 pdf.reserve(110);
                 pdf.anchor("insight-detail");
@@ -154,13 +160,14 @@ public class ReportPdfRenderer {
         }
     }
 
-    private void briefing(ReportPdfLayout pdf, ReportBriefing brief) throws IOException {
+    private void briefing(ReportPdfLayout pdf, ReportBriefing brief, List<CompanyAttachment> companies) throws IOException {
         pdf.section("핵심 브리핑");
         int number = 0;
         for (var item : brief.items()) {
             pdf.reserve(110);
             pdf.subheading((++number) + ". " + item.title());
             pdf.paragraph(item.summary());
+            NotificationCompanySection.pdf(pdf, item.sourceFindingIds(), companies);
             if (item.significance() != null && !item.significance().isBlank()) pdf.muted("읽을 포인트 · " + item.significance());
         }
         if (!brief.watchItems().isEmpty()) {
@@ -173,7 +180,7 @@ public class ReportPdfRenderer {
     }
 
     private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
-                      ReportCoverageDTO.View coverage) throws IOException {
+                      ReportCoverageDTO.View coverage, List<CompanyAttachment> companies) throws IOException {
         pdf.section("핵심 요약");
         pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
         if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
@@ -188,6 +195,7 @@ public class ReportPdfRenderer {
             var counts = coverage == null ? ReportCoverageDTO.unavailable(event.sourceFindingIds())
                     : coverage.forSources(event.sourceFindingIds());
             pdf.muted(NotificationCoverage.label(counts));
+            NotificationCompanySection.pdf(pdf, event.sourceFindingIds(), companies);
             pdf.paragraph(event.summaryKo());
             String significance = ReportBriefing.readingSignificance(event.significance());
             if (significance != null && !significance.isBlank()) pdf.keyValue("읽을 포인트", significance);
@@ -273,27 +281,36 @@ public class ReportPdfRenderer {
             }
             for (String note : data.notes()) pdf.muted(note);
             pdf.muted("실적은 회사 전체 기준입니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
-            recentFilings(pdf, data.disclosures());
+            filingTable(pdf, entry);
         }
         return pages;
     }
 
-    private void recentFilings(ReportPdfLayout pdf, List<Filing> filings) throws IOException {
-        pdf.reserve(120);
-        pdf.subheading("최근 공시");
-        if (filings.isEmpty()) {
-            pdf.paragraph("저장된 최근 공시가 없습니다.");
+    private void filingTable(ReportPdfLayout pdf, CompanyAttachment entry) throws IOException {
+        pdf.reserve(130);
+        pdf.subheading("공시 상세");
+        pdf.muted("확인 범위: 저장한 최근 공시 최대 5건 + 12분기 실적의 근거 공시");
+        pdf.muted("직접 인용은 기사에 명시된 접수번호가 일치한다는 뜻이며 기사 전체의 사실 검증을 뜻하지 않습니다.");
+        if (entry.filingRows().stream().noneMatch(row -> "DIRECT_REFERENCE".equals(row.relevance())))
+            pdf.muted("확보한 공시에서 직접 인용 확인 안 됨");
+        if (entry.filingRows().isEmpty()) {
+            pdf.paragraph("저장된 공시 자료가 없습니다.");
             return;
         }
-        for (Filing filing : filings.stream().limit(5).toList()) {
-            pdf.reserve(90);
-            pdf.muted("공시일 " + (filing.filedAt() == null || filing.filedAt().isBlank() ? "미확인" : filing.filedAt()));
-            String title = (filing.corrected() ? "[정정] " : "")
-                    + (filing.reportName() == null || filing.reportName().isBlank() ? "공시 원문" : filing.reportName());
-            pdf.paragraph(title);
-            if (DartFilingLinks.isSafe(filing)) pdf.link("DART 원문 · " + filing.url(), filing.url());
-            pdf.gap(6);
+        List<List<String>> rows = new ArrayList<>();
+        List<String> urls = new ArrayList<>();
+        for (var row : entry.filingRows()) {
+            Filing filing = row.filing();
+            rows.add(List.of(filing.filedAt() == null ? "미확인" : filing.filedAt(),
+                    (filing.corrected() && (filing.reportName() == null || !filing.reportName().contains("정정")) ? "[정정] " : "")
+                            + (filing.reportName() == null ? "공시 원문" : filing.reportName())
+                            + "\n접수 " + filing.rceptNo(),
+                    NotificationCompanySection.roles(row), NotificationCompanySection.relevance(row),
+                    DartFilingLinks.isSafe(filing) ? "원문" : "미확인"));
+            urls.add(DartFilingLinks.isSafe(filing) ? filing.url() : "");
         }
+        pdf.linkedTable(List.of("접수일", "공시명 · 접수번호", "자료 구분", "기사와의 연결", "DART"), rows,
+                new float[]{1.2f, 3.3f, 1.3f, 1.5f, 0.65f}, urls);
     }
 
     /**

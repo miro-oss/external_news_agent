@@ -11,6 +11,7 @@ export async function refreshReportReading(
   await Promise.all([
     client.invalidateQueries({ queryKey: ['reports', 'list'] }),
     client.invalidateQueries({ queryKey: ['reports', report.id, 'changes'], exact: true }),
+    client.invalidateQueries({ queryKey: ['report-dart', report.id], exact: true }),
   ])
   return result
 }

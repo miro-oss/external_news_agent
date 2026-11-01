@@ -105,8 +105,8 @@ test('legacy, unlinked and aggregate reports render nothing without requiring a 
     { id: 17, reportScope: 'RUN', dartCompanies: [], collectionContexts: contexts },
     { id: 17, reportScope: 'WEEKLY', topicId: 29, collectionContexts: contexts },
     { id: 17, reportScope: 'WEEKLY', topicId: 29, dartCompanies: [], collectionContexts: contexts },
-    { id: 17, reportScope: 'DAILY', dartCompanies: [company], collectionContexts: contexts },
-    { id: 17, reportScope: 'WEEKLY', dartCompanies: [company], collectionContexts: contexts }]) {
+    { id: 17, reportScope: 'DAILY', collectionContexts: contexts },
+    { id: 17, reportScope: 'WEEKLY', collectionContexts: contexts }]) {
     assert.equal(renderToStaticMarkup(createElement(Panel, { report })), '')
   }
 })

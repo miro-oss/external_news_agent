@@ -9,6 +9,7 @@ import { ReportCoverageSources, ReportCoverageSummary } from './ReportCoverage'
 import { eventCoverage } from './reportCoverageDisplay'
 import { ReportBriefing } from './ReportBriefing'
 import { ReportKeywordStats } from './ReportKeywordStats'
+import { ReportIssueCompanies } from './ReportIssueCompanies'
 import { hasWeeklyAnalysisChronology, reportEventElementId } from './reportBriefingDisplay'
 
 export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice, afterBriefing }: {
@@ -53,6 +54,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
             id={reportEventElementId(report.id, index)} tabIndex={-1}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
             <ReportCoverageSummary coverage={eventCoverage(report.coverage, event.sourceFindingIds)} />
+            <ReportIssueCompanies sourceFindingIds={event.sourceFindingIds} />
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
             {event.significance && event.significance !== event.summaryKo
               && (!weekly || (report.briefing && !hasWeeklyAnalysisChronology(event.significance)))
