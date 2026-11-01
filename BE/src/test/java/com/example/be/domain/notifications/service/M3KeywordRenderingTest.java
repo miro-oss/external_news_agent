@@ -49,7 +49,7 @@ class M3KeywordRenderingTest {
         assertTrue(dom.text().contains("8건 / 전체 10건 · 80%"));
         assertTrue(dom.text().contains("6건 / 전체 10건 · 60%"));
         assertFalse(dom.text().contains("0건 / 전체 10건 · 0%"));
-        assertTrue(dom.text().contains("메일에는 상위 3개, 첨부 PDF에는 4개 키워드를 표시"));
+        assertTrue(dom.text().contains("상위 3개 표시 · 나머지 등록 키워드 1개 생략"));
         assertTrue(dom.text().contains("함께 나온 키워드 · 패키징 5건"));
         assertTrue(dom.text().contains("비중 합이 100%를 넘을 수 있습니다"));
         assertTrue(html.contains("width=\"80%\""));
@@ -68,6 +68,36 @@ class M3KeywordRenderingTest {
             var raster = new PDFRenderer(document);
             for (int page = 0; page < document.getNumberOfPages(); page++)
                 ImageIO.write(raster.renderImageWithDPI(page, 110), "png", directory.resolve("keywords-" + (page + 1) + ".png").toFile());
+        }
+    }
+
+    @Test void bothFormatsShowOnlyTopThreeAndCountAllOmittedKeywordsForEachBasis() throws Exception {
+        var items = List.of(
+                new ReportKeywordDTO.Item("TOP1-HBM", 9, 90.0, List.of()),
+                new ReportKeywordDTO.Item("TOP2-패키징", 8, 80.0, List.of()),
+                new ReportKeywordDTO.Item("TOP3-장비", 7, 70.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED4-전력", 6, 60.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED5-냉각", 5, 50.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED6-공급망", 4, 40.0, List.of()));
+        for (String rule : List.of("report-keywords.v1", "report-keywords.recovered-selected.v1")) {
+            var stats = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, rule,
+                    OffsetDateTime.parse("2026-11-02T09:00:00+09:00"), "해당 실행 수집 기준", 10, items, 4);
+            String emailText = Jsoup.parse(renderEmail(stats)).text();
+            try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, stats).bytes())) {
+                for (String text : List.of(emailText, new PDFTextStripper().getText(document))) {
+                    String compact = text.replaceAll("\\s", "");
+                    assertTrue(compact.contains("TOP1-HBM"));
+                    assertTrue(compact.contains("TOP2-패키징"));
+                    assertTrue(compact.contains("TOP3-장비"));
+                    assertFalse(compact.contains("OMITTED4"));
+                    assertFalse(compact.contains("OMITTED5"));
+                    assertFalse(compact.contains("OMITTED6"));
+                    assertTrue(compact.contains("상위3개표시·나머지등록키워드7개생략"));
+                    assertFalse(compact.contains("첨부PDF에는"));
+                    assertTrue(compact.contains(rule.contains("recovered-selected")
+                            ? "9건/보고서포함10건·90%" : "9건/전체10건·90%"));
+                }
+            }
         }
     }
 

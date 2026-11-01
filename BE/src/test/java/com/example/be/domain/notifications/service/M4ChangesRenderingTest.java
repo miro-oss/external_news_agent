@@ -117,6 +117,74 @@ class M4ChangesRenderingTest {
         }
     }
 
+    @Test void undeterminedOnlyOmitsSummaryDetailsAndNavigation() throws Exception {
+        var changes = ready(List.of(undetermined())).withPresentation(null, null);
+        assertFalse(renderEmail(changes).contains("지난 보고서와 달라진 점"));
+        try (var doc = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, null, changes).bytes())) {
+            String text = new PDFTextStripper().getText(doc);
+            assertFalse(text.contains("지난 보고서와 달라진 점"));
+            assertFalse(text.contains("변화 비교 상세"));
+            assertFalse(text.contains("판단 보류"));
+            assertFalse(doc.getDocumentCatalog().getNames().getDests().getNames().containsKey("changes-detail"));
+        }
+    }
+
+    @Test void mixedComparisonExcludesUndeterminedCountsNotesAndEvidence() throws Exception {
+        var source = ready(List.of(undetermined(), new ReportChanges.Item("updated", ReportChanges.Type.UPDATED,
+                "확인된 공급 일정", "공급 일정이 갱신됐습니다.", side(), side())));
+        var changes = new ReportChanges(source.reportId(), source.reportDate(), source.baseReportId(), source.baseReportDate(),
+                source.status(), source.message(), true, List.of("숨긴 이슈는 판단 보류했습니다."), source.items(),
+                source.periods(), null);
+        String html = renderEmail(changes);
+        assertTrue(html.contains("내용 업데이트 1건"));
+        assertTrue(html.contains("확인된 공급 일정"));
+        assertFalse(html.contains("판단 보류"));
+        assertFalse(html.contains("보류 전용"));
+        assertFalse(html.contains("나머지 변화"));
+        try (var doc = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, null, changes).bytes())) {
+            String text = new PDFTextStripper().getText(doc);
+            assertTrue(text.contains("확인된 공급 일정"));
+            assertTrue(text.contains("변화 비교 상세"));
+            assertFalse(text.contains("판단 보류"));
+            assertFalse(text.contains("보류 전용"));
+            for (var page : doc.getPages()) for (var annotation : page.getAnnotations()) {
+                if (annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink link
+                        && link.getAction() instanceof org.apache.pdfbox.pdmodel.interactive.action.PDActionURI uri)
+                    assertFalse(uri.getURI().contains("undetermined-only"));
+            }
+        }
+        assertEquals(ReportChanges.Type.UNDETERMINED, changes.items().getFirst().type());
+        assertEquals(2, changes.items().size());
+    }
+
+    @Test void verifiedKeywordChangesRemainWithoutUndeterminedDetailsAndAreLimitedToThree() throws Exception {
+        var source = ready(List.of(undetermined()));
+        var rows = java.util.stream.IntStream.rangeClosed(1, 6).mapToObj(i ->
+                new ReportChanges.KeywordChange("변화키워드" + i, 1, 2, 10.0, 20.0, 10.0)).toList();
+        var changes = source.withPresentation(source.periods(), new ReportChanges.KeywordChanges(
+                ReportChanges.KeywordStatus.AVAILABLE, null, "같은 수집 조건입니다.", 10, 10, false, rows));
+        String html = renderEmail(changes);
+        assertTrue(html.contains("변화키워드3"));
+        assertFalse(html.contains("변화키워드4"));
+        assertFalse(html.contains("판단 보류"));
+        assertFalse(html.contains("나머지 키워드 변화"));
+        try (var doc = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, null, changes).bytes())) {
+            String text = new PDFTextStripper().getText(doc);
+            assertTrue(text.contains("변화키워드3"));
+            assertFalse(text.contains("변화키워드4"));
+            assertFalse(text.contains("변화 비교 상세"));
+            assertFalse(text.contains("보류 전용"));
+        }
+    }
+
+    private ReportChanges.Item undetermined() {
+        var deferred = new ReportChanges.Side(99, 2, "보류 전용 근거 제목", "보류 전용 설명",
+                List.of(new ReportChanges.Claim("deferred", "보류 전용 주장", List.of(new ReportChanges.Evidence(
+                        99, 99, 4, "보류 전용 기사", "https://example.com/undetermined-only", 0, "보류 전용 원문")))));
+        return new ReportChanges.Item("deferred", ReportChanges.Type.UNDETERMINED,
+                "보류 전용 이슈", "판단 보류 설명", deferred, deferred);
+    }
+
     private String renderEmail(ReportChanges changes) {
         return email.render(report, NotificationChannel.builder().channelType(ChannelType.EMAIL).maxLength(3500).build(),
                 view, null, null, Map.of(), null, null, null, changes).chunks().getFirst();

@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 final class NotificationKeywordSection {
     private NotificationKeywordSection() { }
 
+    private static final int DISPLAY_LIMIT = 3;
     static final String TITLE = "키워드로 보는 이슈";
     static final String BASIS = "상위 선정 전 유효 이슈 기준 · 기사 반복 횟수가 아닙니다.";
     static final String NOTE = "같은 이슈에 여러 키워드가 포함되어 비중 합이 100%를 넘을 수 있습니다.";
@@ -24,7 +25,7 @@ final class NotificationKeywordSection {
                 + "<h2 style=\"margin:0 0 10px;color:#191f28;font-size:18px\">").append(TITLE).append("</h2>");
         note(html, denominator(stats));
         note(html, basis(stats));
-        for (var item : stats.items().stream().limit(3).toList()) {
+        for (var item : stats.items().stream().limit(DISPLAY_LIMIT).toList()) {
             html.append("<p style=\"margin:16px 0 3px;font-size:14px;line-height:1.6;color:#191f28;overflow-wrap:anywhere;word-break:break-word\"><strong>")
                     .append(escape(item.keyword())).append("</strong><br><span style=\"color:#4e5968;font-size:12px\">")
                     .append(escape(amount(stats, item))).append("</span></p>");
@@ -39,9 +40,7 @@ final class NotificationKeywordSection {
             html.append("</tr></tbody></table>");
             if (!item.relatedKeywords().isEmpty()) note(html, related(item));
         }
-        int omitted = stats.omittedKeywordCount() + Math.max(0, stats.items().size() - 3);
-        if (omitted > 0) note(html, "메일에는 상위 " + Math.min(3, stats.items().size())
-                + "개, 첨부 PDF에는 " + stats.items().size() + "개 키워드를 표시합니다.");
+        if (omittedCount(stats) > 0) note(html, displayNote(stats));
         note(html, NOTE);
         html.append("</td></tr></tbody></table>");
     }
@@ -52,11 +51,20 @@ final class NotificationKeywordSection {
         pdf.section(TITLE);
         pdf.muted(denominator(stats));
         pdf.muted(basis(stats));
-        for (var item : stats.items()) pdf.keywordBar(item.keyword(), amount(stats, item), bounded(item.sharePercent()),
+        for (var item : stats.items().stream().limit(DISPLAY_LIMIT).toList())
+            pdf.keywordBar(item.keyword(), amount(stats, item), bounded(item.sharePercent()),
                 item.relatedKeywords().isEmpty() ? "" : related(item));
-        if (stats.omittedKeywordCount() > 0) pdf.muted("관련 이슈 수가 많은 키워드부터 " + stats.items().size()
-                + "개 표시 · 나머지 등록 키워드 " + stats.omittedKeywordCount() + "개 생략");
+        if (omittedCount(stats) > 0) pdf.muted(displayNote(stats));
         if (!stats.items().isEmpty()) { pdf.muted(NOTE); pdf.muted(MATCH); }
+    }
+
+    private static int omittedCount(ReportKeywordDTO.View stats) {
+        return stats.omittedKeywordCount() + Math.max(0, stats.items().size() - DISPLAY_LIMIT);
+    }
+
+    private static String displayNote(ReportKeywordDTO.View stats) {
+        return "상위 " + Math.min(DISPLAY_LIMIT, stats.items().size()) + "개 표시 · 나머지 등록 키워드 "
+                + omittedCount(stats) + "개 생략";
     }
 
     private static boolean hasContent(ReportKeywordDTO.View stats) {

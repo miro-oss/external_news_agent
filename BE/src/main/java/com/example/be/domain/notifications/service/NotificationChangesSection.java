@@ -26,8 +26,7 @@ final class NotificationChangesSection {
                         .append(escape(type(item.type()) + " · " + item.title())).append("</strong></p>");
                 note(html, item.summary());
             }
-            if (changes.items().size() > briefItems(changes).size()) note(html, "나머지 변화와 양쪽 근거는 첨부 PDF의 변화 비교 상세에서 확인하세요.");
-            changes.notes().forEach(value -> note(html, value));
+            if (visibleItems(changes).size() > briefItems(changes).size()) note(html, "나머지 변화와 양쪽 근거는 첨부 PDF의 변화 비교 상세에서 확인하세요.");
             note(html, BASIS);
         }
         var keywords = changes.keywordChanges();
@@ -43,7 +42,6 @@ final class NotificationChangesSection {
                 bar(html, item.previousSharePercent(), "#94a3b8");
                 bar(html, item.currentSharePercent(), "#1b64da");
             }
-            if (keywords.items().size() > 3) note(html, "나머지 키워드 변화는 첨부 PDF에서 확인하세요.");
             if (keywords.lowSample()) note(html, "유효 이슈가 5건 미만인 기간이 있어 작은 변화에도 비중이 크게 달라질 수 있습니다.");
         }
         html.append("</td></tr></tbody></table>");
@@ -61,7 +59,6 @@ final class NotificationChangesSection {
                 pdf.subheading(type(item.type()) + " · " + item.title());
                 pdf.paragraph(item.summary());
             }
-            for (String note : changes.notes()) pdf.muted(note);
             pdf.muted(BASIS);
             pdf.internalLink("변화 비교 상세와 양쪽 근거", "changes-detail");
         }
@@ -72,19 +69,19 @@ final class NotificationChangesSection {
         pdf.muted(keywords.message());
         pdf.muted(denominator(keywords));
         pdf.muted("이전(회색) → 이번(파랑) · 비중 0~100% 동일 눈금");
-        for (var item : keywords.items()) pdf.keywordComparison(item.keyword(), amount(item),
+        for (var item : keywords.items().stream().limit(3).toList()) pdf.keywordComparison(item.keyword(), amount(item),
                 bounded(item.previousSharePercent()), bounded(item.currentSharePercent()));
         if (keywords.lowSample()) pdf.muted("유효 이슈가 5건 미만인 기간이 있어 작은 변화에도 비중이 크게 달라질 수 있습니다.");
     }
 
     static void pdfDetails(ReportPdfLayout pdf, ReportChanges changes) throws IOException {
-        if (changes == null || changes.status() != ReportChanges.Status.READY || changes.items().isEmpty()) return;
+        if (changes == null || !hasIssueContent(changes)) return;
         pdf.pageBreak();
         pdf.anchor("changes-detail");
         pdf.section("변화 비교 상세");
         pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
         pdf.muted(periods(changes));
-        for (var item : changes.items()) {
+        for (var item : visibleItems(changes)) {
             pdf.reserve(100);
             pdf.subheading(type(item.type()) + " · " + item.title());
             pdf.paragraph(item.summary());
@@ -108,7 +105,7 @@ final class NotificationChangesSection {
     }
 
     private static List<ReportChanges.Item> briefItems(ReportChanges changes) {
-        return changes.items().stream().filter(item -> item.type() != ReportChanges.Type.UNCHANGED)
+        return visibleItems(changes).stream().filter(item -> item.type() != ReportChanges.Type.UNCHANGED)
                 .sorted(Comparator.comparingInt(item -> switch (item.type()) {
                     case REFUTATION -> 0; case UPDATED -> 1; case NEWLY_INCLUDED -> 2; default -> 3;
                 })).filter(item -> shortEnough(item.title(), 110) && shortEnough(item.summary(), 240)).limit(3).toList();
@@ -117,7 +114,11 @@ final class NotificationChangesSection {
         return changes != null && (hasIssueContent(changes) || hasKeywordContent(changes.keywordChanges()));
     }
     private static boolean hasIssueContent(ReportChanges changes) {
-        return changes.status() == ReportChanges.Status.READY && !changes.items().isEmpty();
+        return changes.status() == ReportChanges.Status.READY && !visibleItems(changes).isEmpty();
+    }
+    private static List<ReportChanges.Item> visibleItems(ReportChanges changes) {
+        // Global comparison notes may describe these omitted items, so delivery omits those notes too.
+        return changes.items().stream().filter(item -> item.type() != ReportChanges.Type.UNDETERMINED).toList();
     }
     private static boolean hasKeywordContent(ReportChanges.KeywordChanges keywords) {
         return keywords != null && keywords.status() == ReportChanges.KeywordStatus.AVAILABLE
@@ -131,8 +132,8 @@ final class NotificationChangesSection {
         };
     }
     private static String counts(ReportChanges changes) {
-        return java.util.Arrays.stream(ReportChanges.Type.values()).map(type -> type(type) + " "
-                + changes.items().stream().filter(item -> item.type() == type).count() + "건")
+        return java.util.Arrays.stream(ReportChanges.Type.values()).filter(type -> type != ReportChanges.Type.UNDETERMINED)
+                .map(type -> type(type) + " " + visibleItems(changes).stream().filter(item -> item.type() == type).count() + "건")
                 .collect(java.util.stream.Collectors.joining(" · "));
     }
     private static String periods(ReportChanges changes) {
