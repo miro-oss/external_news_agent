@@ -55,7 +55,7 @@ class ReportPdfDeliveryIntegrationTest {
                 .reportDate(LocalDate.of(2026, 10, 26)).reportEndDate(LocalDate.of(2026, 11, 1))
                 .generatedAt(CAPTURED.toLocalDateTime()).markdownBody("숨긴 원본 회사와 기사").build();
         var content = new ReportContent(List.of("생산 투자 일정과 공급 계약의 후속 변화를 함께 확인했습니다."),
-                List.of(new ReportContent.ImportantEvent("생산라인 투자 일정 구체화",
+                List.of(new ReportContent.ImportantEvent("가상 반도체 회사 생산라인 투자 일정 구체화",
                                 "가상 반도체 회사가 투자 계획과 반입 일정을 공개했습니다.",
                                 "계획이 실제 계약으로 이어지는지 확인해야 합니다.", List.of(11L)),
                         new ReportContent.ImportantEvent("공급 계약의 후속 조건 확인",
@@ -86,20 +86,23 @@ class ReportPdfDeliveryIntegrationTest {
             String text = boundedText(document);
             for (String section : List.of("핵심 브리핑", "관점 한눈에", "지난 보고서와 달라진 점", "키워드 변화",
                     "키워드로 보는 이슈", "중요 이벤트", "관련 기사 7건", "3개 매체",
-                    "변화 비교 상세", "회사별 부록 바로가기", "회사 실적 · 공시", "공시 상세", "기사에서 직접 인용"))
+                    "변화 비교 상세", "회사 실적 · 공시", "최근 공시", "최근 4분기"))
                 assertTrue(text.contains(section), section);
-            for (String hidden : List.of("숨긴", "javascript:", "file:///", "알 수 없는 자유 헤드라인"))
+            for (String hidden : List.of("숨긴", "javascript:", "file:///", "알 수 없는 자유 헤드라인",
+                    "회사별 부록 바로가기", "공시 상세", "자료 준비 중인 가상 회사", "영업이익률"))
                 assertFalse(text.contains(hidden), hidden);
             assertFalse(text.contains("해석의 조건"));
             assertFalse(text.contains("발주가 확정되고 투자 집행이 유지되는 경우"));
             assertTrue(text.contains("자료 없음은 0이 아닙니다."));
             assertTrue(text.contains("산출값"));
             assertTrue(text.contains("신규 집계"));
-            for (int line = 0; line < 65; line++) assertTrue(text.contains("장문 공시 조건 " + line + ":"), "filing line " + line);
-            assertTrue(document.getNumberOfPages() >= 7);
+            assertFalse(text.contains("장문 공시 조건 64:"));
+            assertTrue(document.getNumberOfPages() <= 5, "bounded appendix should not restore all twelve quarters and long filing titles");
+            assertTrue(text.indexOf("변화 비교 상세") < text.indexOf("회사 실적 · 공시"));
+            assertFalse(text.contains("2023년 4분기"));
 
             var destinations = document.getDocumentCatalog().getNames().getDests().getNames();
-            assertEquals(Set.of("summary", "report-detail", "changes-detail", "company-0", "company-1"), destinations.keySet());
+            assertEquals(Set.of("summary", "report-detail", "changes-detail"), destinations.keySet());
             Set<String> visited = new HashSet<>();
             Set<String> external = new HashSet<>();
             for (var page : document.getPages()) {
@@ -130,12 +133,13 @@ class ReportPdfDeliveryIntegrationTest {
             }
             assertEquals(destinations.keySet(), visited);
             assertEquals(Set.of(ARTICLE_URL, FILING_URL, "https://example.com/previous"), external);
-            assertEquals(destinations.get("company-0").retrievePageNumber() + 1, result.companyPages().get("00000001"));
-            assertEquals(destinations.get("company-1").retrievePageNumber() + 1, result.companyPages().get("00000002"));
-            for (Integer pageNumber : result.companyPages().values()) assertTrue(text.contains("p. " + pageNumber));
+            assertEquals(Set.of("00000001"), result.companyPages().keySet());
+            var appendix = new PDFTextStripper();
+            appendix.setStartPage(result.companyPages().get("00000001"));
+            appendix.setEndPage(result.companyPages().get("00000001"));
+            assertTrue(appendix.getText(document).contains("가상 반도체 회사 · 000001"));
             assertFalse(text.contains("리포트 관점 분석"));
             assertDestinationContains(document, "changes-detail", "변화 비교 상세");
-            assertDestinationContains(document, "company-0", "회사 실적 · 공시");
         }
         verifyNoInteractions(dart);
         Path sample = Path.of("build/reports/notifications/m6/combined-delivery.pdf");

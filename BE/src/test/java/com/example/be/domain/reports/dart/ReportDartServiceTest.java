@@ -5,6 +5,10 @@ import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.service.ReportReadingContent;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import org.junit.jupiter.api.Test;
@@ -29,8 +33,10 @@ class ReportDartServiceTest {
 
     @Test void readsOnlyFrozenCompaniesInSnapshotOrderAndDeduplicatesCodes() {
         properties.setApiKey("unit-test-key");
+        var report = report(ReportScope.RUN, HYNIX, SAMSUNG, HYNIX);
+        visibleTitle(report, "SK하이닉스와 삼성전자 실적 발표");
         when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
-                .thenReturn(Optional.of(report(ReportScope.RUN, HYNIX, SAMSUNG, HYNIX)));
+                .thenReturn(Optional.of(report));
         when(repository.find(17L)).thenReturn(List.of(new ReportDartRepository.Attachment(17L,
                 new Company(SAMSUNG.corpCode(), "지금 바뀐 회사명", SAMSUNG.stockCode()), "READY", ReportDartMessages.READY, data())));
         var result = service.get(17L);
@@ -53,6 +59,7 @@ class ReportDartServiceTest {
 
     @Test void topicWeeklyUsesReservationCompanyInsteadOfHistoricalCollectionCompanies() {
         var report = topicWeekly(SAMSUNG, ReportStatus.GENERATED);
+        visibleTitle(report, "삼성전자의 실적 발표");
         when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(repository.find(17L)).thenReturn(List.of(
                 new ReportDartRepository.Attachment(17L, SAMSUNG, "READY", ReportDartMessages.READY, data()),
@@ -76,7 +83,9 @@ class ReportDartServiceTest {
     }
 
     @Test void missingKeyReturnsDisabledWithoutBlockingReportAndRunningMapsToPending() {
-        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
+        var report = report(ReportScope.RUN, SAMSUNG);
+        visibleTitle(report, "삼성전자 실적 발표");
+        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         assertEquals("DISABLED", service.get(17L).companies().getFirst().status());
         assertEquals("DART API 키가 설정되지 않았습니다.", service.get(17L).companies().getFirst().message());
         properties.setApiKey("unit-test-key");
@@ -86,7 +95,9 @@ class ReportDartServiceTest {
     }
 
     @Test void retryReturnsStoredCompletedDataWithoutReplacingIt() {
-        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
+        var report = report(ReportScope.RUN, SAMSUNG);
+        visibleTitle(report, "삼성전자 실적 발표");
+        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(repository.find(17L)).thenReturn(List.of(new ReportDartRepository.Attachment(17L, SAMSUNG,
                 "READY", ReportDartMessages.READY, data())));
         assertEquals(data(), service.retry(17L).companies().getFirst().data());
@@ -96,6 +107,24 @@ class ReportDartServiceTest {
 
     @Test void absentPendingAndHiddenReportsUseExistingNotFoundContract() {
         assertThrows(ReportException.class, () -> service.get(404L));
+    }
+
+    @Test void publicReadHidesUnmentionedSelectionWithoutChangingStoredAttachmentOrStartingWork() {
+        var report = report(ReportScope.RUN, SAMSUNG);
+        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(repository.find(17L)).thenReturn(List.of(new ReportDartRepository.Attachment(17L, SAMSUNG,
+                "READY", ReportDartMessages.READY, data())));
+        visibleTitle(report, "행안부 공공 시스템 점검");
+
+        assertTrue(service.get(17L).companies().isEmpty());
+        assertEquals(data(), service.getStored(report).companies().getFirst().data());
+        visibleTitle(report, "삼성전자 실적 발표");
+        assertEquals(SAMSUNG, service.get(17L).companies().getFirst().company());
+        when(feedback.project(eq(report), any(), any())).thenReturn(new ReportEventFeedbackProjection.View(
+                List.of(), new ReportReadingContent("삼성전자 실적", null), false));
+        assertTrue(service.get(17L).companies().isEmpty(), "Legacy markdown alone cannot qualify a company");
+        verifyNoInteractions(persistence);
+        verify(repository, never()).enqueue(anyLong(), any(), anyBoolean(), any());
     }
 
     @Test void legacyUnlistedSelectionsNeverReadAttachmentsAndMixedSelectionsKeepListedCompanies() {
@@ -148,5 +177,14 @@ class ReportDartServiceTest {
         assertSame(snapshot, report.getReportIssueCompanySnapshot());
         verify(persistence).retry(17L);
         verify(repository, never()).enqueue(anyLong(), any(), anyBoolean(), any());
+    }
+
+    private void visibleTitle(NewsReport report, String title) {
+        var finding = com.example.be.domain.analysis.entity.Finding.builder().id(1L)
+                .article(com.example.be.domain.collection.entity.Article.builder().id(101L).build()).build();
+        var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent(
+                title, "저장된 이슈 요약", "", List.of(1L))), List.of(), List.of());
+        when(feedback.project(eq(report), any(), any())).thenReturn(new ReportEventFeedbackProjection.View(
+                List.of(finding), new ReportReadingContent("", content), false));
     }
 }

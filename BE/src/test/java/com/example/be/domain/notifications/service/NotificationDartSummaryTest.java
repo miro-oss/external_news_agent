@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,7 +38,7 @@ class NotificationDartSummaryTest {
                             List.of(), List.of(), List.of(), 10, 60, new Company("00126380", "선택 회사", "005930")))))).build();
 
     @Test
-    void rendersLatestQuarterAndOneFilingWithActualKoreanFetchDate() {
+    void rendersQuarterChartAndTableWithOneRecentFiling() {
         var financials = data("CFS", "KRW", List.of(quarter(1, "999999999999", "999999999999"),
                 quarter(2, "123456789012", "-1234567890")), List.of(
                 filing("반기보고서", FILING_URL, true), filing("이전 보고서", FILING_URL, false)));
@@ -45,13 +46,16 @@ class NotificationDartSummaryTest {
         String html = render(attachment("삼성전자", "READY", financials));
         String text = Jsoup.parse(html).text();
 
-        assertTrue(text.contains("삼성전자 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+        assertTrue(text.contains("삼성전자 연결재무제표 · 단위: 억원 (KRW)"));
+        assertEquals(List.of("2026년 1분기 10,000 10,000", "2026년 2분기 1,234.57 -12.35"),
+                Jsoup.parse(html).select("table:not([role]) tbody tr").eachText());
+        assertFalse(Jsoup.parse(html).select("td[bgcolor='#d14b4b']").isEmpty());
         assertTrue(text.contains("최근 공시 · [정정] 반기보고서 · 2026-08-14"));
-        assertTrue(text.contains("자료 확인 2026-10-15 (한국시간)"));
         assertFalse(text.contains("이전 보고서"));
-        assertFalse(text.contains("2026년 1분기"));
+        assertTrue(text.contains("2026년 1분기"));
         assertEquals(FILING_URL, Jsoup.parse(html).select("a").getFirst().attr("href"));
-        assertEquals(REPORT_URL, Jsoup.parse(html).select("a").getLast().attr("href"));
+        assertEquals(1, Jsoup.parse(html).select("a").size());
+        assertFalse(text.contains("첨부 PDF"));
         assertEquals("presentation", Jsoup.parse(html).selectFirst("table").attr("role"));
     }
 
@@ -60,7 +64,9 @@ class NotificationDartSummaryTest {
         String html = render(attachment("정밀도 회사", "READY", data("OFS", "KRW",
                 List.of(quarter(4, "10000000005000001", "-1")), List.of())));
         String text = Jsoup.parse(html).text();
-        assertTrue(text.contains("2026년 4분기(산출값) · 별도 · 매출 100,000,000.1억원 · 영업이익 -0.00000001억원"));
+        assertTrue(text.contains("별도재무제표 · 단위: 억원 (KRW)"));
+        assertTrue(text.contains("2026년 4분기* 100,000,000.05 -0.00000001"));
+        assertTrue(text.contains("* 산출값"));
     }
 
     @Test
@@ -68,9 +74,11 @@ class NotificationDartSummaryTest {
         String html = render(attachment("부분 회사", "PARTIAL", data(null, "KRW", List.of(
                 quarter(1, "10000000000", "5000000000"), quarter(2, null, "0")), List.of())));
         String text = Jsoup.parse(html).text();
-        assertTrue(text.contains("2026년 2분기 · 재무 기준 미확인 · 매출 자료 없음 · 영업이익 0억원"));
+        assertTrue(text.contains("재무 기준 미확인"));
+        assertEquals(List.of("2026년 1분기 100 50", "2026년 2분기 자료 없음 0"),
+                Jsoup.parse(html).select("table:not([role]) tbody tr").eachText());
         assertTrue(text.contains("일부 자료 없음"));
-        assertFalse(text.contains("100억원"));
+        assertEquals(2, Jsoup.parse(html).select("table[aria-label]").size());
     }
 
     @Test
@@ -78,8 +86,34 @@ class NotificationDartSummaryTest {
         String html = render(attachment("달러 회사", "READY", data("OFS", "USD",
                 List.of(quarter(2, "10000000000000001.20", "-0.01")), List.of())));
         String text = Jsoup.parse(html).text();
-        assertTrue(text.contains("매출 10,000,000,000,000,001.20 USD · 영업이익 -0.01 USD"));
+        assertTrue(text.contains("단위: USD"));
+        assertTrue(text.contains("2026년 2분기 10,000,000,000,000,001.20 -0.01"));
         assertFalse(text.contains("억원"));
+    }
+
+    @Test
+    void selectsLatestFourQuartersInChronologicalOrderAndNewestFilingFromUnsortedSavedData() {
+        var quarters = List.of(quarter(4, "400000000", "-40000000"),
+                new Quarter(2025, 4, "900000000", "90000000", null, true, List.of()),
+                quarter(2, null, "0"), quarter(1, "100000000", "10000000"),
+                quarter(3, "300000000", "30000000"));
+        var latest = new Filing("20261114001234", "새 분기 공시", "2026-11-14",
+                "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261114001234", false);
+        String html = render(attachment("정렬 회사", "PARTIAL", data("CFS", "KRW", quarters,
+                List.of(filing("이전 반기 공시", FILING_URL, false), latest))));
+        var document = Jsoup.parse(html);
+        assertEquals(List.of("2026년 1분기 1 0.1", "2026년 2분기 자료 없음 0", "2026년 3분기 3 0.3", "2026년 4분기* 4 -0.4"),
+                document.select("table:not([role]) tbody tr").eachText());
+        assertFalse(document.text().contains("2025"));
+        assertFalse(document.text().contains("이전 반기 공시"));
+        assertEquals(List.of(latest.url()), document.select("a").eachAttr("href"));
+        assertEquals(6, document.select("table[aria-label]").size());
+        assertEquals(1, document.select("td[bgcolor='#d14b4b']").size());
+        assertTrue(document.select("script,svg,img,canvas").isEmpty());
+        document.select("table[aria-label]").forEach(bar -> {
+            int width = Integer.parseInt(bar.attr("width").replace("%", ""));
+            assertTrue(width >= 1 && width <= 100);
+        });
     }
 
     @ParameterizedTest
@@ -107,17 +141,17 @@ class NotificationDartSummaryTest {
     }
 
     @Test
-    void limitsCompaniesAndShowsTheRemainingCount() {
+    void includesEveryEligibleCompanyWithoutRepeatingPdfNavigation() {
         var companies = IntStream.rangeClosed(1, 5)
                 .mapToObj(index -> attachment("회사 " + index, "PENDING", null)).toList();
-        when(service.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, companies));
-        String html = summary.render(report, REPORT_URL);
+        String html = summary.render(REPORT_URL, Map.of(), companies);
         assertTrue(html.contains("회사 1"));
         assertTrue(html.contains("회사 3"));
-        assertFalse(html.contains("회사 4"));
-        assertFalse(html.contains("회사 5"));
-        assertTrue(html.contains("외 2개 회사"));
-        assertTrue(html.contains("실적·공시 자세히"));
+        assertTrue(html.contains("회사 4"));
+        assertTrue(html.contains("회사 5"));
+        assertFalse(html.contains("외 2개 회사"));
+        assertFalse(html.contains("첨부 PDF"));
+        assertEquals(5, Jsoup.parse(html).select("h3").size());
     }
 
     @Test
@@ -131,7 +165,7 @@ class NotificationDartSummaryTest {
         assertFalse(document.text().contains("길".repeat(100)));
         assertTrue(document.text().contains("…"));
         String longCompany = render(attachment("회".repeat(100), "PENDING", null));
-        assertEquals("회".repeat(39) + "…", Jsoup.parse(longCompany).selectFirst("strong").text());
+        assertEquals("회".repeat(39) + "…", Jsoup.parse(longCompany).selectFirst("h3").text());
     }
 
     @ParameterizedTest
@@ -150,16 +184,13 @@ class NotificationDartSummaryTest {
         String html = render(attachment("회사", "READY", data("CFS", "KRW", List.of(),
                 List.of(filing("원문 제목", url, false)))));
         assertTrue(html.contains("원문 제목"));
-        assertEquals(1, Jsoup.parse(html).select("a").size());
-        assertEquals(REPORT_URL, Jsoup.parse(html).selectFirst("a").attr("href"));
+        assertTrue(Jsoup.parse(html).select("a").isEmpty());
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"javascript:alert(1)", "//news.example/reports", "https://user@news.example/reports", "https://news.example/<script>", ""})
     void omitsUnsafeReportLinks(String reportUrl) {
-        when(service.getStored(report)).thenReturn(new ReportDartDTO.Result(17L,
-                List.of(attachment("회사", "PENDING", null))));
-        String html = summary.render(report, reportUrl);
+        String html = summary.render(reportUrl, Map.of(), List.of(attachment("회사", "PENDING", null)));
         assertTrue(Jsoup.parse(html).select("a").isEmpty());
         assertFalse(html.contains("실적·공시 자세히"));
     }
@@ -170,14 +201,14 @@ class NotificationDartSummaryTest {
         var weekly = StoredReportDartFixture.topicWeekly();
         stored.ready(weekly);
 
-        String html = new NotificationDartSummary(stored.service()).render(weekly, REPORT_URL);
+        String html = new NotificationDartSummary(stored.service()).render(weekly, REPORT_URL, StoredReportDartFixture.readingView(), Map.of());
         var document = Jsoup.parse(html);
-        assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+        assertTrue(document.text().contains("SK하이닉스 연결재무제표 · 단위: 억원 (KRW)"));
+        assertTrue(document.text().contains("2026년 2분기 1,234.57 -12.35"));
         assertTrue(document.text().contains("반기보고서 (가상 검증 자료)"));
-        assertTrue(document.text().contains("자료 확인 2026-10-15 (한국시간)"));
-        assertFalse(document.text().contains("2026년 1분기"));
+        assertTrue(document.text().contains("2026년 1분기"));
         assertFalse(document.text().contains("이전 공시"));
-        assertEquals(List.of(StoredReportDartFixture.FILING_URL, REPORT_URL),
+        assertEquals(List.of(StoredReportDartFixture.FILING_URL),
                 document.select("a").eachAttr("href"));
         stored.verifyStoredReads(weekly.getId(), 1);
     }
@@ -210,8 +241,7 @@ class NotificationDartSummaryTest {
     }
 
     private String render(CompanyAttachment company) {
-        when(service.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(company)));
-        return summary.render(report, REPORT_URL);
+        return summary.render(REPORT_URL, Map.of(), List.of(company));
     }
 
     private CompanyAttachment attachment(String name, String status, FinancialData financials) {

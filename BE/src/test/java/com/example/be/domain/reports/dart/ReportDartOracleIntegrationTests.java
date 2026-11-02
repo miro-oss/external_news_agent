@@ -237,8 +237,10 @@ class ReportDartOracleIntegrationTests {
         persistence.enqueue(eligible.getId());
         assertEquals(1, repository.find(eligible.getId()).size());
         assertFalse(repository.missing().contains(eligible.getId()));
-        assertEquals("PENDING", service.get(eligible.getId()).companies().getFirst().status());
+        assertEquals("PENDING", service.getStored(eligible).companies().getFirst().status());
         assertTrue(service.get(legacy.getId()).companies().isEmpty());
+        assertTrue(service.get(eligible.getId()).companies().isEmpty(),
+                "A stored selection without a visible structured issue title stays hidden");
         verifyNoInteractions(financials);
     }
 
@@ -258,7 +260,7 @@ class ReportDartOracleIntegrationTests {
         assertTrue(repository.saveCache(COMPANY.corpCode(), "correction", data(), now));
         persistence.retry(report.getId());
         persistence.complete(job, "first", data(), false);
-        assertEquals(original, service.get(report.getId()).companies().getFirst().data());
+        assertEquals(original, service.getStored(report).companies().getFirst().data());
         assertEquals(data(), persistence.cache(COMPANY.corpCode(), "other-report").data());
         verifyNoInteractions(financials);
     }
@@ -279,7 +281,7 @@ class ReportDartOracleIntegrationTests {
             cacheStart.countDown();
             assertNotEquals(firstCache.get(10, TimeUnit.SECONDS), secondCache.get(10, TimeUnit.SECONDS));
         }
-        assertEquals("PENDING", service.get(report.getId()).companies().getFirst().status());
+        assertEquals("PENDING", service.getStored(report).companies().getFirst().status());
         verifyNoInteractions(financials);
     }
 
@@ -366,7 +368,7 @@ class ReportDartOracleIntegrationTests {
 
         persistence.enqueue(report.getId());
 
-        var attachment = service.get(report.getId()).companies().getFirst();
+        var attachment = service.getStored(report).companies().getFirst();
         assertEquals("READY", attachment.status());
         assertEquals(data(), attachment.data());
         assertEquals(data().fetchedAt(), attachment.data().fetchedAt());
@@ -395,13 +397,13 @@ class ReportDartOracleIntegrationTests {
         assertTrue(repository.reusableReports().containsAll(waiting.stream().map(NewsReport::getId).toList()));
         for (var report : waiting) {
             persistence.enqueue(report.getId());
-            var attachment = service.get(report.getId()).companies().getFirst();
+            var attachment = service.getStored(report).companies().getFirst();
             assertEquals("READY", attachment.status());
             assertEquals(data(), attachment.data());
             // An in-flight request may refresh the company cache, but cannot overwrite this report.
             repository.complete(new ReportDartRepository.Job(report.getId(), COMPANY, 0), "old-owner",
                     new FinancialData(null, null, data().fetchedAt(), List.of(), List.of(), List.of()), now);
-            assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+            assertEquals(data(), service.getStored(report).companies().getFirst().data());
         }
         assertTrue(repository.reusableReports().isEmpty());
         verifyNoInteractions(financials);
@@ -414,14 +416,14 @@ class ReportDartOracleIntegrationTests {
         seedCache(partial, now.minusDays(2));
         var report = create(true, ReportStatus.GENERATED);
         persistence.enqueue(report.getId());
-        assertEquals("PARTIAL", service.get(report.getId()).companies().getFirst().status());
-        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+        assertEquals("PARTIAL", service.getStored(report).companies().getFirst().status());
+        assertEquals(partial, service.getStored(report).companies().getFirst().data());
 
         seedCache(data(), LocalDateTime.now(ApiTimeZone.ZONE).plusSeconds(1));
         persistence.enqueue(report.getId());
         persistence.retry(report.getId());
 
-        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+        assertEquals(partial, service.getStored(report).companies().getFirst().data());
         assertTrue(repository.staleCompanies(now.plusDays(3), now.plusDays(4)).isEmpty());
         verifyNoInteractions(financials);
     }
@@ -439,7 +441,7 @@ class ReportDartOracleIntegrationTests {
         assertFalse(repository.claimCache(COMPANY.corpCode(), "other", now.plusMinutes(4), now.plusMinutes(34)));
         assertEquals(List.of(COMPANY.corpCode()), repository.staleCompanies(now.minusHours(24), now.plusMinutes(6))
                 .stream().map(Company::corpCode).toList());
-        assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+        assertEquals(data(), service.getStored(report).companies().getFirst().data());
     }
 
     @Test void legacyUnlistedJobsCannotStarveListedPollingOrResumeThroughRetryAndKeyRecovery() {

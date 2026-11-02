@@ -152,9 +152,11 @@ class ReportDeliveryArtifactIntegrationTest {
                         assertTrue(compact.contains("관점분석이준비되지않아기본보고서만전달합니다."));
                 }
                 var destinations = document.getDocumentCatalog().getNames().getDests();
-                int firstPage = destinations.getValue("company-0").retrievePageNumber() + 1;
-                assertTrue(html.contains("첨부 PDF p. " + firstPage + "에서 상세 확인"));
-                assertEquals(index == 0, destinations.getValue("company-1") != null);
+                assertNull(destinations.getValue("company-0"));
+                assertFalse(html.contains("에서 상세 확인"));
+                assertTrue(html.indexOf("회사 실적 · 공시") > html.indexOf("주요 이슈"));
+                assertTrue(pdf.indexOf("회사 실적 · 공시") > pdf.indexOf("중요 이벤트"));
+                assertNull(destinations.getValue("company-1"));
                 assertNull(destinations.getValue("company-2"));
                 var urls = new ArrayList<>(Jsoup.parse(html).select("a").eachAttr("href"));
                 for (var page : document.getPages()) for (var annotation : page.getAnnotations())
@@ -242,7 +244,9 @@ class ReportDeliveryArtifactIntegrationTest {
                 .sensitivity(FindingSensitivity.legacy(SensitivityLevel.HIGH)).build();
     }
     private static String key(long id) { return String.valueOf((char) ('a' + id - 11)).repeat(64); }
-    private static String title(long id) { return id == 11 ? "허용 사건" : id == 12 ? "공용 제외 사건" : "개인 제외 사건"; }
+    private static String title(long id) {
+        return company(id).corpName() + " · " + (id == 11 ? "허용 사건" : id == 12 ? "공용 제외 사건" : "개인 제외 사건");
+    }
     private static Company company(long id) {
         return new Company(String.format(Locale.ROOT, "%08d", id), id == 11 ? "허용기업" : id == 12 ? "공용제외기업" : "개인제외기업",
                 String.format(Locale.ROOT, "%06d", id));

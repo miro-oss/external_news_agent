@@ -66,7 +66,10 @@ class NotificationRendererTest {
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                         view(report, List.of(), false), "https://news.example/#/feedback?token=test").chunks().getFirst())) {
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("핵심 브리핑") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("보고서 전체 보기") < body.indexOf("회사 실적 · 공시"));
+            if (body.contains("이슈 피드백 · 내 수신 기준"))
+                assertTrue(body.indexOf("이슈 피드백 · 내 수신 기준") < body.indexOf("회사 실적 · 공시"));
             assertTrue(body.contains(reportUrl));
             assertEquals(1, org.jsoup.Jsoup.parse(body).select("p:contains(회사 실적 · 공시)").size());
         }
@@ -75,16 +78,15 @@ class NotificationRendererTest {
     @Test
     void topicWeeklyPreviewAndPersonalizedEmailIncludeRealStoredDartSummary() throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
-        var original = new ReportContent(List.of("공용 주간 핵심 요약"), List.of(), List.of(), List.of());
+        var original = StoredReportDartFixture.readingView().readingContent().structuredContent();
         report.recordStructuredContent(original);
         var stored = new StoredReportDartFixture();
         stored.ready(report);
         var actualRenderer = new NotificationRenderer(findingRepository, relevancePolicy, projection,
                 new NotificationDartSummary(stored.service()));
         org.springframework.test.util.ReflectionTestUtils.setField(actualRenderer, "publicBaseUrl", "https://news.example/");
-        String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst();
-        var personalContent = new ReportContent(List.of("수신자에게 허용된 요약"), List.of(), List.of(), List.of());
-        var personalView = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent("", personalContent), false);
+        var personalView = StoredReportDartFixture.readingView();
+        String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE), personalView, null).chunks().getFirst();
         String feedbackUrl = "https://news.example/#/feedback?token=test";
         String personal = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                 personalView, feedbackUrl).chunks().getFirst();
@@ -92,14 +94,20 @@ class NotificationRendererTest {
         for (String body : List.of(preview, personal)) {
             var document = org.jsoup.Jsoup.parse(body);
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("핵심 브리핑") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("보고서 전체 보기") < body.indexOf("회사 실적 · 공시"));
+            if (body.contains("이슈 피드백 · 내 수신 기준"))
+                assertTrue(body.indexOf("이슈 피드백 · 내 수신 기준") < body.indexOf("회사 실적 · 공시"));
             assertEquals(1, document.select("h2:containsOwn(회사 실적 · 공시)").size());
-            assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+            assertTrue(document.text().contains("SK하이닉스 연결재무제표 · 단위: 억원 (KRW)"));
+            assertTrue(document.text().contains("2026년 2분기 1,234.57 -12.35"));
+            assertFalse(document.text().contains("확인된 기업"));
+            assertFalse(document.text().contains("첨부 PDF p."));
             assertTrue(document.select("a").eachAttr("href").contains(StoredReportDartFixture.FILING_URL));
             assertFalse(document.text().contains("이전 공시"));
         }
         assertFalse(preview.contains("공용 주간 핵심 요약"));
-        assertTrue(preview.contains("새롭게 정리할 주요 내용이 없습니다."));
+        assertTrue(preview.contains("SK하이닉스 실적 발표"));
         assertFalse(preview.contains(feedbackUrl));
         assertFalse(personal.contains("수신자에게 허용된 요약"));
         assertTrue(personal.contains(feedbackUrl));

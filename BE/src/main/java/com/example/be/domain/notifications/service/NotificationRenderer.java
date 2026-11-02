@@ -162,7 +162,8 @@ public class NotificationRenderer {
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience, keywords, changes, companies);
+            var visibleCompanies = NotificationCompanyVisibility.visible(report, view, companies);
+            RenderedNotification rendered = renderEmail(report, view, insight, companyPages, coverage, unavailableAudience, keywords, changes, visibleCompanies);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -235,7 +236,6 @@ public class NotificationRenderer {
                     : coverage.forSources(card.sourceFindingIds());
             html.append("<p style=\"margin:-12px 0 16px;color:#636c78;font-size:12px;line-height:1.7\">")
                     .append(escape(NotificationCoverage.label(counts))).append("</p>");
-            NotificationCompanySection.email(html, card.sourceFindingIds(), companies, companyPages);
             if (card.summary().codePointCount(0, card.summary().length()) <= 180)
                 NotificationBriefingSection.paragraph(html, card.summary());
             else
@@ -245,9 +245,10 @@ public class NotificationRenderer {
             html.append("</td></tr></tbody></table>");
         }
         if (cards.isEmpty()) appendSources(html, findings, true);
+        appendReportLink(html, report, true);
+        html.append("<!-- feedback-footer -->");
         String dartBlock = dartSummary.render(reportUrl(report), companyPages, companies);
         if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
-        appendReportLink(html, report, true);
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));
     }
 
@@ -298,7 +299,6 @@ public class NotificationRenderer {
 
     private String emailEnd(StringBuilder html) {
         return html.append("""
-                <!-- feedback-footer -->
                 </td></tr></tbody></table>
                 <!--[if mso]></td></tr></table><![endif]-->
                 <p style="margin:20px 0 0;color:#636c78;font-size:12px;line-height:1.6">BISTelligence · News Signal Desk</p>

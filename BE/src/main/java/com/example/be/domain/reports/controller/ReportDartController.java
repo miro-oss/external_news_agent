@@ -25,7 +25,7 @@ public class ReportDartController {
     private final ReportDartService service;
 
     @GetMapping("/{reportId}/dart")
-    @Operation(summary = "리포트 공시·분기 실적 조회", description = "명시 선택 회사와 신규 RUN·DAILY·WEEKLY의 기사에서 확인하여 고정한 기업 중 상장 회사(6자리 영숫자 종목코드)의 저장 공시·최근 12분기 자료만 반환합니다. 비상장 회사는 과거 연결도 제외합니다. 현재 표시 가능한 issueLinks와 최근 공시/실적 근거 filingRows를 제공하며 직접 참조와 회사 참고를 구분합니다. 과거 자동 연결은 소급하지 않고 조회는 DART·LLM을 호출하지 않습니다. fetchedAt은 실제 자료 확인 시각입니다.")
+    @Operation(summary = "리포트 공시·분기 실적 조회", description = "최종 표시 가능한 중요 이슈 제목에 직접 나온 저장 상장 회사(6자리 영숫자 종목코드)의 공시·최근 12분기 자료만 반환합니다. 제목에 없는 명시 선택 회사와 원문·요약·관찰 항목에만 언급된 기업, 비상장은 제외합니다. 저장 회사명·검증된 matchedName·종목코드의 정확한 일치만 사용하며 그룹·계열사를 추정하지 않습니다. issueLinks는 해당 제목 이슈의 살아 있는 근거만 제공하고 filingRows의 직접 참조와 회사 참고를 구분합니다. 해당 회사나 구조화 이슈 제목이 없으면 companies는 빈 배열입니다. 원본 연결을 변경하거나 과거 자동 연결을 소급하지 않고 조회는 DART·LLM을 호출하지 않습니다. fetchedAt은 실제 자료 확인 시각입니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다.",
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = "{\"isSuccess\":true,\"code\":\"COMMON200\",\"message\":\"성공입니다.\",\"result\":{\"reportId\":17,\"companies\":[{\"company\":{\"corpCode\":\"00126380\",\"corpName\":\"삼성전자\",\"stockCode\":\"005930\"},\"status\":\"PENDING\",\"message\":\"공시 자료를 준비하고 있습니다.\",\"data\":null,\"issueLinks\":[],\"filingRows\":[]}]}}"))),

@@ -298,14 +298,18 @@ class ReportQueryServiceImplTest {
     }
 
     @Test
-    void detailAndLatestExposeFrozenDartCompaniesRegardlessOfFindings() {
+    void detailAndLatestExposeOnlyFrozenCompaniesNamedInVisibleIssuesRegardlessOfFindingsFlag() {
         var selected = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
         var historical = new com.example.be.domain.dart.model.DartModels.Company("00164779", "SK하이닉스", "000660");
         var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "수집 당시", null,
                 List.of(), List.of(), List.of(), 10, 60, historical)));
         var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
                 .topicDartCorpCode(selected.corpCode()).topicDartCorpName(selected.corpName())
-                .topicDartStockCode(selected.stockCode()).collectionContexts(List.of(context)).build();
+                .topicDartStockCode(selected.stockCode()).collectionContexts(List.of(context))
+                .reflectedFindingIds(List.of(1L)).structuredContent(companyIssue("삼성전자의 실적 발표")).build();
+        var findings = List.of(finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT));
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(findings);
+        when(relevancePolicy.filterTopicFindings(1L, findings)).thenReturn(findings);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
@@ -317,6 +321,10 @@ class ReportQueryServiceImplTest {
             assertEquals(List.of(selected), service.getLatest(includeFindings, ReportScope.WEEKLY).getDartCompanies());
             assertEquals(List.of(context), service.getReport(17L, includeFindings).getCollectionContexts());
         }
+        report.recordStructuredContent(companyIssue("행안부 공공 시스템 점검"));
+        assertTrue(service.getReport(17L, false).getDartCompanies().isEmpty());
+        assertTrue(service.getLatest(true).getDartCompanies().isEmpty());
+        assertEquals(selected, report.getTopicDartCompany(), "Projection preserves the saved selection");
     }
 
     @Test
@@ -324,16 +332,29 @@ class ReportQueryServiceImplTest {
         var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
         var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "당시 주제", null,
                 List.of(), List.of(), List.of(), 10, 60, company)));
+        var findings = List.of(finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(findings);
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(findings);
         for (var scope : ReportScope.values()) {
             var report = NewsReport.builder().id(17L).reportScope(scope)
+                    .run(scope == ReportScope.RUN ? CollectionRun.builder().id(42L).build() : null)
+                    .reflectedFindingIds(List.of(1L)).structuredContent(companyIssue("삼성전자 실적 발표"))
                     .collectionContexts(List.of(context, context)).build();
             when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
             assertEquals(scope == ReportScope.RUN ? List.of(company) : List.of(), service.getReport(17L, false).getDartCompanies());
+            report.recordStructuredContent(null);
+            assertTrue(service.getReport(17L, false).getDartCompanies().isEmpty(),
+                    "Legacy reports without structured issue titles cannot qualify selected companies");
         }
         var legacy = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
                 .collectionContexts(List.of(context)).build();
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(legacy));
         assertEquals(List.of(), service.getReport(17L, false).getDartCompanies());
+    }
+
+    private ReportContent companyIssue(String title) {
+        return new ReportContent(List.of("삼성전자와 SK하이닉스"),
+                List.of(new ReportContent.ImportantEvent(title, "이슈 요약", "", List.of(1L))), List.of(), List.of());
     }
 
     @Test
