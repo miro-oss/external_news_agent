@@ -201,7 +201,7 @@ class ReportChangesQueryServiceTest {
 
             var result = query.get(101);
             assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
-            assertEquals(ReportChanges.Status.UNAVAILABLE.message, result.message());
+            assertEquals("제외된 근거나 표시할 수 없는 자료가 있어 변화 비교를 생략했습니다.", result.message());
             assertFalse(result.scopeChanged());
             assertTrue(result.items().isEmpty());
             assertTrue(result.notes().isEmpty());
@@ -216,7 +216,7 @@ class ReportChangesQueryServiceTest {
         verify(comparisons, never()).claim(anyLong(), any());
     }
 
-    @Test void pendingAndUnconfirmedReviewsKeepSavedComparisonReadyAcrossRevisions() {
+    @Test void submittedPendingAndUnconfirmedOpinionsHideSavedComparisonAcrossRevisions() {
         var fixture = comparisonWithEvents(false);
         var stale = eventItem('c', 0, fixture.current().getStructuredContent().importantEvents().getFirst());
         for (var review : List.of(
@@ -226,10 +226,14 @@ class ReportChangesQueryServiceTest {
                 review(101L, fixture.currentEvent(), FeedbackModels.Status.COMPLETED, "NOT_CONFIRMED"))) {
             when(feedbackStore.eventFeedback(101L)).thenReturn(List.of(review));
             var result = query.get(101);
-            assertEquals(ReportChanges.Status.READY, result.status());
-            assertEquals(fixture.ready().items(), result.items());
+            assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+            assertEquals("FILTERED_INPUT", result.keywordChanges().reason());
+            assertEquals("제외된 근거나 표시할 수 없는 자료가 있어 변화 비교를 생략했습니다.", result.message());
+            assertNotEquals(ReportChanges.Status.UNAVAILABLE.message, result.message());
+            assertTrue(result.items().isEmpty());
+            assertTrue(result.notes().isEmpty());
         }
-        verify(eventSnapshots, never()).capture(eq(fixture.current()), any());
+        verify(eventSnapshots, times(4)).capture(eq(fixture.current()), any());
         verify(eventSnapshots, never()).capture(eq(fixture.base()), any());
     }
 
@@ -301,6 +305,7 @@ class ReportChangesQueryServiceTest {
         var result = query.get(101);
         assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
         assertEquals("NO_SNAPSHOT", result.keywordChanges().reason());
+        assertEquals(ReportChanges.Status.UNAVAILABLE.message, result.message());
         assertTrue(result.items().isEmpty());
         assertTrue(result.notes().isEmpty());
     }
@@ -314,13 +319,17 @@ class ReportChangesQueryServiceTest {
         assertEquals("FILTERED_INPUT", query.get(101).keywordChanges().reason());
     }
 
-    @Test void deliveryChecksUnconfirmedBaselineOpinionAndPersonalPolicyWithoutChangingPublicReading() {
+    @Test void baselineOpinionHidesBothViewsWhilePersonalPolicyOnlyRestrictsDeliveryComparison() {
         var fixture = comparisonWithEvents(false);
         when(feedbackStore.eventFeedback(100L)).thenReturn(List.of(review(100L, fixture.baseEvent(),
                 FeedbackModels.Status.PENDING, null)));
         var view = new ReportEventFeedbackProjection.View(List.of(fullText(20)),
                 new com.example.be.domain.reports.service.ReportReadingContent("", fixture.current().getStructuredContent()), false);
-        assertEquals(ReportChanges.Status.READY, query.get(101).status());
+        var publicResult = query.get(101);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, publicResult.status());
+        assertTrue(publicResult.items().isEmpty());
+        assertTrue(publicResult.notes().isEmpty());
+        assertEquals("FILTERED_INPUT", publicResult.keywordChanges().reason());
         var delivered = query.projectForDelivery(fixture.current(), view, false);
         assertEquals(ReportChanges.Status.UNAVAILABLE, delivered.status());
         assertTrue(delivered.items().isEmpty());

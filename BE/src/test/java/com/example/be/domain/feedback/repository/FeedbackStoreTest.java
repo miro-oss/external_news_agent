@@ -1,6 +1,7 @@
 package com.example.be.domain.feedback.repository;
 
 import com.example.be.domain.feedback.model.FeedbackModels.Feedback;
+import com.example.be.domain.feedback.model.FeedbackModels.Item;
 import com.example.be.global.database.OracleInClause;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,13 +32,15 @@ class FeedbackStoreTest {
     }
 
     @Test
-    void reviewStatesReadNoClobsOrFrozenInput() throws Exception {
+    void reviewStatesKeepPendingFrozenInputForRevisedReportsWithoutLoadingDiagnosis() throws Exception {
         ResultSet row = mock(ResultSet.class);
         when(row.getLong("id")).thenReturn(8L);
         when(row.getLong("report_id")).thenReturn(17L);
         when(row.getString("category")).thenReturn("SUMMARY_ERROR");
-        when(row.getString("status")).thenReturn("COMPLETED");
-        when(row.getString("verdict")).thenReturn("CONFIRMED_ERROR");
+        when(row.getString("status")).thenReturn("PENDING");
+        when(row.getString("input_json")).thenReturn("saved-input");
+        var input = mock(Item.class);
+        when(json.readValue("saved-input", Item.class)).thenReturn(input);
         when(row.getString("event_key")).thenReturn("a".repeat(64));
         when(row.getTimestamp("created_at")).thenReturn(Timestamp.valueOf(LocalDateTime.of(2026, 10, 1, 12, 0)));
         when(jdbc.query(anyString(), org.mockito.ArgumentMatchers.<RowMapper<Feedback>>any(), any(Object[].class)))
@@ -46,20 +49,41 @@ class FeedbackStoreTest {
         var feedback = store.eventReviewStates(List.of(17L)).getFirst();
 
         assertEquals(17L, feedback.reportId());
-        assertEquals("CONFIRMED_ERROR", feedback.verdict());
+        assertEquals(com.example.be.domain.feedback.model.FeedbackModels.Status.PENDING, feedback.status());
+        assertNull(feedback.verdict());
         assertEquals("a".repeat(64), feedback.eventKey());
-        assertNull(feedback.input());
+        assertSame(input, feedback.input());
         assertNull(feedback.diagnosis());
         var sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), org.mockito.ArgumentMatchers.<RowMapper<Feedback>>any(), any(Object[].class));
         assertFalse(sql.getValue().contains("SELECT *"));
-        assertFalse(sql.getValue().contains("input_json"));
+        assertTrue(sql.getValue().contains("input_json"));
         assertFalse(sql.getValue().contains("review_json"));
         assertFalse(sql.getValue().contains("diagnosis"));
-        verify(row, never()).getString("input_json");
+        verify(row).getString("input_json");
         verify(row, never()).getString("review_json");
         verify(row, never()).getString("diagnosis");
-        verifyNoInteractions(json);
+        verify(json).readValue("saved-input", Item.class);
+    }
+
+    @Test
+    void malformedHistoricalInputDoesNotBreakReportListsOrInventFallbackEvidence() throws Exception {
+        ResultSet row = mock(ResultSet.class);
+        when(row.getLong("id")).thenReturn(8L);
+        when(row.getLong("report_id")).thenReturn(17L);
+        when(row.getString("category")).thenReturn("PREFERENCE");
+        when(row.getString("status")).thenReturn("FAILED");
+        when(row.getTimestamp("created_at")).thenReturn(Timestamp.valueOf(LocalDateTime.of(2026, 10, 1, 12, 0)));
+        when(row.getString("input_json")).thenReturn("invalid-input");
+        when(row.getString("event_key")).thenReturn("a".repeat(64));
+        when(json.readValue("invalid-input", Item.class)).thenThrow(new IllegalArgumentException("invalid input"));
+        when(jdbc.query(anyString(), org.mockito.ArgumentMatchers.<RowMapper<Feedback>>any(), any(Object[].class)))
+                .thenAnswer(call -> List.of(call.<RowMapper<Feedback>>getArgument(1).mapRow(row, 0)));
+
+        var review = store.eventReviewStates(List.of(17L)).getFirst();
+
+        assertNull(review.input());
+        assertEquals("a".repeat(64), review.eventKey());
     }
 
     @Test

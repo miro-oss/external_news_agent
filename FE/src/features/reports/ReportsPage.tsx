@@ -34,6 +34,7 @@ import { ReportSharePanel } from '../notifications/ReportSharePanel'
 import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { refreshReportReading } from './reportRefresh'
+import { reportFeedbackHistoryHash } from './eventFeedbackState'
 import { ReportInsightsPanel } from './ReportInsightsPanel'
 import { ReportDartPanel, ReportDartProvider } from './ReportDartPanel'
 import { ReportIssueCompanies } from './ReportIssueCompanies'
@@ -380,6 +381,12 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [feedbackSync, setFeedbackSync] = useState<'busy' | 'failed' | null>(null)
+  async function refreshAfterFeedback() {
+    setFeedbackSync('busy')
+    try { await onRefreshReport(); setFeedbackSync(null) }
+    catch { setFeedbackSync('failed') }
+  }
   const contexts = report.collectionContexts ?? []
   const highlightTerms = collectionHighlightTerms(contexts)
   const topicNames = [...new Set(contexts.flatMap(context => context.topics.map(topic => topic.topicName)).filter(Boolean))]
@@ -414,7 +421,14 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     }
   }
   return (
-    <ReportDartProvider report={report}><article className="report-document report-document-enter" data-report-scope={report.reportScope}>
+    <ReportDartProvider report={report}>
+    {feedbackSync && <section className="state-panel" role={feedbackSync === 'failed' ? 'alert' : 'status'}>
+      <p>{feedbackSync === 'busy' ? '의견이 접수된 이슈를 제외하고 브리핑·집계를 갱신하고 있습니다.'
+        : '의견은 접수됐지만 새 보고서를 불러오지 못했습니다. 다시 불러와 주세요.'}</p>
+      {feedbackSync === 'failed' && <button type="button" className="secondary-button" onClick={() => { void refreshAfterFeedback() }}>보고서 다시 불러오기</button>}
+      <a href={reportFeedbackHistoryHash(report.id)}>의견·검토 이력 보기 →</a>
+    </section>}
+    <article hidden={feedbackSync !== null} className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
         {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
           {report.topicId != null ? '주제별' : '전체 통합'}
@@ -461,6 +475,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       <ReportDartPanel report={report} />
 
       <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
+        onFeedbackSubmitted={refreshAfterFeedback}
         afterBriefing={<><ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
           selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
           onEvidenceSelect={onEvidenceSelect} /><ReportChangesPanel reportId={report.id} /></>} />

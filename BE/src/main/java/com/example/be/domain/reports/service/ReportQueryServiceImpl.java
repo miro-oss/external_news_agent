@@ -147,7 +147,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         long highSensitivityCount = report.getReportScope() != ReportScope.RUN
                 ? aggregateCount == null ? 0 : aggregateCount.getHighSensitivityCount()
                 : count == null ? 0 : count.getHighSensitivityCount();
-        if (feedbackProjection.hasConfirmedErrors(reviews) || !inherited.isEmpty()) {
+        if (feedbackProjection.hasSubmittedOpinions(reviews) || !inherited.isEmpty()) {
             var view = feedbackProjection.project(report,
                     ReportFindings.loadVisible(report, findingRepository, relevancePolicy), reviews, inherited);
             findingCount = view.findings().size();
@@ -195,7 +195,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Long runId = report.getRunId();
         boolean aggregate = report.getReportScope() != ReportScope.RUN;
         var reviews = feedbackProjection.reviews(report.getId());
-        boolean loadFindings = report.getStructuredContent() != null || report.getReportCoverageSnapshot() != null || report.getReportKeywordSnapshot() != null || report.getReportIssueCompanySnapshot() != null || includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
+        boolean loadFindings = report.getStructuredContent() != null || report.getReportCoverageSnapshot() != null || report.getReportKeywordSnapshot() != null || report.getReportIssueCompanySnapshot() != null || includeFindings || aggregate || feedbackProjection.hasSubmittedOpinions(reviews)
                 || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
                 || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
         ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)

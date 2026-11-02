@@ -212,7 +212,7 @@ class PersonalizedNotificationRendererTest {
 
     @ParameterizedTest
     @EnumSource(ChannelType.class)
-    void localOpinionsImmediatelyChangeManualAndQueuedDeliveryWithoutChangingPublicReading(ChannelType type) {
+    void localOpinionsImmediatelyChangePublicReadingAndBothDeliveryEntryPoints(ChannelType type) {
         Fixture fixture = fixture(false);
         List<Feedback> reviews = List.of(
                 review('a', Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null),
@@ -231,7 +231,11 @@ class PersonalizedNotificationRendererTest {
                 assertTrue(body.contains("정상 사건 제목"));
             }
             var publicView = projection.project(fixture.report(), new ReportFindings.Visible(fixture.findings(), false), List.of(review));
-            assertSame(fixture.report().getStructuredContent(), publicView.readingContent().structuredContent());
+            assertRejectedContentAbsent(publicView.readingContent().markdownBody());
+            assertEquals(List.of("정상 사건 제목"), eventTitles(publicView));
+            assertEquals(List.of(12L, 13L), publicView.findings().stream().map(Finding::getId).toList());
+            assertEquals(Set.of(11L, 12L), publicView.excludedEvidenceFindingIds());
+            assertTrue(publicView.excludedEvents());
         }
 
         for (var view : preparedViews(fixture.report(), reviews.size() * 2)) {

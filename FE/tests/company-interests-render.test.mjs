@@ -120,6 +120,17 @@ test('the management page offers loading, empty, error and populated states with
   assert.deepEqual(requests, [])
 })
 
+test('a report history deep link mounts the saved-opinion reader inside feedback management', t => {
+  const previous = globalThis.window
+  globalThis.window = { location: { hash: '#/company-interests?reportId=17' } }
+  t.after(() => { if (previous === undefined) delete globalThis.window; else globalThis.window = previous })
+  setFixture({ criteria: [], busy: false })
+  const markup = renderToStaticMarkup(createElement(Page))
+  assert.match(markup, /보고서 #17 의견·검토 이력/)
+  assert.match(markup, /의견 이력을 불러오고 있습니다/)
+  assert.match(markup, /#\/reports\?reportId=17/)
+})
+
 test('returned criteria are text, and stale/loading state disables mutations', () => {
   const markup = card({ ...companyCriterion, eventTitle: '<script>bad()</script>', comment: '<img src=x onerror=bad()>', instruction: '<script>instruction()</script>' }, { disabled: true })
   assert.doesNotMatch(markup, /<script|<img/)

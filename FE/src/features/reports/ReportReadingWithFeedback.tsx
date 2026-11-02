@@ -10,16 +10,17 @@ import { CompanyInterestProgress } from '../interests/CompanyInterestProgress'
 import { companyInterestHash } from '../interests/companyInterestState'
 import { useCompanyInterests } from '../interests/useCompanyInterests'
 import { ReportReadingContent } from './ReportReadingContent'
-import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError } from './eventFeedbackState'
+import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError, reportFeedbackHistoryHash, submittedReportEventsRemain } from './eventFeedbackState'
 import { useReportEventFeedback } from './useReportEventFeedback'
 import './reportEventFeedback.css'
 
-export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOtherAnalysis, onRefreshReport, afterBriefing }: {
+export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOtherAnalysis, onRefreshReport, onFeedbackSubmitted, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   beforeOtherAnalysis?: ReactNode
   afterBriefing?: ReactNode
   onRefreshReport: () => Promise<unknown>
+  onFeedbackSubmitted?: () => Promise<unknown>
 }) {
   const hasEvents = !!report.structuredContent?.importantEvents.length
   const { data, error, busy, paused, refresh, recordFeedback } = useReportEventFeedback(report.id, hasEvents)
@@ -27,28 +28,45 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
   const interests = useCompanyInterests(reviewedPreferences.length > 0, `${report.id}:${reviewedPreferences.map(item => item.id).join(',')}`)
   const [refreshingReport, setRefreshingReport] = useState(false)
   const [refreshError, setRefreshError] = useState('')
+  const [acceptedTargets, setAcceptedTargets] = useState<{ reportId: number; events: ReportFeedbackEvent[] } | null>(null)
   const mounted = useRef(true)
   const refreshInFlight = useRef(false)
   const syncedEvents = useRef<string | null>(null)
+  const knownSubmitted = data?.events.filter(target => data.feedback.some(item => item.eventKey === target.eventKey)) ?? []
+  const submittedVisible = submittedReportEventsRemain(report.structuredContent?.importantEvents ?? [],
+    [...knownSubmitted, ...(acceptedTargets?.reportId === report.id ? acceptedTargets.events : [])])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const refreshReport = useCallback(async () => {
+  const refreshReport = useCallback(async (afterSubmission = false) => {
     if (refreshInFlight.current) return
     refreshInFlight.current = true
     setRefreshingReport(true)
     setRefreshError('')
-    try { await onRefreshReport(); if (mounted.current) refresh() }
+    if (afterSubmission && data) setAcceptedTargets(current => ({ reportId: report.id,
+      events: [...(current?.reportId === report.id ? current.events : []),
+        ...data.events.filter(target => data.feedback.some(item => item.eventKey === target.eventKey))] }))
+    try {
+      await (afterSubmission && onFeedbackSubmitted ? onFeedbackSubmitted() : onRefreshReport())
+      if (mounted.current) refresh()
+    }
     catch { if (mounted.current) setRefreshError('보고서를 새로고침하지 못했습니다. 다시 시도해 주세요.') }
     finally { refreshInFlight.current = false; if (mounted.current) setRefreshingReport(false) }
-  }, [onRefreshReport, refresh])
+  }, [onRefreshReport, onFeedbackSubmitted, refresh, data, report.id])
   const mismatch = !!data && (report.structuredContent?.importantEvents ?? [])
     .some((event, index) => !matchReportFeedbackEvent(report.id, event, index, data))
-  const changedEvents = mismatch && data ? JSON.stringify([report.id, data.events]) : null
+  const changedEvents = (mismatch || submittedVisible) && data ? JSON.stringify([report.id, data.events, data.feedback.map(item => item.id)]) : null
   useEffect(() => {
     if (!changedEvents) { syncedEvents.current = null; return }
     if (syncedEvents.current === changedEvents || refreshInFlight.current) return
     syncedEvents.current = changedEvents
-    void refreshReport()
-  }, [changedEvents, refreshReport, refreshingReport])
+    void refreshReport(submittedVisible)
+  }, [changedEvents, refreshReport, refreshingReport, submittedVisible])
+  function feedbackSaved(feedback: ReportEventFeedback) {
+    const target = data?.events.find(item => item.eventKey === feedback.eventKey)
+    if (target) setAcceptedTargets(current => ({ reportId: report.id,
+      events: [...(current?.reportId === report.id ? current.events : []), target] }))
+    recordFeedback(feedback)
+    void refreshReport(true)
+  }
   const refreshButton = <button type="button" className="text-button" disabled={refreshingReport || busy}
     onClick={() => { void refreshReport() }}>{refreshingReport ? '새로고침 중…' : '보고서 새로고침'}</button>
   const notice = hasEvents && <>
@@ -66,13 +84,22 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
     {interests.error != null && <div className="report-feedback-notice" role="alert"><span>의견 검토는 완료됐지만 회사 관심 기준의 현재 상태를 확인하지 못했습니다.</span>
       <button type="button" className="text-button" disabled={interests.busy} onClick={interests.refresh}>회사 기준 다시 확인</button></div>}
   </>
-  return <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis} afterBriefing={afterBriefing}
+  return <>
+    {submittedVisible && <div className="report-feedback-notice" role="status">
+      <p>의견이 접수된 이슈를 제외하고 보고서를 갱신하고 있습니다.</p>{refreshButton}
+      {refreshError && <p role="alert">{refreshError}</p>}
+    </div>}
+    <p className="report-feedback-notice"><a href={reportFeedbackHistoryHash(report.id)}>이 보고서의 의견·검토 이력 보기 →</a></p>
+    <div hidden={submittedVisible}>
+    <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis} afterBriefing={afterBriefing}
     feedbackNotice={notice} eventFeedback={(event, index) => {
       const target = matchReportFeedbackEvent(report.id, event, index, data)
       return <ReportEventFeedbackSlot key={report.id} reportId={report.id} target={target} feedback={data?.feedback ?? []}
-        disabled={error != null} onFeedback={recordFeedback} onRefreshReport={refreshReport}
+        disabled={error != null} onFeedback={feedbackSaved} onRefreshReport={refreshReport}
         criteria={interests.criteria ?? []} criteriaBusy={interests.busy} criteriaError={interests.error != null} />
     }} />
+    </div>
+  </>
 }
 
 /** Keep a draft mounted while a newer feedback view and the report detail are being synchronized. */
@@ -163,7 +190,7 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
       </label>
       <div className="report-feedback-help report-feedback-count" id={`${id}-count`}><span>1~2,000자</span><span>{comment.length.toLocaleString()} / 2,000</span></div>
     </fieldset>
-    <p className="report-feedback-help" id={`${id}-delivery`}>의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 이후 메일·텔레그램 발송에서 제외됩니다. 전달 제외는 보고서 화면의 내용을 변경하지 않습니다.</p>
+    <p className="report-feedback-help" id={`${id}-delivery`}>의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 보고서 화면과 이후 메일·텔레그램 발송에서 제외됩니다. 핵심 브리핑과 집계도 다시 반영합니다. 의견·검토 이력은 피드백 관리에서 확인할 수 있습니다.</p>
     <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 관심 의견은 검토 후 회사 관심 기준으로 제안하며, 기준을 확인하고 적용하면 이후 보고서 선정에 사용합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
     {error && <div className="report-feedback-error" role="alert"><p>{error}</p>
       {conflict ? <><p>이미 의견이 접수되었거나 보고서 내용이 바뀌었을 수 있습니다. 새로고침 후 확인해 주세요.</p>
@@ -185,7 +212,7 @@ export function ReportEventFeedbackResult({ feedback, criterion, criteriaBusy = 
       <time dateTime={feedback.createdAt}>{formatFullDate(feedback.createdAt)}</time></div>
     <p className="report-feedback-help">{FEEDBACK_CATEGORIES.find(option => option.value === feedback.category)?.label}</p>
     <p className="report-feedback-saved-comment">{feedback.comment}</p>
-    <p className="report-feedback-help"><strong>메일·텔레그램 전달 제외</strong> · 의견 접수 즉시 적용되었습니다. 검토 상태·결과와 관계없이 해당 이슈를 이후 발송에서 제외합니다. 이미 발송된 내용은 바뀌지 않습니다.</p>
+    <p className="report-feedback-help"><strong>보고서 화면·메일·텔레그램 전달 제외</strong> · 의견 접수 즉시 적용되었습니다. 검토 상태·결과와 관계없이 해당 이슈를 보고서 화면과 이후 발송에서 제외합니다. 이미 발송된 내용은 바뀌지 않습니다.</p>
     {feedback.diagnosis && <div className="report-feedback-diagnosis"><strong>{feedback.verdict ? VERDICT_LABELS[feedback.verdict] : '검토 설명'}</strong><p>{feedback.diagnosis}</p></div>}
     {feedback.status === 'COMPLETED' && !feedback.diagnosis && <p>검토를 마쳤습니다. 추가 설명이 제공되지 않았습니다.</p>}
     {feedback.status === 'FAILED' && <p>검토를 완료하지 못했습니다. 남긴 의견은 보관됩니다.</p>}

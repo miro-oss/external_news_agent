@@ -5,19 +5,31 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, afterEach, before, test } from 'node:test'
 import { createElement } from 'react'
+import { setImmediate } from 'node:timers/promises'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const fixtureId = '\0test:report-event-feedback-context'
+const readingFixtureId = '\0test:report-event-feedback-reading'
 const contextFixturePlugin = {
   name: 'report-event-feedback-context-fixture',
   enforce: 'pre',
   resolveId(source, importer) {
     if (source === 'test:report-event-feedback-context'
-      || (source === './useReportEventFeedback' && importer?.endsWith('/ReportReadingWithFeedback.tsx'))) return fixtureId
+      || (source === './useReportEventFeedback' && (importer?.endsWith('/ReportReadingWithFeedback.tsx')
+        || importer?.endsWith('/ReportFeedbackHistory.tsx')))) return fixtureId
+    if (source === 'test:report-event-feedback-reading'
+      || (source === './ReportReadingContent' && importer?.endsWith('/ReportReadingWithFeedback.tsx'))) return readingFixtureId
   },
   load(id) {
+    if (id === readingFixtureId) return `
+      import { createElement } from 'react';
+      import { ReportReadingContent as Reading } from '/src/features/reports/ReportReadingContent.tsx';
+      let props;
+      export function ReportReadingContent(value) { props = value; return createElement(Reading, value); }
+      export function getReadingProps() { return props; }
+    `
     if (id !== fixtureId) return
     return `
       const defaults = { data: null, error: null, busy: false, paused: false, refresh() {}, recordFeedback() {} };
@@ -28,7 +40,7 @@ const contextFixturePlugin = {
   },
 }
 
-let server, emptyEnvDir, Card, Reading, ReadingWithFeedback, setFeedbackFixture
+let server, emptyEnvDir, Card, Reading, ReadingWithFeedback, History, setFeedbackFixture, getReadingProps
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'report-event-feedback-render-'))
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
@@ -39,6 +51,8 @@ before(async () => {
   ReadingWithFeedback = module.ReportReadingWithFeedback
   Reading = (await server.ssrLoadModule('/src/features/reports/ReportReadingContent.tsx')).ReportReadingContent
   setFeedbackFixture = (await server.ssrLoadModule('test:report-event-feedback-context')).setFeedbackFixture
+  getReadingProps = (await server.ssrLoadModule('test:report-event-feedback-reading')).getReadingProps
+  History = (await server.ssrLoadModule('/src/features/reports/ReportFeedbackHistory.tsx')).ReportFeedbackHistory
 })
 afterEach(() => { setFeedbackFixture?.() })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 3 }) })
@@ -96,8 +110,8 @@ test('the important event itself owns the inline composer, with automatic multi-
   assert.match(markup, /<summary>의견 남기기/)
   assert.match(markup, /aria-label="서로 다른 공급 계약 의견"/)
   assert.match(markup, /의견 보내기/)
-  assert.match(markup, /의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 이후 메일·텔레그램 발송에서 제외됩니다/)
-  assert.match(markup, /전달 제외는 보고서 화면의 내용을 변경하지 않습니다/)
+  assert.match(markup, /의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 보고서 화면과 이후 메일·텔레그램 발송에서 제외됩니다/)
+  assert.match(markup, /핵심 브리핑과 집계도 다시 반영합니다/)
   assert.match(markup, /개인 알림 기준에는 적용하지 않습니다/)
   assert.doesNotMatch(markup, /<select|type="checkbox"|소식을 선택|수신자 선택|feedback\?token|다른 소식에 의견/)
 })
@@ -110,14 +124,14 @@ test('pending and final results stay within the same card and prevent another op
     assert.match(markup, /각각 다른 계약이에요/)
     assert.match(markup, /메일·텔레그램 전달 제외/)
     assert.match(markup, /의견 접수 즉시 적용되었습니다/)
-    assert.match(markup, /검토 상태·결과와 관계없이 해당 이슈를 이후 발송에서 제외합니다/)
+    assert.match(markup, /검토 상태·결과와 관계없이 해당 이슈를 보고서 화면과 이후 발송에서 제외합니다/)
     assert.match(markup, /이미 발송된 내용은 바뀌지 않습니다/)
     assert.doesNotMatch(markup, /<form|의견 보내기|의견 남기기/)
     if (status === 'COMPLETED') assert.match(markup, /근거 부족.*두 번째 기사의 당시 근거/s)
   }
 })
 
-test('one event under review or already reviewed leaves other matched event composers enabled', () => {
+test('submitted event hides stale report while preserving other mounted drafts until the server refresh finishes', () => {
   const second = { ...event, title: '다음 공급 계약' }
   const third = { ...event, title: '별도 공급 계약' }
   const events = [event, second, third]
@@ -130,6 +144,8 @@ test('one event under review or already reviewed leaves other matched event comp
       onEvidenceSelect() {}, ...actions,
     }))
     const cards = markup.match(/<article class="report-event-card"[^>]*>[\s\S]*?<\/article>/g)
+    assert.match(markup, /의견이 접수된 이슈를 제외하고 보고서를 갱신하고 있습니다/)
+    assert.match(markup, /<div hidden="">[\s\S]*report-reading-content/)
     assert.equal(cards.length, 3)
     assert.match(cards[0], /각각 다른 계약이에요/)
     assert.doesNotMatch(cards[0], /<form/)
@@ -139,6 +155,33 @@ test('one event under review or already reviewed leaves other matched event comp
       assert.doesNotMatch(cards[index], /<fieldset disabled|<button type="submit" disabled/)
     }
   }
+})
+
+test('successful feedback records acceptance and immediately refreshes the entire report without waiting for diagnosis', async () => {
+  const calls = []
+  setFeedbackFixture({ data: { reportId: report.id, events: [target], feedback: [] },
+    recordFeedback(value) { calls.push(['saved', value]) }, refresh() { calls.push(['context']) } })
+  renderToStaticMarkup(createElement(ReadingWithFeedback, { report, onEvidenceSelect() {},
+    async onRefreshReport() { calls.push(['manual']) },
+    async onFeedbackSubmitted() { calls.push(['report']) },
+  }))
+  getReadingProps().eventFeedback(event, 0).props.onFeedback(saved)
+  assert.deepEqual(calls.slice(0, 2), [['saved', saved], ['report']])
+  await setImmediate()
+  assert.deepEqual(calls, [['saved', saved], ['report'], ['context']])
+})
+
+test('management history retains every submitted status even when no report events remain', () => {
+  const feedback = ['PENDING', 'PROCESSING', 'FAILED', 'COMPLETED'].map((status, index) => ({
+    ...saved, id: index + 1, status, comment: `보관된 의견 ${index + 1}`,
+    ...(status === 'COMPLETED' ? { verdict: 'NOT_CONFIRMED', diagnosis: '검토를 마쳤습니다.' } : {}),
+  }))
+  setFeedbackFixture({ data: { reportId: report.id, events: [], feedback } })
+  const markup = renderToStaticMarkup(createElement(History, { reportId: report.id }))
+  for (let index = 1; index <= 4; index++) assert.match(markup, new RegExp(`보관된 의견 ${index}`))
+  assert.match(markup, /검토를 마쳤습니다/)
+  assert.match(markup, /#\/reports\?reportId=17/)
+  assert.doesNotMatch(markup, /의견 보내기|<form/)
 })
 
 test('one mismatched event does not disable another event whose position and full evidence still match', () => {

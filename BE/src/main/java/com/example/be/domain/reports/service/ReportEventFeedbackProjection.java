@@ -1,10 +1,8 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.feedback.model.FeedbackModels.Feedback;
 import com.example.be.domain.feedback.model.FeedbackModels.Item;
-import com.example.be.domain.feedback.model.FeedbackModels.Status;
 import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.feedback.service.ReportEventSnapshotFactory;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -19,7 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Confirmed report reviews change reading and new delivery views, preserving stored reports and issued snapshots. */
+/** Submitted local opinions change reading and new delivery views, preserving stored reports and issued snapshots. */
 @Service
 @RequiredArgsConstructor
 public class ReportEventFeedbackProjection {
@@ -36,8 +34,8 @@ public class ReportEventFeedbackProjection {
         return store.eventReviewStates(reportIds).stream().collect(Collectors.groupingBy(Feedback::reportId));
     }
 
-    public boolean hasConfirmedErrors(List<Feedback> reviews) {
-        return reviews.stream().anyMatch(ReportEventFeedbackProjection::confirmedError);
+    public boolean hasSubmittedOpinions(List<Feedback> reviews) {
+        return reviews.stream().anyMatch(review -> review != null && localEvent(review, review.reportId()));
     }
 
     public Map<Long, Set<Long>> inheritedFindingIdsByReport(Collection<NewsReport> reports) {
@@ -46,10 +44,10 @@ public class ReportEventFeedbackProjection {
 
     /** Capture before filtering so surviving events keep their original revision-bound identities. */
     public List<Item> events(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews) {
-        Set<String> excluded = confirmedKeys(report.getId(), reviews);
+        Set<String> excluded = submittedKeys(report.getId(), reviews);
         var current = snapshots.capture(report, visible);
         Set<Long> inherited = new HashSet<>(dailyExclusions.forReport(report));
-        inherited.addAll(staleConfirmedSources(report.getId(), reviews, current));
+        inherited.addAll(staleSubmittedSources(report.getId(), reviews, current));
         return current.stream()
                 .filter(item -> !excluded.contains(item.event().key()))
                 .filter(item -> item.event().sourceFindingIds().stream().noneMatch(inherited::contains)).toList();
@@ -62,25 +60,16 @@ public class ReportEventFeedbackProjection {
     /** List reads resolve inherited decisions in a batch and use the same projection as detail/delivery. */
     public View project(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews,
                         Set<Long> inherited) {
-        Set<String> excluded = confirmedKeys(report.getId(), reviews);
+        Set<String> excluded = submittedKeys(report.getId(), reviews);
         var current = excluded.isEmpty() ? List.<Item>of() : snapshots.capture(report, visible);
         Set<Long> excludedSources = new HashSet<>(inherited);
-        excludedSources.addAll(staleConfirmedSources(report.getId(), reviews, current));
+        excludedSources.addAll(staleSubmittedSources(report.getId(), reviews, current));
         return project(report, visible, excluded, excludedSources, current);
     }
 
-    /** A submitted local opinion is an immediate delivery exclusion, independently of its AI diagnosis. */
+    /** Delivery shares the same immediate local-opinion exclusions as the report screen. */
     public View projectForDelivery(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews) {
-        List<Feedback> submitted = reviews.stream().filter(review -> localEvent(review, report.getId())).toList();
-        Set<String> keys = submitted.stream().map(Feedback::eventKey).collect(Collectors.toSet());
-        List<Item> current = keys.isEmpty() ? List.of() : snapshots.capture(report, visible);
-        Set<String> currentKeys = current.stream().map(item -> item.event().key()).collect(Collectors.toSet());
-        Set<Long> excludedSources = new HashSet<>(dailyExclusions.forDelivery(report));
-        // An edited report revision must not silently reintroduce the evidence the user already rejected.
-        submitted.stream().filter(review -> !currentKeys.contains(review.eventKey()))
-                .map(review -> submittedEvent(review, report.getId())).filter(java.util.Objects::nonNull)
-                .flatMap(event -> event.sourceFindingIds().stream()).forEach(excludedSources::add);
-        return project(report, visible, keys, excludedSources, current);
+        return project(report, visible, reviews, dailyExclusions.forDelivery(report));
     }
 
     private View project(NewsReport report, ReportFindings.Visible visible, Set<String> excluded,
@@ -146,24 +135,18 @@ public class ReportEventFeedbackProjection {
         return event;
     }
 
-    private static Set<String> confirmedKeys(long reportId, List<Feedback> reviews) {
-        return reviews.stream().filter(review -> review.reportId() == reportId)
-                .filter(ReportEventFeedbackProjection::confirmedError).map(Feedback::eventKey).collect(Collectors.toSet());
+    private static Set<String> submittedKeys(long reportId, List<Feedback> reviews) {
+        return reviews.stream().filter(review -> localEvent(review, reportId))
+                .map(Feedback::eventKey).collect(Collectors.toSet());
     }
 
-    /** A revised report must not revive a confirmed error whose original event evidence is still present. */
-    private static Set<Long> staleConfirmedSources(long reportId, List<Feedback> reviews, List<Item> current) {
+    /** A revised report must not revive a submitted issue whose original event evidence is still present. */
+    private static Set<Long> staleSubmittedSources(long reportId, List<Feedback> reviews, List<Item> current) {
         Set<String> currentKeys = current.stream().map(item -> item.event().key()).collect(Collectors.toSet());
-        return reviews.stream().filter(ReportEventFeedbackProjection::confirmedError)
+        return reviews.stream().filter(review -> localEvent(review, reportId))
                 .filter(review -> !currentKeys.contains(review.eventKey()))
                 .map(review -> submittedEvent(review, reportId)).filter(java.util.Objects::nonNull)
                 .flatMap(event -> event.sourceFindingIds().stream()).collect(Collectors.toSet());
-    }
-
-    static boolean confirmedError(Feedback review) {
-        return review.capabilityId() == null && review.recipientId() == null && review.itemId() == null
-                && review.eventKey() != null && review.category() != Category.PREFERENCE
-                && review.status() == Status.COMPLETED && "CONFIRMED_ERROR".equals(review.verdict());
     }
 
     private static String markdown(ReportContent content) {

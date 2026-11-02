@@ -45,13 +45,13 @@ public class FeedbackStore {
     public List<Feedback> eventFeedback(long reportId) {
         return jdbc.query("SELECT * FROM news_feedback WHERE report_id=? AND event_key IS NOT NULL ORDER BY id",this::feedback,reportId);
     }
-    /** List reads need review state only; diagnosis and frozen input CLOBs stay on single-report reads. */
+    /** List reads preserve submitted evidence so later report edits cannot revive an excluded event. */
     public List<Feedback> eventReviewStates(Collection<Long> reportIds) {
         return OracleInClause.batches(new LinkedHashSet<>(reportIds)).stream().flatMap(ids -> {
             String placeholders = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
             return jdbc.query("""
                     SELECT id,capability_id,recipient_id,report_id,item_id,category,user_comment,
-                      allow_personalization,request_hash,status,verdict,created_at,event_key
+                      allow_personalization,request_hash,status,verdict,created_at,event_key,input_json
                     FROM news_feedback WHERE report_id IN (
                     """ + placeholders + ") AND event_key IS NOT NULL ORDER BY id", this::eventReviewState,
                     ids.toArray()).stream();
@@ -102,7 +102,12 @@ public class FeedbackStore {
         return new Feedback(rs.getLong("id"),rs.getObject("capability_id",Long.class),rs.getObject("recipient_id",Long.class),rs.getLong("report_id"),
                 rs.getObject("item_id",Long.class),Category.valueOf(rs.getString("category")),rs.getString("user_comment"),
                 "Y".equals(rs.getString("allow_personalization")),rs.getString("request_hash"),Status.valueOf(rs.getString("status")),
-                rs.getString("verdict"),null,time(rs,"created_at"),null,rs.getString("event_key"));
+                rs.getString("verdict"),null,time(rs,"created_at"),eventInput(rs.getString("input_json")),rs.getString("event_key"));
+    }
+    private Item eventInput(String value) {
+        if (value == null) return null;
+        try { return json.readValue(value, Item.class); }
+        catch (RuntimeException invalidLegacyInput) { return null; }
     }
     public List<Policy> policies(long recipientId) {
         return jdbc.query("SELECT * FROM news_feedback_policies WHERE recipient_id=? ORDER BY id",this::policy,recipientId);

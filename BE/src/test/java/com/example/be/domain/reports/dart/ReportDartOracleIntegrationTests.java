@@ -369,7 +369,8 @@ class ReportDartOracleIntegrationTests {
     }
 
     @Test void legacyUnlistedJobsCannotStarveListedPollingOrResumeThroughRetryAndKeyRecovery() {
-        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        // Use an exact persisted timestamp so Oracle precision cannot move a job just past the poll cutoff.
+        var now = LocalDateTime.now(ApiTimeZone.ZONE).withNano(0);
         var report = create(false, ReportStatus.GENERATED);
         var listed = new Company("99993300", "영숫자 상장 종목", "0068Y0");
         var unlistedCodes = new ArrayList<String>();
