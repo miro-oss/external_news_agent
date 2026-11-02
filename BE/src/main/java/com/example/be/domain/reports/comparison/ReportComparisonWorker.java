@@ -20,6 +20,7 @@ public class ReportComparisonWorker {
     private final ReportComparisonAnalyzer analyzer;
     @Value("${news.reports.changes.enabled:true}") private boolean enabled = true;
     @Value("${news.scheduling.enabled:true}") private boolean schedulingEnabled = true;
+    private long missingCursor;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void completed(ReportCompleted event) {
@@ -33,7 +34,10 @@ public class ReportComparisonWorker {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         // Unknown provider outcomes are terminal; recovery never repeats a paid call.
         repository.expireRunning(now.minusMinutes(30), now);
-        repository.missingJobs().forEach(this::enqueueSafely);
+        var missing = repository.missingJobs(missingCursor);
+        // Advance even when enqueue waits on a PENDING baseline. Wrap to retry those reports on the next sweep.
+        missingCursor = missing.isEmpty() ? 0L : missing.getLast();
+        missing.forEach(this::enqueueSafely);
         repository.pending().forEach(this::process);
     }
 

@@ -55,15 +55,27 @@ public class ReportDartRepository {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
                 WHERE report.id > ? AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
-                  AND ((((report.report_scope = 'RUN'
-                        AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode'))
+                  AND ((report.report_scope = 'RUN'
+                        AND EXISTS (SELECT 1 FROM JSON_TABLE(report.collection_contexts,
+                            '$[*].topics[*].dartCompany' COLUMNS (
+                                corp_code VARCHAR2(100) PATH '$.corpCode',
+                                stock_code VARCHAR2(100) PATH '$.stockCode')) selected
+                            WHERE REGEXP_LIKE(selected.corp_code, '^[0-9]{8}$', 'c')
+                              AND REGEXP_LIKE(selected.stock_code, '^[0-9A-Z]{6}$', 'c')
+                              AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                                WHERE attachment.report_id = report.id AND attachment.corp_code = selected.corp_code)))
                        OR (report.report_scope = 'WEEKLY' AND report.topic_id IS NOT NULL
-                           AND report.topic_dart_corp_code IS NOT NULL))
-                    AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment WHERE attachment.report_id = report.id))
+                           AND REGEXP_LIKE(report.topic_dart_corp_code, '^[0-9]{8}$', 'c')
+                           AND REGEXP_LIKE(report.topic_dart_stock_code, '^[0-9A-Z]{6}$', 'c')
+                           AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                             WHERE attachment.report_id = report.id AND attachment.corp_code = report.topic_dart_corp_code))
                     OR (JSON_VALUE(report.report_issue_company_snapshot, '$.version') = 'report-issue-companies.v1'
                         AND EXISTS (SELECT 1 FROM JSON_TABLE(report.report_issue_company_snapshot,
-                            '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
-                            WHERE NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                            '$.links[*]' COLUMNS (corp_code VARCHAR2(100) PATH '$.company.corpCode',
+                                stock_code VARCHAR2(100) PATH '$.company.stockCode')) linked
+                            WHERE REGEXP_LIKE(linked.corp_code, '^[0-9]{8}$', 'c')
+                              AND REGEXP_LIKE(linked.stock_code, '^[0-9A-Z]{6}$', 'c')
+                              AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
                                 WHERE attachment.report_id = report.id AND attachment.corp_code = linked.corp_code))))
                 ORDER BY report.id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1), afterReportId);

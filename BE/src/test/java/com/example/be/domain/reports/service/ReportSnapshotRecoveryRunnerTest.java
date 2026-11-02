@@ -7,7 +7,7 @@ import org.springframework.mock.env.MockEnvironment;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -48,5 +48,37 @@ class ReportSnapshotRecoveryRunnerTest {
         verify(comparisons).complete(18);
         verify(comparisons, never()).complete(17);
         verify(context).close();
+    }
+
+    @Test void oneFailedComparisonDoesNotSkipLaterReportsAndAllFailuresAreReportedAtTheEnd() {
+        when(context.getEnvironment()).thenReturn(new MockEnvironment());
+        when(service.recover(anyList(), eq(true), any())).thenReturn(List.of(
+                outcome(17), outcome(18), outcome(19), outcome(20)));
+        var first = new IllegalStateException("first comparison unavailable");
+        var later = new IllegalArgumentException("later stored input invalid");
+        when(comparisons.complete(17)).thenThrow(first);
+        when(comparisons.complete(18)).thenReturn(com.example.be.domain.reports.comparison.ReportChanges.Status.READY);
+        when(comparisons.complete(19)).thenThrow(later);
+        when(comparisons.complete(20)).thenReturn(com.example.be.domain.reports.comparison.ReportChanges.Status.FAILED);
+        runner.reportIds = "17,18,19,20"; runner.apply = true;
+
+        var failure = assertThrows(IllegalStateException.class, () -> runner.run(null));
+
+        assertTrue(failure.getMessage().contains("[17, 19, 20]"));
+        assertEquals(3, failure.getSuppressed().length);
+        assertSame(first, failure.getSuppressed()[0]);
+        assertSame(later, failure.getSuppressed()[1]);
+        var order = inOrder(comparisons, context);
+        order.verify(comparisons).complete(17);
+        order.verify(comparisons).complete(18);
+        order.verify(comparisons).complete(19);
+        order.verify(comparisons).complete(20);
+        order.verify(context).close();
+        verify(service, times(1)).recover(eq(List.of(17L, 18L, 19L, 20L)), eq(true), any());
+    }
+
+    private ReportSnapshotRecoveryService.Outcome outcome(long id) {
+        return new ReportSnapshotRecoveryService.Outcome(id, com.example.be.domain.reports.entity.ReportScope.DAILY,
+                null, false, true, true, null, 3, true);
     }
 }

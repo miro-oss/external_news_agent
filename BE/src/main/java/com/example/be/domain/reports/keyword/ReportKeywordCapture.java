@@ -61,9 +61,11 @@ public class ReportKeywordCapture {
             Set<Long> recordedCriterionTopics) {
         if (sources.isEmpty() || sources.stream().anyMatch(source -> source.getReportKeywordSnapshot() == null
                 || !ReportKeywordSnapshot.RULE_VERSION.equals(source.getReportKeywordSnapshot().ruleVersion())
-                || source.getReportKeywordSnapshot().unavailableReason() != null))
+                || source.getReportKeywordSnapshot().unavailableReason() != null
+                    && !"COMPANY_SCOPE_UNVERIFIED".equals(source.getReportKeywordSnapshot().unavailableReason())))
             return unavailable(report, now, "INCOMPLETE_SOURCE");
 
+        boolean scopeKnown = sources.stream().allMatch(source -> source.getReportKeywordSnapshot().unavailableReason() == null);
         Map<String, ReportKeywordSnapshot.Definition> definitions = new TreeMap<>();
         Set<Pair> rejected = new HashSet<>();
         List<ReportKeywordSnapshot.Candidate> candidates = new ArrayList<>();
@@ -94,17 +96,19 @@ public class ReportKeywordCapture {
         if (!unassessedTopics.isEmpty()) {
             if (recordedCriterionTopics != null) {
                 if (unassessedTopics.stream().anyMatch(recordedCriterionTopics::contains))
-                    return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+                    scopeKnown = false;
             } else {
                 try {
                     if (!companyInterests.activeForTopics(unassessedTopics).isEmpty())
-                        return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+                        scopeKnown = false;
                 } catch (RuntimeException unavailable) {
-                    return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+                    scopeKnown = false;
                 }
             }
         }
-        return snapshot(report, now, null, List.copyOf(definitions.values()), kept);
+        // Preserve the frozen evidence even when its full policy scope is unknown. The reading
+        // projection may then count only completed body sources, without publishing this full universe.
+        return snapshot(report, now, scopeKnown ? null : "COMPANY_SCOPE_UNVERIFIED", List.copyOf(definitions.values()), kept);
     }
 
     private ReportKeywordSnapshot capture(NewsReport report, List<Finding> candidates, LocalDateTime now) {

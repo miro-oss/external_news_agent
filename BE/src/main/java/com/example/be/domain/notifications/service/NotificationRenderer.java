@@ -258,7 +258,7 @@ public class NotificationRenderer {
         int number = 0;
         var titles = NotificationBriefingSection.reportTitles(view);
         for (String title : titles) NotificationBriefingSection.label(html, (++number) + ". " + title);
-        if (titles.isEmpty()) NotificationBriefingSection.paragraph(html, "이번 수집에서 새롭게 정리할 주요 내용이 없습니다.");
+        if (titles.isEmpty()) NotificationBriefingSection.paragraph(html, NotificationBriefingSection.emptyReportMessage(view));
         html.append("</td></tr></tbody></table>");
     }
 
@@ -436,7 +436,7 @@ public class NotificationRenderer {
                 .map(line -> limit(line, maxLength)).limit(3).toList();
     }
 
-    private static String prose(String value) {
+    static String prose(String value) {
         return normalize(value).replaceAll("\\[([^]]+)]\\([^)]*\\)", "$1").replace("**", "");
     }
 

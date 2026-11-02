@@ -163,6 +163,123 @@ class M2BriefingRenderingTest {
     }
 
     @Test
+    void deliveryNormalizesLegacyTitlesBeforeLengthSelectionAndDeduplicationWithoutParsingMarkup() throws Exception {
+        String decoded = "\"".repeat(12) + " 연구 & 개발";
+        String encoded = "**[" + "&amp;quot;".repeat(12) + " 연구 &amp;amp; 개발](https://example.com/research)**";
+        String encodedMarkup = "확인 &amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;";
+        String decodedMarkup = "확인 <script>alert(1)</script>";
+        var content = new ReportContent(List.of(), List.of(
+                new ReportContent.ImportantEvent(encoded, "확인된 내용", "", List.of(11L)),
+                new ReportContent.ImportantEvent(decoded, "같은 제목의 내용", "", List.of(12L)),
+                new ReportContent.ImportantEvent(encodedMarkup, "별도 내용", "", List.of(13L))), List.of(), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11), finding(12), finding(13)),
+                new ReportReadingContent("", content), false);
+
+        assertTrue(encoded.length() > 100);
+        assertEquals(List.of(decoded, decodedMarkup), NotificationBriefingSection.reportTitles(view));
+        assertEquals(List.of(decoded, encodedMarkup), ReportBriefing.from(view).items().stream()
+                .map(ReportBriefing.Item::title).toList(), "The web reading view retains its saved text boundary");
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        var titleBox = Jsoup.parse(html).selectFirst("td[bgcolor='#e8f3ff']");
+        assertNotNull(titleBox);
+        assertEquals(List.of("1. " + decoded, "2. " + decodedMarkup), titleBox.select("h3").eachText());
+        assertTrue(titleBox.select("script, a").isEmpty());
+        assertFalse(titleBox.html().contains("&amp;quot;"));
+        assertTrue(titleBox.html().contains("&lt;script&gt;"));
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            var stripper = new PDFTextStripper();
+            stripper.setEndPage(1);
+            String text = stripper.getText(document);
+            assertTrue(text.contains("1. " + decoded));
+            assertTrue(text.contains("2. " + decodedMarkup));
+            assertFalse(text.contains("&amp;"));
+        }
+        assertEquals(encoded, content.importantEvents().getFirst().title());
+    }
+
+    @Test
+    void deliveryNormalizesLegacyArticleFallbackAndWatchTitlesBeforeSelectingTwo() {
+        String decoded = "\"".repeat(12) + " 연구 & 개발";
+        String encoded = "&amp;quot;".repeat(12) + " 연구 &amp;amp; 개발";
+        var legacyFindings = List.of(finding(11, encoded), finding(12, decoded), finding(13, "다음 제목"));
+        var legacyView = new ReportEventFeedbackProjection.View(legacyFindings, new ReportReadingContent("", null), false);
+        assertEquals(List.of(decoded, "다음 제목"), NotificationBriefingSection.reportTitles(legacyView));
+
+        var content = new ReportContent(List.of(), List.of(), List.of(
+                new ReportContent.WatchItem(encoded, "아직 확인되지 않음", List.of(11L)),
+                new ReportContent.WatchItem(decoded, "같은 확인점", List.of(12L)),
+                new ReportContent.WatchItem("가".repeat(93), "접두사를 더하면 100자를 초과", List.of(13L)),
+                new ReportContent.WatchItem("별도 확인점", "아직 확인되지 않음", List.of(14L))), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11), finding(12), finding(13), finding(14)),
+                new ReportReadingContent("", content), false);
+        assertEquals(List.of("후속 확인 · " + decoded, "후속 확인 · 별도 확인점"), NotificationBriefingSection.reportTitles(view));
+        assertEquals(encoded, content.watchItems().getFirst().topic());
+    }
+
+    @Test
+    void emptyShortBriefDoesNotClaimThereIsNoContentWhenLongOrSharedEvidenceEventStillRenders() throws Exception {
+        for (boolean sharedEvidence : List.of(false, true)) {
+            String title = sharedEvidence ? "공유 근거가 남은 정상 사건" : "긴 제목 ".repeat(21);
+            var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent(
+                    title, "본문에 남아 있는 정상 내용", "", List.of(11L))), List.of(), List.of());
+            var view = new ReportEventFeedbackProjection.View(List.of(finding(11)), new ReportReadingContent("", content),
+                    sharedEvidence, sharedEvidence ? Set.of(11L) : Set.of());
+            assertTrue(NotificationBriefingSection.reportTitles(view).isEmpty());
+            String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+            var dom = Jsoup.parse(html);
+            assertTrue(dom.text().contains("본문에 남아 있는 정상 내용"));
+            var titleBox = dom.selectFirst("td[bgcolor='#e8f3ff']");
+            assertNotNull(titleBox);
+            assertTrue(titleBox.select("h3").isEmpty());
+            assertTrue(titleBox.text().contains("짧게 표시할 핵심 제목이 없습니다."));
+            assertFalse(dom.text().contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+            try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+                String text = new PDFTextStripper().getText(document);
+                assertTrue(text.contains("본문에 남아 있는 정상 내용"));
+                assertTrue(text.contains("짧게 표시할 핵심 제목이 없습니다."));
+                assertFalse(text.contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+            }
+        }
+    }
+
+    @Test
+    void unsupportedEventsDoNotReplaceTheGenuinelyEmptyBriefingMessage() throws Exception {
+        var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent(
+                "근거 누락 사건", "지원되지 않는 내용", "", List.of(11L, 12L))), List.of(), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11)), new ReportReadingContent("", content), false);
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        assertTrue(Jsoup.parse(html).text().contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+        assertFalse(html.contains("지원되지 않는 내용"));
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+            assertFalse(text.contains("지원되지 않는 내용"));
+        }
+    }
+
+    @Test
+    void insightWithOnlyOmittedLongItemsShowsTheSameConciseFallbackInMailAndPdf() throws Exception {
+        var original = insight();
+        var longInsight = new ReportInsightDTO.AudienceInsight(Audience.EQUIPMENT_MAKER, "긴 관점", "high",
+                List.of(new Overview(LONG_TEXT, List.of("11:0"), null)), List.of(), original.facts(), List.of(),
+                List.of(new WatchItem("긴 관찰 항목 ".repeat(20), "확인할 지표", "판단 조건", List.of("11:0"))),
+                "test", "test", null);
+        var view = view(false);
+        var brief = NotificationBriefingSection.insightBrief(longInsight, view);
+        assertTrue(brief.overview().isEmpty());
+        assertTrue(brief.watchItems().isEmpty());
+        assertEquals(2, brief.omittedItemCount());
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null, longInsight).chunks().getFirst();
+        assertTrue(Jsoup.parse(html).text().contains("전체 관점 분석은 보고서 화면에서 확인하세요."));
+        assertFalse(html.contains("긴 관찰 항목"));
+        try (var document = Loader.loadPDF(pdf.render(report, view, longInsight))) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("전체 관점 분석은 보고서 화면에서 확인하세요."));
+            assertFalse(text.contains("긴 관찰 항목"));
+        }
+    }
+
+    @Test
     void feedbackGapsUseSurvivingWatchTitlesInBothMailAndPdfWithoutRevivingRejectedSources() throws Exception {
         var content = new ReportContent(List.of(), List.of(
                 new ReportContent.ImportantEvent("제외한 핵심 이슈", "제외된 내용입니다.", "", List.of(11L))), List.of(
@@ -239,8 +356,13 @@ class M2BriefingRenderingTest {
     }
 
     private Finding finding(long id) {
+        return finding(id, null);
+    }
+
+    private Finding finding(long id, String title) {
         return Finding.builder().id(id).summary("저장된 요약")
-                .article(Article.builder().id(id + 100).canonicalUrl("https://example.com/article-" + id).build()).build();
+                .article(Article.builder().id(id + 100).title(title)
+                        .canonicalUrl("https://example.com/article-" + id).build()).build();
     }
 
     private NotificationChannel channel(ChannelType type, int maximum) {

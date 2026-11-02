@@ -8,6 +8,8 @@ import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.web.util.HtmlUtils;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Short, shared reading content. Prose is selected whole by the report projection, never clipped here. */
 final class NotificationBriefingSection {
@@ -47,8 +49,8 @@ final class NotificationBriefingSection {
                 field(html, "확인할 지표", item.indicator());
             }
         }
-        if (brief.overview().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
-            paragraph(html, NotificationInsightBrief.UNAVAILABLE);
+        if (brief.overview().isEmpty() && brief.watchItems().isEmpty())
+            paragraph(html, emptyInsightMessage(brief));
         html.append("</section>");
     }
 
@@ -59,9 +61,32 @@ final class NotificationBriefingSection {
                 .filter(finding -> !view.excludedEvidenceFindingIds().contains(finding.getId())).toList();
         if (content.structuredContent() == null) return findings.stream()
                 .filter(finding -> finding.getArticle() != null)
-                .map(finding -> finding.getArticle().getTitle()).filter(NotificationBriefingSection::shortTitle)
+                .map(finding -> NotificationRenderer.prose(finding.getArticle().getTitle()))
+                .filter(NotificationBriefingSection::shortTitle)
                 .distinct().limit(2).toList();
-        return ReportBriefing.titles(view, 2);
+        return ReportBriefing.titles(view, 2, NotificationRenderer::prose);
+    }
+
+    static String emptyReportMessage(ReportEventFeedbackProjection.View view) {
+        var content = view.readingContent();
+        Set<Long> visible = view.findings().stream().map(finding -> finding.getId()).collect(Collectors.toSet());
+        // Body cards can still use a shared source retained for another event. Headline eligibility stays stricter.
+        boolean hasBody = content.structuredContent() == null
+                ? content.markdownBody() != null && !content.markdownBody().isBlank()
+                : content.structuredContent().importantEvents().stream().anyMatch(event ->
+                        supported(event.sourceFindingIds(), visible))
+                    || content.structuredContent().watchItems().stream().anyMatch(watch ->
+                        supported(watch.sourceFindingIds(), visible));
+        return hasBody ? "짧게 표시할 핵심 제목이 없습니다." : "이번 수집에서 새롭게 정리할 주요 내용이 없습니다.";
+    }
+
+    private static boolean supported(List<Long> refs, Set<Long> visible) {
+        return refs != null && !refs.isEmpty() && refs.stream().allMatch(id -> id != null && visible.contains(id));
+    }
+
+    static String emptyInsightMessage(ReportInsightBriefing brief) {
+        return brief.omittedItemCount() > 0 ? "전체 관점 분석은 보고서 화면에서 확인하세요."
+                : NotificationInsightBrief.UNAVAILABLE;
     }
 
     private static boolean shortTitle(String value) {

@@ -163,7 +163,7 @@ public class ReportPdfRenderer {
         int number = 0;
         var titles = NotificationBriefingSection.reportTitles(view);
         for (String title : titles) pdf.subheading((++number) + ". " + title);
-        if (titles.isEmpty()) pdf.muted("이번 수집에서 새롭게 정리할 주요 내용이 없습니다.");
+        if (titles.isEmpty()) pdf.muted(NotificationBriefingSection.emptyReportMessage(view));
     }
 
     private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,

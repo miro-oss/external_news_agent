@@ -83,10 +83,7 @@ public class DailyReportPersistenceService {
         // Every new reservation needs the complete pre-ranking universe, including legacy callers.
         // Existing reports return above so retries never reconstruct historical inputs.
         if (prepared == null) {
-            var input = selector.prepare(date, 1);
-            prepared = new DailyReportSelector.Prepared(input.candidates().stream()
-                    .filter(finding -> sourceRunIds.contains(finding.getRun().getId())).toList(),
-                    input.stubExcluded(), input.evidenceExcluded(), input.issues(), input.limit());
+            prepared = selector.prepare(date, 1, java.util.Set.copyOf(sourceRunIds));
         }
         NewsReport report = reportRepository.saveAndFlush(NewsReport.builder()
                 .reportScope(ReportScope.DAILY).reportDate(date).sourceRunIds(sourceRunIds)

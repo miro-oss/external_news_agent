@@ -157,15 +157,78 @@ class ReportKeywordCaptureTest {
         verifyNoInteractions(companyInterests);
     }
 
-    @Test void activeCompanyCriterionHidesAnUnassessedPreTopNUniverseWithoutAnyNewEvaluation() {
+    @Test void activeCompanyCriterionRetainsFrozenEvidenceWithoutPublishingAnUnassessedPreTopNUniverse() {
         var source = source(1, List.of(candidate(101, 1, 20, "ai"), candidate(102, 2, 21, "hbm")));
         when(companyInterests.activeForTopics(Set.of(3L))).thenReturn(List.of(new ActiveCriterion(9, 3, "반도체", "관심 기준", 1)));
         var result = capture.mergeWeekly(week(List.of(101L)), List.of(source), now);
         assertEquals("COMPANY_SCOPE_UNVERIFIED", result.unavailableReason());
-        assertTrue(result.candidates().isEmpty());
+        assertEquals(source.getReportKeywordSnapshot().candidates(), result.candidates());
+        assertEquals(source.getReportKeywordSnapshot().definitions(), result.definitions());
         verifyNoInteractions(orchestrator, findings);
         when(companyInterests.activeForTopics(Set.of(3L))).thenThrow(new IllegalStateException("unavailable"));
-        assertEquals("COMPANY_SCOPE_UNVERIFIED", capture.mergeWeekly(week(List.of(101L)), List.of(source), now).unavailableReason());
+        var failedLookup = capture.mergeWeekly(week(List.of(101L)), List.of(source), now);
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", failedLookup.unavailableReason());
+        assertEquals(result.candidates(), failedLookup.candidates());
+        var recovered = capture.mergeRecoveredWeekly(week(List.of(101L)), List.of(source), now, Set.of(3L));
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", recovered.unavailableReason());
+        assertEquals(result.candidates(), recovered.candidates());
+    }
+
+    @Test void uncertainSourcePropagatesItsReasonAndPolicyExclusionsWithoutUpgradingToCompleteStatistics() {
+        var uncertain = source(1, List.of(candidate(101, 1, 20, "ai"), candidate(102, 2, 21, "hbm")));
+        uncertain.markKeywordCompanyScopeUnverified();
+        uncertain.freezeCompanySelection(List.of(102L), List.of(101L), null);
+        var other = source(2, List.of(candidate(103, 3, 20, "ai"), candidate(104, 4, 22, "hbm")));
+
+        var result = capture.mergeWeekly(week(List.of(102L, 104L)), List.of(uncertain, other), now);
+
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", result.unavailableReason());
+        assertEquals(List.of(102L, 104L), result.candidates().stream().map(ReportKeywordSnapshot.Candidate::findingId).toList());
+        assertEquals(2, result.definitions().size());
+        assertEquals(2, uncertain.getReportKeywordSnapshot().candidates().size());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", uncertain.getReportKeywordSnapshot().unavailableReason());
+        verifyNoInteractions(companyInterests, orchestrator, findings);
+    }
+
+    @Test void unavailableSourceEvidenceIsNotPreservedAsAUsablePartialUniverse() {
+        var saved = source(1, List.of(candidate(101, 1, 20, "ai"))).getReportKeywordSnapshot();
+        for (String reason : List.of("NO_SNAPSHOT", "INVALID_SNAPSHOT", "INCOMPLETE_SOURCE", "MISSING_COLLECTION_CONTEXT",
+                "PERSONALIZATION_UNVERIFIED")) {
+            var incomplete = NewsReport.builder().reportKeywordSnapshot(new ReportKeywordSnapshot(saved.ruleVersion(),
+                    saved.capturedAt(), saved.periodLabel(), reason, saved.definitions(), saved.candidates())).build();
+            var result = capture.mergeWeekly(week(List.of(101L)), List.of(incomplete), now);
+            assertEquals("INCOMPLETE_SOURCE", result.unavailableReason());
+            assertTrue(result.candidates().isEmpty());
+        }
+        verifyNoInteractions(companyInterests, orchestrator, findings);
+    }
+
+    @Test void weeklyCaptureFeedsOnlyCompletedBodySourcesToTheBoundedReadingProjection() {
+        var source = source(1, List.of(candidate(101, 1, 20, "ai"), candidate(102, 2, 21, "hbm")));
+        when(companyInterests.activeForTopics(Set.of(3L))).thenReturn(List.of(new ActiveCriterion(9, 3, "반도체", "관심 기준", 1)));
+        var frozen = capture.mergeWeekly(week(List.of(101L)), List.of(source), now);
+        var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent("AI 투자", "본문", "", List.of(101L))),
+                List.of(), List.of());
+        var completed = NewsReport.builder().id(5L).reportScope(ReportScope.WEEKLY).reportStatus(ReportStatus.GENERATED)
+                .reportDate(monday).reportEndDate(monday.plusDays(6)).structuredContent(content)
+                .reflectedFindingIds(List.of(101L, 102L)).reportKeywordSnapshot(frozen).build();
+        var articles = mock(com.example.be.domain.collection.repository.ArticleRepository.class);
+        when(articles.findAllById(any())).thenReturn(List.of(Article.builder().id(1L).body("원문").fetchStatus(FetchStatus.FULLTEXT).build()));
+        var reading = new ReportKeywordService(articles, mock(com.example.be.domain.analysis.relevance.TopicRelevancePolicy.class),
+                mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class));
+        var view = new com.example.be.domain.reports.service.ReportEventFeedbackProjection.View(List.of(),
+                new com.example.be.domain.reports.service.ReportReadingContent("", content), false);
+
+        var result = reading.project(completed, view);
+
+        assertEquals(ReportKeywordDTO.Status.AVAILABLE, result.status());
+        assertEquals(ReportKeywordSnapshot.SELECTED_RULE_VERSION, result.ruleVersion());
+        assertEquals(1, result.denominatorIssueCount());
+        assertEquals("AI", result.items().getFirst().keyword());
+        assertEquals(0, result.items().stream().filter(item -> item.keyword().equals("HBM")).findFirst().orElseThrow().issueCount());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", completed.getReportKeywordSnapshot().unavailableReason());
+        assertEquals(2, completed.getReportKeywordSnapshot().candidates().size());
+        verifyNoInteractions(orchestrator, findings);
     }
 
     @Test void snapshotRoundTripsAndCanOnlyBeFrozenOnceDuringNewReservation() {

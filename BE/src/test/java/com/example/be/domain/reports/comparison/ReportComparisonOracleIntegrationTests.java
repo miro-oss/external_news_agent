@@ -95,6 +95,33 @@ class ReportComparisonOracleIntegrationTests {
         assertEquals(64, jdbc.queryForObject("SELECT input_hash FROM news_report_comparisons WHERE report_id = ?", String.class, current.getId()).length());
     }
 
+    @Test void missingJobsPagesPastPendingBaselinesWithoutChangingTheirExactPredecessors() {
+        var waiting = new ArrayList<NewsReport>();
+        var predecessors = new ArrayList<NewsReport>();
+        for (int index = 0; index < 12; index++) {
+            var start = date.plusDays(index * 2L);
+            predecessors.add(report(start, ReportStatus.PENDING, snapshot(side(1, 10, "생성 중"))));
+            waiting.add(report(start.plusDays(1), ReportStatus.GENERATED, snapshot(side(1, 20, "현재"))));
+        }
+        var baseline = report(date.plusDays(40), ReportStatus.GENERATED, snapshot(side(1, 10, "완료 기준")));
+        var eligible = report(date.plusDays(41), ReportStatus.GENERATED, snapshot(side(1, 20, "완료 비교")));
+
+        var first = comparisons.missingJobs(predecessors.getFirst().getId() - 1);
+        assertEquals(waiting.subList(0, 10).stream().map(NewsReport::getId).toList(), first);
+        first.forEach(persistence::enqueue);
+        var second = comparisons.missingJobs(first.getLast());
+        assertEquals(List.of(waiting.get(10).getId(), waiting.get(11).getId(), baseline.getId(), eligible.getId()), second);
+        second.forEach(persistence::enqueue);
+
+        var queued = comparisons.find(eligible.getId()).orElseThrow();
+        assertEquals(ReportChanges.Status.PENDING, queued.status());
+        assertEquals(baseline.getId(), queued.result().baseReportId());
+        assertTrue(waiting.stream().allMatch(value -> comparisons.find(value.getId()).isEmpty()));
+        jdbc.update("UPDATE news_reports SET report_status = 'FALLBACK' WHERE id = ?", predecessors.getFirst().getId());
+        persistence.enqueue(waiting.getFirst().getId());
+        assertEquals(predecessors.getFirst().getId(), comparisons.find(waiting.getFirst().getId()).orElseThrow().result().baseReportId());
+    }
+
     @Test
     @org.springframework.transaction.annotation.Transactional
     void runReservationFlushesReportBeforeJdbcComparisonInputInsert() {

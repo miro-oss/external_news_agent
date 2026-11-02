@@ -26,8 +26,7 @@ final class ReportPdfInsightSection {
                 NotificationInsightBrief.AI_NOTICE, groups);
         else {
             pdf.section("관점 한눈에 · " + audience(insight.audience()));
-            pdf.muted(brief.omittedItemCount() > 0 ? "전체 관점 분석은 보고서 화면에서 확인하세요."
-                    : NotificationInsightBrief.UNAVAILABLE);
+            pdf.muted(NotificationBriefingSection.emptyInsightMessage(brief));
         }
     }
 
