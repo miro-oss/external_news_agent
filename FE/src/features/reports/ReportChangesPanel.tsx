@@ -38,6 +38,8 @@ export function ReportChangesContent({ changes, refreshing, onRefresh }: {
     ? reportDateGap(changes.baseReportDate, changes.reportDate) : null
   const active = changes.status === 'PENDING' || changes.status === 'RUNNING'
   const message = changes.message || REPORT_CHANGES_MESSAGES[changes.status]
+  const keywordMessage = changes.keywordChanges?.status === 'UNAVAILABLE'
+    ? keywordChangesMessage(changes.keywordChanges) : null
   return <>
     {currentLabel && <div className="report-changes-dates" aria-label="비교하는 보고서 기간">
       <span className="report-changes-period"><small>이전{changes.periods?.basis === 'RUN' ? ' 실행' : ''}</small><strong>{previousLabel ?? '비교 대상 없음'}</strong></span>
@@ -79,8 +81,8 @@ export function ReportChangesContent({ changes, refreshing, onRefresh }: {
       </details>}
       <p className="report-changes-footnote">‘새로 포함’은 비교 대상인 이전 보고서에 없던 항목이라는 뜻입니다. 사건의 발생이나 종료를 의미하지 않습니다. 근거는 각 보고서에 저장된 문장으로 확인합니다.</p>
     </>}
-    {changes.status !== 'READY' && changes.keywordChanges?.status === 'UNAVAILABLE'
-      && <p className="report-changes-footnote">{keywordChangesMessage(changes.keywordChanges)}</p>}
+    {changes.status !== 'READY' && keywordMessage && keywordMessage.trim() !== message.trim()
+      && <p className="report-changes-footnote">{keywordMessage}</p>}
   </>
 }
 
