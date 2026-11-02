@@ -21,8 +21,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NotificationCompanyVisibilityTest {
-    private final Company retained = new Company("00000001", "허용 기업", null);
-    private final Company excluded = new Company("00000002", "제외 기업", null);
+    private final Company retained = new Company("00000001", "허용 기업", "000001");
+    private final Company excluded = new Company("00000002", "제외 기업", "000002");
     private final List<CompanyAttachment> companies = List.of(attachment(retained), attachment(excluded));
 
     @Test
@@ -71,7 +71,8 @@ class NotificationCompanyVisibilityTest {
     @Test
     void filteredLegacyTopicWeeklyUsesItsPersistedTopicScope() {
         var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(10L)
-                .topicDartCorpCode(retained.corpCode()).topicDartCorpName(retained.corpName()).build();
+                .topicDartCorpCode(retained.corpCode()).topicDartCorpName(retained.corpName())
+                .topicDartStockCode(retained.stockCode()).build();
         assertEquals(List.of(companies.getFirst()), NotificationCompanyVisibility.visible(report,
                 view(List.of(Finding.builder().id(1L).build()), true, Set.of()), companies));
         assertTrue(NotificationCompanyVisibility.visible(report, view(List.of(), true, Set.of()), companies).isEmpty());

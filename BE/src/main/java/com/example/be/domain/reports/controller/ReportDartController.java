@@ -25,7 +25,7 @@ public class ReportDartController {
     private final ReportDartService service;
 
     @GetMapping("/{reportId}/dart")
-    @Operation(summary = "리포트 공시·분기 실적 조회", description = "명시 선택 회사와 신규 RUN·DAILY·WEEKLY의 기사에서 확인하여 고정한 기업의 저장 공시·최근 12분기 자료를 반환합니다. 현재 표시 가능한 issueLinks와 최근 공시/실적 근거 filingRows를 제공하며 직접 참조와 회사 참고를 구분합니다. 과거 자동 연결은 소급하지 않고 조회는 DART·LLM을 호출하지 않습니다. fetchedAt은 실제 자료 확인 시각입니다.")
+    @Operation(summary = "리포트 공시·분기 실적 조회", description = "명시 선택 회사와 신규 RUN·DAILY·WEEKLY의 기사에서 확인하여 고정한 기업 중 상장 회사(6자리 영숫자 종목코드)의 저장 공시·최근 12분기 자료만 반환합니다. 비상장 회사는 과거 연결도 제외합니다. 현재 표시 가능한 issueLinks와 최근 공시/실적 근거 filingRows를 제공하며 직접 참조와 회사 참고를 구분합니다. 과거 자동 연결은 소급하지 않고 조회는 DART·LLM을 호출하지 않습니다. fetchedAt은 실제 자료 확인 시각입니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다.",
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = "{\"isSuccess\":true,\"code\":\"COMMON200\",\"message\":\"성공입니다.\",\"result\":{\"reportId\":17,\"companies\":[{\"company\":{\"corpCode\":\"00126380\",\"corpName\":\"삼성전자\",\"stockCode\":\"005930\"},\"status\":\"PENDING\",\"message\":\"공시 자료를 준비하고 있습니다.\",\"data\":null,\"issueLinks\":[],\"filingRows\":[]}]}}"))),
@@ -36,7 +36,7 @@ public class ReportDartController {
     }
 
     @PostMapping("/{reportId}/dart/retry")
-    @Operation(summary = "리포트 공시 자료 재시도", description = "FAILED/DISABLED 작업만 다시 예약합니다. READY/PARTIAL 자료와 저장된 회사 스냅샷은 변경하지 않고 PENDING을 중복 예약하지 않습니다. 키 미설정은 DISABLED입니다. 외부 DART 호출을 기다리지 않습니다.")
+    @Operation(summary = "리포트 공시 자료 재시도", description = "상장 회사의 FAILED/DISABLED 작업만 다시 예약합니다. READY/PARTIAL 자료와 저장된 회사 스냅샷은 변경하지 않고 PENDING을 중복 예약하지 않습니다. 키 미설정은 DISABLED입니다. 외부 DART 호출을 기다리지 않습니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다. 조회와 같은 reportId·companies 응답"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "REPORT404: 보고서를 찾을 수 없습니다.")

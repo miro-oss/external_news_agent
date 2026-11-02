@@ -100,12 +100,13 @@ class ReportKeywordChangesServiceTest {
     @Test void recoveredIncludedIssueBasisCannotBeComparedAsACompletePreRankingUniverse() {
         var before = report(1);
         var known = report(2).getReportKeywordSnapshot();
-        var now = NewsReport.builder().id(2L).companySelectionRecorded(true).reportKeywordSnapshot(
-                new ReportKeywordSnapshot(ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION,
-                        known.capturedAt(), "보고서 포함 이슈 기준 · 저장 자료 복원", null,
-                        known.definitions(), known.candidates())).build();
-        assertEquals("CONDITIONS_UNVERIFIED", service.project(before, now,
-                work(snapshot(1), snapshot(2)), VIEW, VIEW, false).reason());
+        for (var rule : List.of(ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION, ReportKeywordSnapshot.SELECTED_RULE_VERSION)) {
+            var now = NewsReport.builder().id(2L).companySelectionRecorded(true).reportKeywordSnapshot(
+                    new ReportKeywordSnapshot(rule, known.capturedAt(), "보고서 포함 이슈 기준", null,
+                            known.definitions(), known.candidates())).build();
+            assertEquals("CONDITIONS_UNVERIFIED", service.project(before, now,
+                    work(snapshot(1), snapshot(2)), VIEW, VIEW, false).reason());
+        }
         verifyNoInteractions(keywords, criteria);
     }
 
@@ -120,6 +121,21 @@ class ReportKeywordChangesServiceTest {
             assertEquals("CONDITIONS_UNVERIFIED", service.project(before, now, work(snapshot(1), snapshot(2)), VIEW, VIEW, false).reason());
         }
         verifyNoInteractions(keywords, criteria);
+    }
+
+    @Test void boundedProjectionCannotBeUsedForPercentagePointChangesEvenWithFullStoredVersions() {
+        var before = report(1);
+        var now = report(2);
+        aggregate(before, 10, counts(1, 10.0), false);
+        var bounded = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null,
+                ReportKeywordSnapshot.SELECTED_RULE_VERSION, OffsetDateTime.now(), "보고서 본문에 포함된 이슈 기준",
+                2, List.of(), 0);
+        when(keywords.aggregate(now, VIEW, false)).thenReturn(new ReportKeywordService.FullAggregation(bounded, counts(1, 50.0), false));
+
+        var result = service.project(before, now, work(snapshot(1), snapshot(2)), VIEW, VIEW, false);
+
+        assertEquals("CONDITIONS_UNVERIFIED", result.reason());
+        assertTrue(result.items().isEmpty());
     }
 
     @Test void sourceConfigurationChangesIncompleteCollectionAndMissingPeriodHaveSeparateReasons() {

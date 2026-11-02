@@ -45,8 +45,8 @@ test('counts and percentages use the complete server denominator instead of disp
   assert.deepEqual(stats, original)
 })
 
-test('recovered selected issues are labelled as report-only counts rather than the complete candidate universe', () => {
-  const stats = { ...fixture(), ruleVersion: 'report-keywords.recovered-selected.v1' }
+for (const ruleVersion of ['report-keywords.recovered-selected.v1', 'report-keywords.selected.v1']) test(`${ruleVersion} labels report-only counts`, () => {
+  const stats = { ...fixture(), ruleVersion }
   const html = render(stats)
   assert.match(html, /보고서 포함 이슈 <strong>12건<\/strong>/)
   assert.match(html, /이 보고서에 포함된 유효 이슈 기준입니다/)

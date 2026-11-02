@@ -397,7 +397,13 @@ class NotificationRendererTest {
                     "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "표시 금지")) {
                 assertFalse(body.contains(unsupported), unsupported + " must be omitted");
             }
-            assertFalse(body.contains("다른 사건의 확인"));
+            assertEquals(type == ChannelType.EMAIL, body.contains("다른 사건의 확인"));
+            if (type == ChannelType.EMAIL) {
+                var briefing = org.jsoup.Jsoup.parse(body).selectFirst("td[bgcolor='#e8f3ff']");
+                assertEquals(List.of("1. 유효 사건", "2. 후속 확인 · 다른 사건의 확인"), briefing.select("h3").eachText());
+                assertTrue(briefing.select("p").isEmpty());
+            }
+            assertFalse(body.contains("독립적인 관찰 이유"));
             assertFalse(body.contains("https://example.com/unrelated"));
         }
     }

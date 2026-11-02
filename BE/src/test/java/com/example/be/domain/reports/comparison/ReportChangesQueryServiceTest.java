@@ -216,11 +216,12 @@ class ReportChangesQueryServiceTest {
         verify(comparisons, never()).claim(anyLong(), any());
     }
 
-    @Test void staleRevisionPendingAndUnconfirmedReviewsKeepSavedComparisonReady() {
+    @Test void pendingAndUnconfirmedReviewsKeepSavedComparisonReadyAcrossRevisions() {
         var fixture = comparisonWithEvents(false);
         var stale = eventItem('c', 0, fixture.current().getStructuredContent().importantEvents().getFirst());
         for (var review : List.of(
-                review(101L, stale, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR"),
+                review(101L, stale, FeedbackModels.Status.PENDING, "CONFIRMED_ERROR"),
+                review(101L, stale, FeedbackModels.Status.COMPLETED, "NOT_CONFIRMED"),
                 review(101L, fixture.currentEvent(), FeedbackModels.Status.PENDING, "CONFIRMED_ERROR"),
                 review(101L, fixture.currentEvent(), FeedbackModels.Status.COMPLETED, "NOT_CONFIRMED"))) {
             when(feedbackStore.eventFeedback(101L)).thenReturn(List.of(review));
@@ -228,9 +229,35 @@ class ReportChangesQueryServiceTest {
             assertEquals(ReportChanges.Status.READY, result.status());
             assertEquals(fixture.ready().items(), result.items());
         }
-        // Only the stale confirmed candidate requires recapturing the original event identities.
-        verify(eventSnapshots, times(1)).capture(eq(fixture.current()), any());
+        verify(eventSnapshots, never()).capture(eq(fixture.current()), any());
         verify(eventSnapshots, never()).capture(eq(fixture.base()), any());
+    }
+
+    @Test void staleConfirmedReviewWithSavedEvidenceHidesCurrentOrBaselineComparisonWithoutRewritingIt() {
+        var fixture = comparisonWithEvents(false);
+        for (long rejectedReport : List.of(101L, 100L)) {
+            when(feedbackStore.eventFeedback(101L)).thenReturn(List.of());
+            when(feedbackStore.eventFeedback(100L)).thenReturn(List.of());
+            var report = rejectedReport == 101L ? fixture.current() : fixture.base();
+            var stale = eventItem('c', 0, report.getStructuredContent().importantEvents().getFirst());
+            when(feedbackStore.eventFeedback(rejectedReport)).thenReturn(List.of(
+                    review(rejectedReport, stale, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR")));
+
+            var result = query.get(101);
+
+            assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+            assertEquals("FILTERED_INPUT", result.keywordChanges().reason());
+            assertTrue(result.items().isEmpty());
+            assertTrue(result.notes().isEmpty());
+            assertEquals(100L, result.baseReportId());
+            assertEquals("과거 오류 근거", fixture.ready().items().getFirst().previous().claims().getFirst().text());
+            assertEquals("현재 오류 근거", fixture.ready().items().getFirst().current().claims().getFirst().text());
+            assertEquals(1, fixture.current().getStructuredContent().importantEvents().size());
+            assertEquals(1, fixture.base().getStructuredContent().importantEvents().size());
+        }
+        verify(comparisons, never()).insert(any(), any(), any());
+        verify(comparisons, never()).finish(anyLong(), any(), any());
+        verify(comparisons, never()).claim(anyLong(), any());
     }
 
     @Test void rejectedSharedEvidenceEventStillInvalidatesTheComparisonEvenWithNoHiddenFindings() {

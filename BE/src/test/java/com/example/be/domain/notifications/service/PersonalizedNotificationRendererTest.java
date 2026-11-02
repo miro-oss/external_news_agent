@@ -122,7 +122,14 @@ class PersonalizedNotificationRendererTest {
             assertRejectedContentAbsent(body);
             assertTrue(body.contains("정상 사건 제목"));
             assertTrue(body.contains("정상 사건 주요 내용"));
-            assertEquals(type == ChannelType.TELEGRAM, body.contains("정상 후속 확인"));
+            assertTrue(body.contains("정상 후속 확인"));
+            if (type == ChannelType.EMAIL) {
+                var briefing = org.jsoup.Jsoup.parse(body).selectFirst("td[bgcolor='#e8f3ff']");
+                // The main event shares excluded evidence 12; only watch evidence 13 is eligible here.
+                assertEquals(List.of("1. 후속 확인 · 정상 후속 확인"), briefing.select("h3").eachText());
+                assertTrue(briefing.select("p").isEmpty());
+                assertFalse(body.contains("정상 확인 이유"));
+            }
             assertTrue(body.contains("https://example.com/source-12"));
             assertTrue(body.contains("https://example.com/source-13"));
             assertTrue(body.contains("https://news.example.com/#/reports?reportId=17"));

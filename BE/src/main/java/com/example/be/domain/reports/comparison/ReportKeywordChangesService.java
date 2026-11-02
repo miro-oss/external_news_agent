@@ -35,8 +35,8 @@ public class ReportKeywordChangesService {
         if (incompatible != null) return unavailable(incompatible);
         var priorSnapshot = previous.getReportKeywordSnapshot();
         var currentSnapshot = current.getReportKeywordSnapshot();
-        if (ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION.equals(priorSnapshot.ruleVersion())
-                || ReportKeywordSnapshot.RECOVERED_SELECTED_RULE_VERSION.equals(currentSnapshot.ruleVersion()))
+        if (ReportKeywordSnapshot.selectedBasis(priorSnapshot.ruleVersion())
+                || ReportKeywordSnapshot.selectedBasis(currentSnapshot.ruleVersion()))
             return unavailable("CONDITIONS_UNVERIFIED");
         if ("COMPANY_SCOPE_UNVERIFIED".equals(priorSnapshot.unavailableReason())
                 || "COMPANY_SCOPE_UNVERIFIED".equals(currentSnapshot.unavailableReason()))
@@ -54,6 +54,9 @@ public class ReportKeywordChangesService {
         var now = keywords.aggregate(current, currentView, delivery);
         if (prior.view().status() != ReportKeywordDTO.Status.AVAILABLE || now.view().status() != ReportKeywordDTO.Status.AVAILABLE)
             return unavailable("NO_SNAPSHOT");
+        if (ReportKeywordSnapshot.selectedBasis(prior.view().ruleVersion())
+                || ReportKeywordSnapshot.selectedBasis(now.view().ruleVersion()))
+            return unavailable("CONDITIONS_UNVERIFIED");
         // An exclusion can change the universe without appearing in the final top-N report view.
         if (prior.filtered() || now.filtered()) return unavailable("FILTERED_INPUT");
         int before = prior.view().denominatorIssueCount();

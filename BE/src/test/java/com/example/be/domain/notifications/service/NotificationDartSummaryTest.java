@@ -197,6 +197,18 @@ class NotificationDartSummaryTest {
         assertEquals("", summary.render(report, REPORT_URL));
     }
 
+    @Test
+    void legacyUnlistedSelectionAddsNoCompanyBlockWithoutAnEvidenceView() {
+        var unlisted = new Company("00999999", "비상장 선택 회사", "");
+        var legacy = NewsReport.builder().id(18L).reportScope(ReportScope.WEEKLY).topicId(29L)
+                .topicDartCorpCode(unlisted.corpCode()).topicDartCorpName(unlisted.corpName())
+                .topicDartStockCode(unlisted.stockCode()).build();
+        when(service.getStored(legacy)).thenReturn(new ReportDartDTO.Result(18L,
+                List.of(new CompanyAttachment(unlisted, "READY", "저장 상태", data("CFS", "KRW",
+                        List.of(quarter(2, "100000000", "10000000")), List.of(filing("숨길 공시", FILING_URL, false)))))));
+        assertEquals("", summary.render(legacy, REPORT_URL));
+    }
+
     private String render(CompanyAttachment company) {
         when(service.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(company)));
         return summary.render(report, REPORT_URL);

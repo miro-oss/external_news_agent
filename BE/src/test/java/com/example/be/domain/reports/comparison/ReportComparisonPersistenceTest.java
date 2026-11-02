@@ -212,6 +212,37 @@ class ReportComparisonPersistenceTest {
         verify(reports, never()).findById(98L);
     }
 
+    @Test void runSkipsRemovedReportsIncludingUnknownTopicSnapshotsToThePreviousVisibleReport() {
+        var started = date.atTime(9, 0);
+        var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();
+        var current = NewsReport.builder().id(101L).run(run).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(20L)).build();
+        var input = snapshot(side(1, 20, "현재"));
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(comparisons.findInput(101L)).thenReturn(Optional.of(new ReportComparisonSnapshot(
+                input.version(), input.issues(), input.scopes(), ReportComparisonSnapshot.Period.from(current), List.of())));
+        when(comparisons.previousRuns(started, 90L)).thenReturn(List.of(
+                new ReportComparisonRepository.RunCandidate(89L, 100L, started.minusDays(1), java.util.Set.of(1L), java.util.Set.of(1L), true),
+                new ReportComparisonRepository.RunCandidate(88L, 99L, started.minusDays(2), java.util.Set.of(), java.util.Set.of(1L), false),
+                new ReportComparisonRepository.RunCandidate(87L, 98L, started.minusDays(3), java.util.Set.of(1L), java.util.Set.of(1L), true),
+                new ReportComparisonRepository.RunCandidate(86L, 97L, started.minusDays(4), java.util.Set.of(1L), java.util.Set.of(1L), true)));
+        for (long id : List.of(100L, 99L)) {
+            var removed = NewsReport.builder().id(id).reportScope(ReportScope.RUN).reportStatus(ReportStatus.FALLBACK).build();
+            removed.hide(started.minusHours(1));
+            when(reports.findById(id)).thenReturn(Optional.of(removed));
+        }
+        // 98 is a missing historical report; its run association must not terminate the search either.
+        var previous = NewsReport.builder().id(97L).reportScope(ReportScope.RUN)
+                .reportStatus(ReportStatus.GENERATED).reflectedFindingIds(List.of(10L)).build();
+        when(reports.findById(97L)).thenReturn(Optional.of(previous));
+        when(comparisons.findInput(97L)).thenReturn(Optional.of(snapshot(side(1, 10, "이전"))));
+
+        persistence.enqueue(101L);
+
+        verify(comparisons).insert(argThat(result -> result.status() == ReportChanges.Status.PENDING
+                && result.baseReportId().equals(97L)), any(), any());
+    }
+
     @Test void runUsesPreviousSavedTopicSetRatherThanAdjacentDifferentTopic() {
         var started = date.atTime(9, 0);
         var run = com.example.be.domain.collection.entity.CollectionRun.builder().id(90L).startedAt(started).build();

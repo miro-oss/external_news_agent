@@ -124,7 +124,7 @@ def test_synthesizes_saved_same_issue_and_expands_chronology_despite_subset_sele
     assert "2026-09-14 ~ 2026-09-20 주간 통합" in response.title
     assert response.source_notes == data["sourceNotes"]
     assert response.meta.input_tokens == 10
-    assert response.meta.prompt_version == "weekly-report.ko.v2"
+    assert response.meta.prompt_version == "weekly-report.ko.v3"
     assert "전주 대비 변화" in provider.calls[0]["system_instruction"]
     assert "issueIdsByFinding" in provider.calls[0]["prompt"]
 

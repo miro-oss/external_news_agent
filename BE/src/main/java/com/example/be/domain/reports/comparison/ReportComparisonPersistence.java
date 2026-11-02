@@ -75,13 +75,16 @@ public class ReportComparisonPersistence {
                 // Executions without new articles intentionally have no report. They must not
                 // break the chain between reports generated for the same accepted topic set.
                 if (candidate.reportId() == null) continue;
-                if (!candidate.known() && candidate.topicIds().stream().anyMatch(topicIds::contains))
+                boolean uncertain = !candidate.known() && candidate.topicIds().stream().anyMatch(topicIds::contains);
+                boolean matches = candidate.known() && candidate.savedTopicIds().equals(topicIds);
+                if (!uncertain && !matches) continue;
+                var previous = reports.findById(candidate.reportId()).orElse(null);
+                // A removed report is not part of the reading history, even if its saved topics are unknown.
+                if (previous == null || previous.getDeletedAt() != null) continue;
+                if (uncertain)
                     return new Baseline(null, true);
-                if (candidate.known() && candidate.savedTopicIds().equals(topicIds)) {
-                    var previous = reports.findById(candidate.reportId()).orElse(null);
-                    return previous != null && previous.getReportScope() == ReportScope.RUN
-                            ? completedBaseline(previous) : new Baseline(null, false);
-                }
+                return previous.getReportScope() == ReportScope.RUN
+                        ? completedBaseline(previous) : new Baseline(null, false);
             }
             var last = candidates.getLast();
             before = last.startedAt();

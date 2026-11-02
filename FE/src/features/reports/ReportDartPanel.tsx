@@ -95,7 +95,7 @@ function ConnectedReportDartPanel({ reportId, companies }: { reportId: number; c
       <button type="button" className="text-button" disabled={busy} onClick={refresh}>다시 불러오기</button>
     </div>}
     {retry.isError && <p className="error" role="alert">{retry.error.message}</p>}
-    {selected && <ReportDartCompanyContent entry={selected} sourceFindingIds={selectedFindingIds}
+    {selected && <ReportDartCompanyContent key={selected.company.corpCode} entry={selected} sourceFindingIds={selectedFindingIds}
       busy={busy} pollExpired={pollExpired} onRefresh={refresh} onRetry={retryFailed} />}
   </section>
 }
@@ -180,8 +180,8 @@ export function DartFilingTable({ rows, companyName, sourceFindingIds = null }: 
 }) {
   const direct = (row: DartFilingRow) => row.relevance === 'DIRECT_REFERENCE' && row.sourceFindingIds.length > 0
     && (sourceFindingIds === null || row.sourceFindingIds.some(id => sourceFindingIds.includes(id)))
-  return <section className="report-dart-filing-section" aria-label={`${companyName} 공시 상세`}>
-    <h5>공시 상세</h5>
+  return <details className="report-dart-filing-section" aria-label={`${companyName} 공시 상세`}>
+    <summary>{`공시 상세 · ${rows.length}건`}</summary>
     <p className="report-dart-note">확인 범위: 저장한 최근 공시 최대 5건과 분기 실적의 근거 공시입니다. 기간 전체 공시 목록이 아닙니다.</p>
     {!rows.some(direct) && <p className="report-dart-reference-note">확보한 공시에서 직접 인용 확인 안 됨</p>}
     {rows.length ? <div className="report-dart-table-scroll" tabIndex={0} role="region" aria-label="공시 상세 표 가로 스크롤">
@@ -198,7 +198,7 @@ export function DartFilingTable({ rows, companyName, sourceFindingIds = null }: 
       </table>
     </div> : <p className="report-dart-note">저장된 공시 자료가 없습니다.</p>}
     <p className="report-dart-note">직접 인용은 기사에 적힌 접수번호와 공시가 같다는 뜻입니다. 기사 내용 전체나 계약 실행·매출 반영을 검증한 것은 아닙니다.</p>
-  </section>
+  </details>
 }
 
 function DartFilingLink({ filing }: { filing: DartFiling }) {

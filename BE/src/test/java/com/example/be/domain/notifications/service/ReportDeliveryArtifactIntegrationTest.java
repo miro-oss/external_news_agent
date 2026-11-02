@@ -244,6 +244,7 @@ class ReportDeliveryArtifactIntegrationTest {
     private static String key(long id) { return String.valueOf((char) ('a' + id - 11)).repeat(64); }
     private static String title(long id) { return id == 11 ? "허용 사건" : id == 12 ? "공용 제외 사건" : "개인 제외 사건"; }
     private static Company company(long id) {
-        return new Company(String.format(Locale.ROOT, "%08d", id), id == 11 ? "허용기업" : id == 12 ? "공용제외기업" : "개인제외기업", "");
+        return new Company(String.format(Locale.ROOT, "%08d", id), id == 11 ? "허용기업" : id == 12 ? "공용제외기업" : "개인제외기업",
+                String.format(Locale.ROOT, "%06d", id));
     }
 }

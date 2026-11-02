@@ -163,6 +163,39 @@ class M2BriefingRenderingTest {
     }
 
     @Test
+    void feedbackGapsUseSurvivingWatchTitlesInBothMailAndPdfWithoutRevivingRejectedSources() throws Exception {
+        var content = new ReportContent(List.of(), List.of(
+                new ReportContent.ImportantEvent("제외한 핵심 이슈", "제외된 내용입니다.", "", List.of(11L))), List.of(
+                new ReportContent.WatchItem("제외 근거를 쓴 관찰", "제외됐습니다.", List.of(11L)),
+                new ReportContent.WatchItem("첫 후속 시험 예정", "시험을 계획했으며 완료한 것은 아닙니다.", List.of(12L)),
+                new ReportContent.WatchItem("같은 근거 반복", "중복된 관찰입니다.", List.of(12L)),
+                new ReportContent.WatchItem("두 번째 결과 확인", "결과가 확인되지 않았습니다.", List.of(13L)),
+                new ReportContent.WatchItem("세 번째 관찰", "추가 관찰입니다.", List.of(14L))), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(12), finding(13), finding(14)),
+                new ReportReadingContent("", content), true, Set.of(11L));
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        var titleBox = Jsoup.parse(html).selectFirst("td[bgcolor='#e8f3ff']");
+        assertNotNull(titleBox);
+        assertEquals(List.of("1. 후속 확인 · 첫 후속 시험 예정", "2. 후속 확인 · 두 번째 결과 확인"), titleBox.select("h3").eachText());
+        assertFalse(titleBox.text().contains("같은 근거 반복"));
+        assertFalse(titleBox.text().contains("세 번째 관찰"));
+        assertTrue(titleBox.select("p").isEmpty());
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            var stripper = new PDFTextStripper();
+            stripper.setStartPage(1);
+            stripper.setEndPage(1);
+            String firstPage = stripper.getText(document);
+            assertTrue(firstPage.contains("후속 확인 · 첫 후속 시험 예정"));
+            assertTrue(firstPage.contains("후속 확인 · 두 번째 결과 확인"));
+            assertFalse(firstPage.contains("같은 근거 반복"));
+            assertFalse(firstPage.contains("제외한 핵심 이슈"));
+            assertFalse(firstPage.contains("세 번째 관찰"));
+        }
+        assertEquals(1, content.importantEvents().size());
+        assertEquals(5, content.watchItems().size());
+    }
+
+    @Test
     void automaticUnpreparedAudienceIsVisibleWithoutDroppingTheBaseReportOrBreakingTelegramBudget() throws Exception {
         var view = view(false);
         String notice = NotificationBriefingSection.unavailable(Audience.EQUIPMENT_MAKER);

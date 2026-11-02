@@ -252,6 +252,55 @@ class ReportEventFeedbackProjectionTest {
         }
     }
 
+    @Test void revisedReportKeepsValidatedConfirmedErrorsOutOfReadingAndFeedbackTargets() {
+        var revised = event("문구가 바뀐 오류 사건", "수정된 오류 요약", 11L);
+        var retained = event("남길 사건", "남길 요약", 12L);
+        var retainedWatch = new ReportContent.WatchItem("남길 관찰", "남길 이유", List.of(13L));
+        var content = new ReportContent(List.of("오류가 섞인 원본 요약"), List.of(revised, retained),
+                List.of(new ReportContent.WatchItem("오류 후속", "오류 이유", List.of(14L)), retainedWatch), List.of());
+        var report = report(content);
+        var visible = visible(11L, 12L, 13L, 14L);
+        var retainedTarget = item('c', 1, retained);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('b', 0, revised), retainedTarget));
+        var confirmed = withInput(review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null),
+                item('a', 0, event("원래 오류 사건", "원래 오류 요약", 11L, 14L)), 17L);
+
+        var view = projection.project(report, visible, List.of(confirmed));
+
+        assertEquals(List.of(retained), view.readingContent().structuredContent().importantEvents());
+        assertEquals(List.of(retainedWatch), view.readingContent().structuredContent().watchItems());
+        assertEquals(List.of(12L, 13L), view.findings().stream().map(Finding::getId).toList());
+        assertEquals(Set.of(11L, 14L), view.excludedEvidenceFindingIds());
+        assertEquals(List.of(retainedTarget), projection.events(report, visible, List.of(confirmed)));
+        assertEquals(1, retainedTarget.event().index(), "surviving feedback targets keep their captured index");
+        assertFalse(view.readingContent().markdownBody().contains("오류"));
+        assertSame(content, report.getStructuredContent());
+        assertEquals("잘못된 원본 마크다운", report.getMarkdownBody());
+    }
+
+    @Test void stalePublicExclusionRequiresConfirmedLocalErrorAndCorrectlyBoundSavedEvidence() {
+        var revised = event("남길 수정 사건", "남길 요약", 11L);
+        var content = new ReportContent(List.of("요약"), List.of(revised), List.of(), List.of());
+        var report = report(content);
+        var visible = visible(11L);
+        var current = item('b', 0, revised);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(current));
+        var original = item('a', 0, event("이전 사건", "이전 요약", 11L));
+        var confirmed = review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null);
+        for (var review : List.of(
+                withInput(review('a', Category.PREFERENCE, Status.COMPLETED, "PREFERENCE", null), original, 17L),
+                withInput(review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "NOT_CONFIRMED", null), original, 17L),
+                withInput(review('a', Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null), original, 17L),
+                withInput(review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", 99L), original, 17L),
+                withInput(confirmed, original, 18L),
+                withInput(confirmed, item('c', 0, revised), 17L), confirmed)) {
+            var view = projection.project(report, visible, List.of(review));
+            assertSame(content, view.readingContent().structuredContent());
+            assertTrue(view.excludedEvidenceFindingIds().isEmpty());
+            assertEquals(List.of(current), projection.events(report, visible, List.of(review)));
+        }
+    }
+
     @Test void personalSuppressionKeepsProjectedEventsWithoutRegeneratingRejectedSharedClaims() {
         var bad = event("잘못된 묶음", "잘못된 요약", 11L, 12L);
         var good = event("정상 사건", "정상 요약", 12L);

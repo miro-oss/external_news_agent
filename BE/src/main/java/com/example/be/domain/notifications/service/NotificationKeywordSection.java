@@ -1,6 +1,7 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.reports.keyword.ReportKeywordDTO;
+import com.example.be.domain.reports.keyword.ReportKeywordSnapshot;
 import org.springframework.web.util.HtmlUtils;
 
 import java.io.IOException;
@@ -74,22 +75,22 @@ final class NotificationKeywordSection {
     }
 
     private static String amount(ReportKeywordDTO.View stats, ReportKeywordDTO.Item item) {
-        return item.issueCount() + "건 / " + (selectedRecovery(stats) ? "보고서 포함 " : "전체 ")
+        return item.issueCount() + "건 / " + (selectedBasis(stats) ? "보고서 포함 " : "전체 ")
                 + stats.denominatorIssueCount() + "건 · "
                 + (item.sharePercent() == null ? "비중 계산 안 함" : number(item.sharePercent()) + "%");
     }
 
-    private static boolean selectedRecovery(ReportKeywordDTO.View stats) {
-        return "report-keywords.recovered-selected.v1".equals(stats.ruleVersion());
+    private static boolean selectedBasis(ReportKeywordDTO.View stats) {
+        return ReportKeywordSnapshot.selectedBasis(stats.ruleVersion());
     }
 
     private static String denominator(ReportKeywordDTO.View stats) {
-        return (selectedRecovery(stats) ? "보고서 포함 이슈 " : "유효 이슈 ")
+        return (selectedBasis(stats) ? "보고서 포함 이슈 " : "유효 이슈 ")
                 + stats.denominatorIssueCount() + "건 · " + stats.periodLabel();
     }
 
     private static String basis(ReportKeywordDTO.View stats) {
-        return selectedRecovery(stats) ? "이 보고서에 포함된 유효 이슈 기준입니다." : BASIS;
+        return selectedBasis(stats) ? "이 보고서에 포함된 유효 이슈 기준입니다." : BASIS;
     }
 
     private static String related(ReportKeywordDTO.Item item) {

@@ -98,6 +98,21 @@ class ReportDartServiceTest {
         assertThrows(ReportException.class, () -> service.get(404L));
     }
 
+    @Test void legacyUnlistedSelectionsNeverReadAttachmentsAndMixedSelectionsKeepListedCompanies() {
+        var unlisted = new Company("99999001", "비상장기업", "");
+        var legacyNullStock = new Company("99999003", "종목코드없음", null);
+        for (var report : List.of(report(ReportScope.RUN, unlisted), topicWeekly(unlisted, ReportStatus.GENERATED),
+                report(ReportScope.RUN, legacyNullStock), topicWeekly(legacyNullStock, ReportStatus.GENERATED))) {
+            assertTrue(service.getStored(report).companies().isEmpty());
+        }
+        verifyNoInteractions(repository);
+
+        var listed = new Company("99999002", "신규상장기업", "0068Y0");
+        var result = service.getStored(report(ReportScope.RUN, unlisted, SAMSUNG, listed));
+        assertEquals(List.of(SAMSUNG, listed), result.companies().stream().map(ReportDartDTO.CompanyAttachment::company).toList());
+        verify(repository).find(17L);
+    }
+
     @Test void notificationReadsExistingReportSnapshotWithoutReloadingOrEnqueueing() {
         var report = report(ReportScope.RUN, SAMSUNG, SAMSUNG);
         when(repository.find(17L)).thenReturn(List.of(

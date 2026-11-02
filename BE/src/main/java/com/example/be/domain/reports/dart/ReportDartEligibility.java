@@ -17,7 +17,8 @@ public final class ReportDartEligibility {
         var companies = new LinkedHashMap<String, Company>();
         selectedCompanies(report).forEach(company -> companies.putIfAbsent(company.corpCode(), company));
         var snapshot = report.getReportIssueCompanySnapshot();
-        if (snapshot != null && snapshot.valid()) snapshot.companies()
+        if (snapshot != null && snapshot.valid()) snapshot.links().stream().map(ReportIssueCompanySnapshot.Link::company)
+                .filter(ReportDartEligibility::valid)
                 .forEach(company -> companies.putIfAbsent(company.corpCode(), company));
         return List.copyOf(companies.values());
     }
@@ -42,6 +43,11 @@ public final class ReportDartEligibility {
     }
 
     private static boolean valid(Company company) {
-        return company != null && company.corpCode() != null && company.corpCode().matches("[0-9]{8}");
+        return isListed(company) && company.corpCode() != null && company.corpCode().matches("[0-9]{8}");
+    }
+
+    /** DART uses an empty stock code for unlisted companies; listed codes may contain letters. */
+    public static boolean isListed(Company company) {
+        return company != null && company.stockCode() != null && company.stockCode().matches("[0-9A-Z]{6}");
     }
 }

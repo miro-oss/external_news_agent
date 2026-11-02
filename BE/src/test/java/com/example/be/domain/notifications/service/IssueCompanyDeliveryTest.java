@@ -32,6 +32,51 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class IssueCompanyDeliveryTest {
     @Test
+    void unlistedCompanyRemainsInNewsButHasNoEmailBadgeOrPdfAppendix() throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var listed = StoredReportDartFixture.COMPANY;
+        var unlisted = new Company("00999999", "검증기업", "");
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "topicDartCorpCode", unlisted.corpCode());
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "topicDartCorpName", unlisted.corpName());
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "topicDartStockCode", unlisted.stockCode());
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "reportIssueCompanySnapshot", new ReportIssueCompanySnapshot(
+                ReportIssueCompanySnapshot.RULE_VERSION, OffsetDateTime.parse("2026-10-30T09:00:00+09:00"), List.of(
+                new ReportIssueCompanySnapshot.Link(listed, 51L, 101L, 501L, listed.corpName(), "확인된 원문", null, List.of()),
+                new ReportIssueCompanySnapshot.Link(unlisted, 52L, 102L, 502L, unlisted.corpName(), "확인된 원문", null, List.of()))));
+        var stored = new StoredReportDartFixture();
+        stored.ready(report, List.of(listed, unlisted));
+        var content = new ReportContent(List.of(), List.of(
+                new ReportContent.ImportantEvent("SK하이닉스 실적 발표", "SK하이닉스가 실적을 발표했다.", "실적 확인", List.of(51L)),
+                new ReportContent.ImportantEvent("검증기업 협약", "검증기업이 협약을 체결했다.", "협약 확인", List.of(52L))), List.of(), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(
+                Finding.builder().id(51L).article(Article.builder().id(101L).build()).build(),
+                Finding.builder().id(52L).article(Article.builder().id(102L).build()).build()),
+                new ReportReadingContent("", content), false);
+        var summary = new NotificationDartSummary(stored.service());
+        var companies = summary.project(report, view);
+        assertEquals(List.of(listed), companies.stream().map(entry -> entry.company()).toList());
+        var pdf = new ReportPdfRenderer(stored.service()).renderDetailed(report, view, null, null, null, null, null, companies);
+        assertEquals(Set.of(listed.corpCode()), pdf.companyPages().keySet());
+        try (var document = Loader.loadPDF(pdf.bytes())) {
+            String text = new PDFTextStripper().getText(document).replaceAll("\\s+", " ");
+            assertTrue(text.contains("검증기업이 협약을 체결했다."));
+            assertFalse(text.contains("확인된 기업 · 검증기업"));
+            var destinations = document.getDocumentCatalog().getNames().getDests().getNames();
+            assertTrue(destinations.containsKey("company-0"));
+            assertFalse(destinations.containsKey("company-1"));
+        }
+        String email = new NotificationRenderer(null, null, null, summary).render(report,
+                NotificationChannel.builder().channelType(ChannelType.EMAIL).build(), view,
+                null, null, pdf.companyPages(), null, null, null, null, companies).chunks().getFirst();
+        String text = Jsoup.parse(email).text();
+        assertTrue(text.contains("검증기업이 협약을 체결했다."));
+        assertTrue(text.contains("확인된 기업 · SK하이닉스"));
+        assertFalse(text.contains("확인된 기업 · 검증기업"));
+        assertEquals(List.of(listed.corpName()), Jsoup.parse(summary.render(null, pdf.companyPages(), companies))
+                .select("strong").eachText());
+    }
+
+    @Test
     void offlineIssueLinksResolveToCompanyChartAndFilingTableAndEmailUsesSamePage() throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
         var company = StoredReportDartFixture.COMPANY;

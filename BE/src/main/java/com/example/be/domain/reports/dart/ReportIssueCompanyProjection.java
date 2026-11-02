@@ -27,7 +27,8 @@ public final class ReportIssueCompanyProjection {
     public static List<IssueLink> storedLinks(NewsReport report, String corpCode) {
         var snapshot = report.getReportIssueCompanySnapshot();
         if (snapshot == null || !snapshot.valid()) return List.of();
-        return snapshot.links().stream().filter(link -> corpCode.equals(link.company().corpCode()))
+        return snapshot.links().stream().filter(link -> ReportDartEligibility.isListed(link.company())
+                        && corpCode.equals(link.company().corpCode()))
                 .map(link -> new IssueLink(link.findingId(), link.articleId(), link.issueId(), link.matchedName(),
                         link.evidenceText(), link.evidenceUrl(), link.rceptNos())).distinct().toList();
     }
@@ -51,6 +52,7 @@ public final class ReportIssueCompanyProjection {
         Set<String> selected = visibleSelections(report, view, visibleArticles.keySet());
         List<CompanyAttachment> result = new ArrayList<>();
         for (var company : companies) {
+            if (!ReportDartEligibility.isListed(company.company())) continue;
             var links = company.issueLinks().stream().filter(link -> visibleArticles.containsKey(link.findingId())
                     && Long.valueOf(link.articleId()).equals(visibleArticles.get(link.findingId()))).toList();
             if (links.isEmpty() && !selected.contains(company.company().corpCode())) continue;

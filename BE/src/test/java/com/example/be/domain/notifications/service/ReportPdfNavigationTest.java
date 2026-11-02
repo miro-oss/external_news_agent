@@ -27,9 +27,9 @@ class ReportPdfNavigationTest {
         var report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN)
                 .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L,
                         List.of(new com.example.be.domain.collection.entity.CollectionTopicSnapshot(29L, "첫 회사", null,
-                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000001", "첫 회사", null)),
+                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000001", "첫 회사", "000001")),
                                 new com.example.be.domain.collection.entity.CollectionTopicSnapshot(30L, "둘째 회사", null,
-                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000002", "둘째 회사", null))))))
+                                        List.of(), List.of(), List.of(), 10, 60, new Company("00000002", "둘째 회사", "000002"))))))
                 .title("가상 뉴스 브리핑").build();
         var dart = mock(ReportDartService.class);
         when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(
@@ -83,6 +83,6 @@ class ReportPdfNavigationTest {
     }
 
     private ReportDartDTO.CompanyAttachment company(String code, String name) {
-        return new ReportDartDTO.CompanyAttachment(new Company(code, name, null), "PENDING", null, null);
+        return new ReportDartDTO.CompanyAttachment(new Company(code, name, code.substring(2)), "PENDING", null, null);
     }
 }

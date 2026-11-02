@@ -47,8 +47,10 @@ public class ReportEventFeedbackProjection {
     /** Capture before filtering so surviving events keep their original revision-bound identities. */
     public List<Item> events(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews) {
         Set<String> excluded = confirmedKeys(report.getId(), reviews);
-        Set<Long> inherited = dailyExclusions.forReport(report);
-        return snapshots.capture(report, visible).stream()
+        var current = snapshots.capture(report, visible);
+        Set<Long> inherited = new HashSet<>(dailyExclusions.forReport(report));
+        inherited.addAll(staleConfirmedSources(report.getId(), reviews, current));
+        return current.stream()
                 .filter(item -> !excluded.contains(item.event().key()))
                 .filter(item -> item.event().sourceFindingIds().stream().noneMatch(inherited::contains)).toList();
     }
@@ -61,7 +63,10 @@ public class ReportEventFeedbackProjection {
     public View project(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews,
                         Set<Long> inherited) {
         Set<String> excluded = confirmedKeys(report.getId(), reviews);
-        return project(report, visible, excluded, inherited, null);
+        var current = excluded.isEmpty() ? List.<Item>of() : snapshots.capture(report, visible);
+        Set<Long> excludedSources = new HashSet<>(inherited);
+        excludedSources.addAll(staleConfirmedSources(report.getId(), reviews, current));
+        return project(report, visible, excluded, excludedSources, current);
     }
 
     /** A submitted local opinion is an immediate delivery exclusion, independently of its AI diagnosis. */
@@ -144,6 +149,15 @@ public class ReportEventFeedbackProjection {
     private static Set<String> confirmedKeys(long reportId, List<Feedback> reviews) {
         return reviews.stream().filter(review -> review.reportId() == reportId)
                 .filter(ReportEventFeedbackProjection::confirmedError).map(Feedback::eventKey).collect(Collectors.toSet());
+    }
+
+    /** A revised report must not revive a confirmed error whose original event evidence is still present. */
+    private static Set<Long> staleConfirmedSources(long reportId, List<Feedback> reviews, List<Item> current) {
+        Set<String> currentKeys = current.stream().map(item -> item.event().key()).collect(Collectors.toSet());
+        return reviews.stream().filter(ReportEventFeedbackProjection::confirmedError)
+                .filter(review -> !currentKeys.contains(review.eventKey()))
+                .map(review -> submittedEvent(review, reportId)).filter(java.util.Objects::nonNull)
+                .flatMap(event -> event.sourceFindingIds().stream()).collect(Collectors.toSet());
     }
 
     static boolean confirmedError(Feedback review) {

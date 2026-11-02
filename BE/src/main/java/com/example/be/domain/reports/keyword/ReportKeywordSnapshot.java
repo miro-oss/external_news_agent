@@ -9,6 +9,11 @@ public record ReportKeywordSnapshot(String ruleVersion, OffsetDateTime capturedA
                                     List<Candidate> candidates) {
     public static final String RULE_VERSION = "report-keywords.v1";
     public static final String RECOVERED_SELECTED_RULE_VERSION = "report-keywords.recovered-selected.v1";
+    public static final String SELECTED_RULE_VERSION = "report-keywords.selected.v1";
+
+    public static boolean selectedBasis(String ruleVersion) {
+        return SELECTED_RULE_VERSION.equals(ruleVersion) || RECOVERED_SELECTED_RULE_VERSION.equals(ruleVersion);
+    }
 
     public ReportKeywordSnapshot {
         definitions = List.copyOf(definitions);

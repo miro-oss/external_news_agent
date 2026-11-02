@@ -42,7 +42,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @ActiveProfiles("local")
 @EnabledIfSystemProperty(named = "news.integration.db", matches = "true")
 class ReportDartOracleIntegrationTests {
-    static final Company COMPANY = new Company("99993201", "공시 첨부 통합검증 회사", "");
+    static final Company COMPANY = new Company("99993201", "공시 첨부 통합검증 회사", "932001");
     @Autowired NewsReportRepository reports;
     @Autowired CollectionRunRepository runs;
     @Autowired ReportDartRepository repository;
@@ -52,11 +52,14 @@ class ReportDartOracleIntegrationTests {
     @MockitoBean DartFinancialService financials;
     final List<Long> reportIds = new ArrayList<>();
     final List<Long> runIds = new ArrayList<>();
+    final List<String> extraCacheCorpCodes = new ArrayList<>();
 
     @AfterEach void removeOwnedFixtures() {
         for (var id : reportIds) jdbc.update("DELETE FROM news_reports WHERE id = ?", id);
         for (var id : runIds) jdbc.update("DELETE FROM news_collection_runs WHERE id = ?", id);
         jdbc.update("DELETE FROM news_dart_financial_cache WHERE corp_code = ?", COMPANY.corpCode());
+        for (var corpCode : extraCacheCorpCodes)
+            jdbc.update("DELETE FROM news_dart_financial_cache WHERE corp_code = ?", corpCode);
     }
 
     private NewsReport create(boolean selected, ReportStatus status) {
@@ -216,7 +219,7 @@ class ReportDartOracleIntegrationTests {
         var date = java.time.LocalDate.of(1600, 1, 1).plusDays(run.getId());
         if (scope == ReportScope.WEEKLY) date = java.time.LocalDate.of(1600, 1, 1)
                 .with(java.time.DayOfWeek.MONDAY).plusWeeks(run.getId());
-        var second = new Company("99993202", "추가 공시 연결 검증 회사", "");
+        var second = new Company("99993202", "추가 공시 연결 검증 회사", "932002");
         var snapshot = new ReportIssueCompanySnapshot("report-issue-companies.v1", now.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
                 List.of(new ReportIssueCompanySnapshot.Link(COMPANY, 51L, 61L, 71L, COMPANY.corpName(),
                                 COMPANY.corpName() + " 공시", "https://example.com/61", List.of()),
@@ -363,6 +366,63 @@ class ReportDartOracleIntegrationTests {
         assertEquals(List.of(COMPANY.corpCode()), repository.staleCompanies(now.minusHours(24), now.plusMinutes(6))
                 .stream().map(Company::corpCode).toList());
         assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+    }
+
+    @Test void legacyUnlistedJobsCannotStarveListedPollingOrResumeThroughRetryAndKeyRecovery() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var report = create(false, ReportStatus.GENERATED);
+        var listed = new Company("99993300", "영숫자 상장 종목", "0068Y0");
+        var unlistedCodes = new ArrayList<String>();
+        // These legacy rows predate the listed-only enqueue guard. There are more than both polling page limits.
+        for (int index = 1; index <= 12; index++) {
+            String corpCode = String.format("999933%02d", index);
+            unlistedCodes.add(corpCode);
+            jdbc.update("""
+                    INSERT INTO news_report_dart_attachments
+                        (report_id, corp_code, corp_name, stock_code, status, message, next_attempt_at, created_at, updated_at)
+                    VALUES (?, ?, '비상장 과거 연결', NULL, 'PENDING', '공시 자료를 준비하고 있습니다.', ?, ?, ?)
+                    """, report.getId(), corpCode, java.sql.Timestamp.valueOf(now.minusHours(1)),
+                    java.sql.Timestamp.valueOf(now.minusDays(1)), java.sql.Timestamp.valueOf(now.minusDays(1)));
+            seedExtraCache(corpCode, now.minusDays(3), now);
+        }
+        repository.enqueue(report.getId(), listed, true, now.minusMinutes(1));
+        seedExtraCache(listed.corpCode(), now.minusDays(2), now);
+
+        assertEquals(List.of(listed), repository.pending(now).stream()
+                .filter(job -> job.reportId() == report.getId()).map(ReportDartRepository.Job::company).toList());
+        var stale = repository.staleCompanies(now.minusHours(24), now).stream().map(Company::corpCode).toList();
+        assertTrue(stale.contains(listed.corpCode()));
+        assertTrue(stale.stream().noneMatch(unlistedCodes::contains));
+        assertTrue(repository.reusableReports().contains(report.getId()));
+
+        jdbc.update("UPDATE news_report_dart_attachments SET status = 'FAILED' WHERE report_id = ?", report.getId());
+        repository.retry(report.getId(), true, now);
+        assertEquals(12, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM news_report_dart_attachments
+                WHERE report_id = ? AND stock_code IS NULL AND status = 'FAILED'
+                """, Integer.class, report.getId()));
+        assertEquals("PENDING", repository.find(report.getId()).stream()
+                .filter(row -> row.company().corpCode().equals(listed.corpCode())).findFirst().orElseThrow().status());
+
+        jdbc.update("UPDATE news_report_dart_attachments SET status = 'DISABLED' WHERE report_id = ?", report.getId());
+        repository.recover(now, true);
+        assertEquals(12, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM news_report_dart_attachments
+                WHERE report_id = ? AND stock_code IS NULL AND status = 'DISABLED'
+                """, Integer.class, report.getId()));
+        assertEquals(List.of(listed), repository.pending(now).stream()
+                .filter(job -> job.reportId() == report.getId()).map(ReportDartRepository.Job::company).toList());
+
+        jdbc.update("DELETE FROM news_report_dart_attachments WHERE report_id = ? AND corp_code = ?",
+                report.getId(), listed.corpCode());
+        assertFalse(repository.reusableReports().contains(report.getId()), "Unlisted cached attachments do not re-enter recovery");
+        verifyNoInteractions(financials);
+    }
+
+    private void seedExtraCache(String corpCode, LocalDateTime cachedAt, LocalDateTime now) {
+        extraCacheCorpCodes.add(corpCode);
+        assertTrue(repository.claimCache(corpCode, "seed", now, now.plusMinutes(30)));
+        assertTrue(repository.saveCache(corpCode, "seed", data(), cachedAt));
     }
 
     private void seedCache(FinancialData snapshot, LocalDateTime cachedAt) {

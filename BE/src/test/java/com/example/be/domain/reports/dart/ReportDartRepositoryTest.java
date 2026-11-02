@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.dart;
 
+import com.example.be.domain.dart.model.DartModels.Company;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -16,6 +17,15 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ReportDartRepositoryTest {
+    @Test void unlistedCompanyCannotEnqueueNewWork() {
+        var jdbc = mock(JdbcTemplate.class);
+        var repository = new ReportDartRepository(jdbc, new ObjectMapper());
+
+        repository.enqueue(17L, new Company("99993210", "비상장 회사", ""), true, LocalDateTime.now());
+
+        verifyNoInteractions(jdbc);
+    }
+
     @Test void cachedSnapshotPreservesOriginalOffsetAndExactAmountsAcrossJsonPersistence() throws Exception {
         var jdbc = mock(JdbcTemplate.class);
         var mapper = new ObjectMapper();

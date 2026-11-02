@@ -113,6 +113,22 @@ test('direct filing citations are scoped to the selected issue and corrections k
   assert.match(direct, /기사 내용 전체나 계약 실행·매출 반영을 검증한 것은 아닙니다/)
 })
 
+test('filing details start collapsed with a count and retain disclosure evidence for expansion', () => {
+  const rows = [entry().filingRows[0], { filing: filing('20260814009999', true), roles: ['RECENT'],
+    relevance: 'COMPANY_REFERENCE', sourceFindingIds: [] }]
+  const html = renderToStaticMarkup(createElement(Table, { rows, companyName: samsung.corpName }))
+  assert.match(html, /^<details class="report-dart-filing-section" aria-label="삼성전자 공시 상세"><summary>공시 상세 · 2건<\/summary>/)
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:[\s=>])/)
+  assert.match(html, /공시 상세 표 가로 스크롤/)
+  assert.match(html, /접수번호 20260814001234/)
+  assert.match(html, /접수번호 20260814009999/)
+  assert.match(html, /<\/details>$/)
+
+  const empty = renderToStaticMarkup(createElement(Table, { rows: [], companyName: samsung.corpName }))
+  assert.match(empty, /<summary>공시 상세 · 0건<\/summary>/)
+  assert.match(empty, /저장된 공시 자료가 없습니다/)
+})
+
 test('refreshing the report hides cached removed companies and strips direct citations from removed findings', () => {
   const report = { id: 17, reportScope: 'RUN', dartCompanies: [samsung], findings: [{ id: 2 }] }
   const html = renderReport(report, [entry(), entry(hynix)])

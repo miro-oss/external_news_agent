@@ -58,6 +58,20 @@ class ReportDartPersistenceTest {
         verifyNoInteractions(repository);
     }
 
+    @Test void unlistedHistoricalSelectionsCannotEnqueueRetryOrClaimFinancialWork() {
+        var unlisted = new com.example.be.domain.dart.model.DartModels.Company("99999001", "비상장기업", "");
+        for (var report : java.util.List.of(report(ReportScope.RUN, unlisted),
+                topicWeekly(unlisted, com.example.be.domain.reports.entity.ReportStatus.GENERATED))) {
+            when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+            when(reports.findById(17L)).thenReturn(Optional.of(report));
+
+            persistence.enqueue(17L);
+            persistence.retry(17L);
+            assertFalse(persistence.claim(new ReportDartRepository.Job(17L, unlisted, 0), "unlisted"));
+        }
+        verifyNoInteractions(repository);
+    }
+
     @Test void enqueueCopiesExpiredCompanySnapshotEvenWhenProviderIsDisabled() {
         when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
         when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(

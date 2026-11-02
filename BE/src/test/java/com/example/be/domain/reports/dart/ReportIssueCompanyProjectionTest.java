@@ -2,6 +2,7 @@ package com.example.be.domain.reports.dart;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.dart.model.DartModels.Quarter;
@@ -86,6 +87,34 @@ class ReportIssueCompanyProjectionTest {
         assertTrue(entry.issueLinks().isEmpty());
         assertEquals(3, entry.filingRows().size());
         assertTrue(entry.filingRows().stream().allMatch(row -> row.relevance().equals("COMPANY_REFERENCE")));
+    }
+
+    @Test void mixedLegacySnapshotsExposeOnlyListedCompaniesAndTheirStoredEvidence() {
+        var unlisted = new Company("99999001", "비상장기업", "");
+        var listed = new Company("99999002", "신규상장기업", "0068Y0");
+        var beforeListing = new Company(listed.corpCode(), listed.corpName(), "");
+        var snapshot = new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION, OffsetDateTime.now(),
+                List.of(frozenLink(unlisted, 1), frozenLink(beforeListing, 4), frozenLink(SAMSUNG, 2), frozenLink(listed, 3)));
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.DAILY).reportStatus(ReportStatus.GENERATED)
+                .reportIssueCompanySnapshot(snapshot).build();
+
+        assertTrue(snapshot.valid());
+        assertEquals(List.of(SAMSUNG, listed), ReportDartEligibility.companies(report));
+        assertTrue(ReportIssueCompanyProjection.storedLinks(report, unlisted.corpCode()).isEmpty());
+        assertEquals(1, ReportIssueCompanyProjection.storedLinks(report, SAMSUNG.corpCode()).size());
+        assertEquals(List.of(SAMSUNG, listed), ReportIssueCompanyProjection.companies(report,
+                view(List.of(finding(1), finding(2), finding(3)), Set.of())));
+        assertEquals(4, snapshot.links().size(), "read projection does not rewrite historical input");
+    }
+
+    @Test void legacyUnlistedAttachmentsAreExcludedEvenWithVisibleEvidenceOrExplicitSelection() {
+        var unlisted = new Company("99999001", "비상장기업", "");
+        var entry = new CompanyAttachment(unlisted, "READY", "완료", financials(), List.of(link(1)), List.of());
+
+        assertTrue(ReportIssueCompanyProjection.project(report(ReportScope.RUN, unlisted),
+                view(List.of(finding(1)), Set.of()), List.of(entry)).isEmpty());
+        assertTrue(ReportIssueCompanyProjection.project(topicWeekly(unlisted, ReportStatus.GENERATED),
+                null, List.of(entry)).isEmpty());
     }
 
     private CompanyAttachment attachment(List<IssueLink> links) {

@@ -1,14 +1,13 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Audience;
-import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.reports.insight.ReportInsightBriefing;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.web.util.HtmlUtils;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Short, shared reading content. Prose is selected whole by the report projection, never clipped here. */
 final class NotificationBriefingSection {
@@ -62,10 +61,7 @@ final class NotificationBriefingSection {
                 .filter(finding -> finding.getArticle() != null)
                 .map(finding -> finding.getArticle().getTitle()).filter(NotificationBriefingSection::shortTitle)
                 .distinct().limit(2).toList();
-        var allowed = findings.stream().map(Finding::getId).collect(Collectors.toSet());
-        return content.structuredContent().importantEvents().stream()
-                .filter(event -> !event.sourceFindingIds().isEmpty() && allowed.containsAll(event.sourceFindingIds()))
-                .map(event -> event.title()).filter(NotificationBriefingSection::shortTitle).distinct().limit(2).toList();
+        return ReportBriefing.titles(view, 2);
     }
 
     private static boolean shortTitle(String value) {

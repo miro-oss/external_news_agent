@@ -79,7 +79,7 @@ class M3KeywordRenderingTest {
                 new ReportKeywordDTO.Item("OMITTED4-전력", 6, 60.0, List.of()),
                 new ReportKeywordDTO.Item("OMITTED5-냉각", 5, 50.0, List.of()),
                 new ReportKeywordDTO.Item("OMITTED6-공급망", 4, 40.0, List.of()));
-        for (String rule : List.of("report-keywords.v1", "report-keywords.recovered-selected.v1")) {
+        for (String rule : List.of("report-keywords.v1", "report-keywords.recovered-selected.v1", "report-keywords.selected.v1")) {
             var stats = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, rule,
                     OffsetDateTime.parse("2026-11-02T09:00:00+09:00"), "해당 실행 수집 기준", 10, items, 4);
             String emailText = Jsoup.parse(renderEmail(stats)).text();
@@ -94,7 +94,7 @@ class M3KeywordRenderingTest {
                     assertFalse(compact.contains("OMITTED6"));
                     assertTrue(compact.contains("상위3개표시·나머지등록키워드7개생략"));
                     assertFalse(compact.contains("첨부PDF에는"));
-                    assertTrue(compact.contains(rule.contains("recovered-selected")
+                    assertTrue(compact.contains(rule.contains("selected")
                             ? "9건/보고서포함10건·90%" : "9건/전체10건·90%"));
                 }
             }
