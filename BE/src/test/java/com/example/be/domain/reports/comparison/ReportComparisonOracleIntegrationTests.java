@@ -32,6 +32,7 @@ class ReportComparisonOracleIntegrationTests {
     @Autowired NewsReportRepository reports;
     @Autowired ReportComparisonRepository comparisons;
     @Autowired ReportComparisonPersistence persistence;
+    @Autowired com.example.be.domain.collection.repository.CollectionRunRepository runs;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired jakarta.persistence.EntityManager em;
@@ -73,8 +74,8 @@ class ReportComparisonOracleIntegrationTests {
         assertTrue(comparisons.findInput(report.getId()).isEmpty());
     }
 
-    @Test void baselineUsesVisibleCompletedPriorDateAndNeverMovesAfterEnqueue() {
-        var baseline = report(date.minusDays(3), ReportStatus.GENERATED, snapshot(side(1, 10, "과거")));
+    @Test void baselineWaitsForPreviousDayAndNeverSkipsToOlderCompletedReport() {
+        report(date.minusDays(3), ReportStatus.GENERATED, snapshot(side(1, 10, "과거")));
         var hidden = report(date.minusDays(2), ReportStatus.GENERATED, snapshot(side(1, 20, "숨긴 과거")));
         new TransactionTemplate(transactionManager).executeWithoutResult(transaction ->
                 reports.findByIdForUpdate(hidden.getId()).orElseThrow().hide(LocalDateTime.now()));
@@ -82,13 +83,78 @@ class ReportComparisonOracleIntegrationTests {
         var current = report(date, ReportStatus.GENERATED, snapshot(side(1, 40, "현재")));
         assertTrue(comparisons.missingJobs().contains(current.getId()));
         persistence.enqueue(current.getId());
-        var job = comparisons.find(current.getId()).orElseThrow();
-        assertEquals(baseline.getId(), job.result().baseReportId());
-        assertEquals(date.minusDays(3), job.work().baseReportDate());
+        assertTrue(comparisons.find(current.getId()).isEmpty());
+        assertTrue(comparisons.missingJobs().contains(current.getId()));
         jdbc.update("UPDATE news_reports SET report_status = 'FALLBACK' WHERE id = ?", pending.getId());
         persistence.enqueue(current.getId());
-        assertEquals(baseline.getId(), comparisons.find(current.getId()).orElseThrow().result().baseReportId());
+        var job = comparisons.find(current.getId()).orElseThrow();
+        assertEquals(pending.getId(), job.result().baseReportId());
+        assertEquals(date.minusDays(1), job.work().baseReportDate());
+        persistence.enqueue(current.getId());
+        assertEquals(pending.getId(), comparisons.find(current.getId()).orElseThrow().result().baseReportId());
         assertEquals(64, jdbc.queryForObject("SELECT input_hash FROM news_report_comparisons WHERE report_id = ?", String.class, current.getId()).length());
+    }
+
+    @Test void missingJobsPagesPastPendingBaselinesWithoutChangingTheirExactPredecessors() {
+        var waiting = new ArrayList<NewsReport>();
+        var predecessors = new ArrayList<NewsReport>();
+        for (int index = 0; index < 12; index++) {
+            var start = date.plusDays(index * 2L);
+            predecessors.add(report(start, ReportStatus.PENDING, snapshot(side(1, 10, "생성 중"))));
+            waiting.add(report(start.plusDays(1), ReportStatus.GENERATED, snapshot(side(1, 20, "현재"))));
+        }
+        var baseline = report(date.plusDays(40), ReportStatus.GENERATED, snapshot(side(1, 10, "완료 기준")));
+        var eligible = report(date.plusDays(41), ReportStatus.GENERATED, snapshot(side(1, 20, "완료 비교")));
+
+        var first = comparisons.missingJobs(predecessors.getFirst().getId() - 1);
+        assertEquals(waiting.subList(0, 10).stream().map(NewsReport::getId).toList(), first);
+        first.forEach(persistence::enqueue);
+        var second = comparisons.missingJobs(first.getLast());
+        assertEquals(List.of(waiting.get(10).getId(), waiting.get(11).getId(), baseline.getId(), eligible.getId()), second);
+        second.forEach(persistence::enqueue);
+
+        var queued = comparisons.find(eligible.getId()).orElseThrow();
+        assertEquals(ReportChanges.Status.PENDING, queued.status());
+        assertEquals(baseline.getId(), queued.result().baseReportId());
+        assertTrue(waiting.stream().allMatch(value -> comparisons.find(value.getId()).isEmpty()));
+        jdbc.update("UPDATE news_reports SET report_status = 'FALLBACK' WHERE id = ?", predecessors.getFirst().getId());
+        persistence.enqueue(waiting.getFirst().getId());
+        assertEquals(predecessors.getFirst().getId(), comparisons.find(waiting.getFirst().getId()).orElseThrow().result().baseReportId());
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void runReservationFlushesReportBeforeJdbcComparisonInputInsert() {
+        String suffix = java.util.UUID.randomUUID().toString();
+        var source = com.example.be.domain.sources.entity.Source.builder()
+                .sourceKind(com.example.be.domain.sources.entity.Source.KIND_FEED).name("capture source " + suffix)
+                .urlTemplate("https://example.com/capture/" + suffix).language("ko").active(true).build();
+        var topic = com.example.be.domain.topics.entity.Topic.builder().name("capture topic " + suffix)
+                .queryText("HBM").requiredKeywords(List.of("HBM")).batchSize(10).intervalMinutes(60).active(true).build();
+        em.persist(source); em.persist(topic); em.flush();
+        var run = execution(topic, source, LocalDateTime.of(2198, 7, 18, 10, 0), true);
+        em.flush();
+        var observations = org.mockito.Mockito.mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class);
+        org.mockito.Mockito.when(observations.existsByRunIdAndChangeTypeIn(run.getId(),
+                List.of(com.example.be.domain.collection.entity.ChangeType.NEW))).thenReturn(true);
+        var coverage = org.mockito.Mockito.mock(com.example.be.domain.reports.coverage.ReportCoverageCapture.class);
+        org.mockito.Mockito.when(coverage.captureRun(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.example.be.domain.reports.coverage.ReportCoverageSnapshot(
+                        com.example.be.domain.reports.coverage.ReportCoverageSnapshot.RULE_VERSION, null,
+                        "실행 기준", List.of(), List.of()));
+        var capture = new ReportComparisonCapture(comparisons, runs,
+                org.mockito.Mockito.mock(com.example.be.domain.analysis.repository.FindingRepository.class));
+        var service = new com.example.be.domain.reports.service.ReportPersistenceService(runs, reports,
+                org.mockito.Mockito.mock(com.example.be.domain.notifications.service.ReportNotificationAutomationService.class),
+                observations, org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class),
+                org.mockito.Mockito.mock(com.example.be.domain.companyinterest.CompanyInterestSelection.class), coverage,
+                org.mockito.Mockito.mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), capture);
+
+        var reservation = service.reserve(run.getId(), run.getStartedAt().plusMinutes(1));
+
+        assertTrue(reservation.owner());
+        assertTrue(comparisons.findInput(reservation.reportId()).isPresent(),
+                "comparison input must be written in the reservation transaction, not lost to the report FK");
     }
 
     @Test void concurrentClaimsHaveOneOwnerAndInterruptedCallsAreNeverRepeatedOrPublishedLate() throws Exception {

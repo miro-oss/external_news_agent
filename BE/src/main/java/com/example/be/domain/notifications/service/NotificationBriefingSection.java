@@ -1,10 +1,15 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.reports.insight.ReportInsightBriefing;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.web.util.HtmlUtils;
+
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Short, shared reading content. Prose is selected whole by the report projection, never clipped here. */
 final class NotificationBriefingSection {
@@ -26,27 +31,15 @@ final class NotificationBriefingSection {
     static void emailInsight(StringBuilder html, ReportInsightDTO.AudienceInsight insight,
                              ReportEventFeedbackProjection.View view) {
         if (insight == null) return;
-        var brief = ReportInsightBriefing.from(insight, view.findings(), view.excludedEvidenceFindingIds());
+        var brief = insightBrief(insight, view);
         html.append("<section style=\"margin:24px 0\"><h2 style=\"margin:0 0 8px;color:#1b64da;font-size:16px\">")
                 .append(escape("관점 인사이트 · " + audience(insight.audience())))
                 .append("</h2><p style=\"color:#636c78;font-size:12px\">")
                 .append(escape(NotificationInsightBrief.AI_NOTICE)).append("</p>");
-        if (!brief.facts().isEmpty()) {
-            label(html, "원문에서 확인한 내용");
-            for (var fact : brief.facts()) {
-                String type = switch (fact.claimType()) {
-                    case "FORECAST" -> "계획·전망";
-                    case "OPINION" -> "의견·발언";
-                    default -> "확인된 사실";
-                };
-                field(html, type + (fact.attributedTo() == null ? "" : " · " + fact.attributedTo()), fact.text());
-            }
-        }
         if (!brief.overview().isEmpty()) {
             label(html, "업무상 의미");
             for (var item : brief.overview()) {
                 paragraph(html, item.text());
-                field(html, "해석의 조건", item.assumption());
             }
         }
         if (!brief.watchItems().isEmpty()) {
@@ -54,14 +47,61 @@ final class NotificationBriefingSection {
             for (var item : brief.watchItems()) {
                 paragraph(html, item.topic());
                 field(html, "확인할 지표", item.indicator());
-                field(html, "판단 기준", item.trigger());
             }
         }
-        if (brief.overview().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
-            paragraph(html, NotificationInsightBrief.UNAVAILABLE);
-        if (brief.omittedItemCount() > 0)
-            field(html, "상세 안내", "긴 내용과 나머지 " + brief.omittedItemCount() + "개 항목은 첨부 PDF의 관점 분석에서 확인하세요.");
+        if (brief.overview().isEmpty() && brief.watchItems().isEmpty())
+            paragraph(html, emptyInsightMessage(brief));
         html.append("</section>");
+    }
+
+    /** Select delivery titles independently of summary length, preserving the final evidence boundary. */
+    static List<String> reportTitles(ReportEventFeedbackProjection.View view) {
+        var content = view.readingContent();
+        var findings = view.findings().stream()
+                .filter(finding -> !view.excludedEvidenceFindingIds().contains(finding.getId())).toList();
+        if (content.structuredContent() == null) return findings.stream()
+                .filter(finding -> finding.getArticle() != null)
+                .map(finding -> NotificationRenderer.prose(finding.getArticle().getTitle()))
+                .filter(NotificationBriefingSection::shortTitle)
+                .distinct().limit(2).toList();
+        return ReportBriefing.titles(view, 2, NotificationRenderer::prose);
+    }
+
+    static String emptyReportMessage(ReportEventFeedbackProjection.View view) {
+        var content = view.readingContent();
+        Set<Long> visible = view.findings().stream().map(finding -> finding.getId()).collect(Collectors.toSet());
+        // Body cards can still use a shared source retained for another event. Headline eligibility stays stricter.
+        boolean hasBody = content.structuredContent() == null
+                ? content.markdownBody() != null && !content.markdownBody().isBlank()
+                : content.structuredContent().importantEvents().stream().anyMatch(event ->
+                        supported(event.sourceFindingIds(), visible))
+                    || content.structuredContent().watchItems().stream().anyMatch(watch ->
+                        supported(watch.sourceFindingIds(), visible));
+        return hasBody ? "짧게 표시할 핵심 제목이 없습니다." : "이번 수집에서 새롭게 정리할 주요 내용이 없습니다.";
+    }
+
+    private static boolean supported(List<Long> refs, Set<Long> visible) {
+        return refs != null && !refs.isEmpty() && refs.stream().allMatch(id -> id != null && visible.contains(id));
+    }
+
+    static String emptyInsightMessage(ReportInsightBriefing brief) {
+        return brief.omittedItemCount() > 0 ? "전체 관점 분석은 보고서 화면에서 확인하세요."
+                : NotificationInsightBrief.UNAVAILABLE;
+    }
+
+    private static boolean shortTitle(String value) {
+        return value != null && !value.isBlank() && value.codePointCount(0, value.length()) <= 100;
+    }
+
+    /** Validate complete source-bound items before selecting delivery-only fields. */
+    static ReportInsightBriefing insightBrief(ReportInsightDTO.AudienceInsight insight,
+                                              ReportEventFeedbackProjection.View view) {
+        var brief = ReportInsightBriefing.from(insight, view.findings(), view.excludedEvidenceFindingIds());
+        var overview = brief.overview().stream().limit(1).toList();
+        var watches = brief.watchItems().stream().limit(1).toList();
+        return new ReportInsightBriefing(brief.version(), List.of(), overview, watches,
+                brief.omittedItemCount() + brief.overview().size() - overview.size()
+                        + brief.watchItems().size() - watches.size());
     }
 
     static void label(StringBuilder html, String value) {

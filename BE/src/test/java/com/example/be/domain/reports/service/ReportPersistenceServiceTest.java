@@ -160,7 +160,7 @@ class ReportPersistenceServiceTest {
         assertFalse(reservation.owner());
         assertNull(reservation.reportId());
         assertNull(run.getReportId());
-        verify(reportRepository, never()).save(any());
+        verify(reportRepository, never()).saveAndFlush(any());
         verifyNoInteractions(notificationAutomation);
     }
 
@@ -180,7 +180,7 @@ class ReportPersistenceServiceTest {
 
         assertFalse(reservation.owner());
         assertNull(reservation.reportId());
-        verify(reportRepository, never()).save(any());
+        verify(reportRepository, never()).saveAndFlush(any());
         verifyNoInteractions(notificationAutomation);
     }
 
@@ -221,7 +221,7 @@ class ReportPersistenceServiceTest {
 
         assertNull(service.reserve(42L, LocalDateTime.now()).reportId());
 
-        verify(reportRepository, never()).save(any());
+        verify(reportRepository, never()).saveAndFlush(any());
     }
 
     private CollectionRun runWithItem(RunItemStatus status) {
@@ -232,7 +232,7 @@ class ReportPersistenceServiceTest {
 
     private void prepareReservation(CollectionRun run) {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
-        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
+        when(reportRepository.saveAndFlush(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
         when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
     }
 
@@ -325,7 +325,7 @@ class ReportPersistenceServiceTest {
         LocalDateTime generatedAt = LocalDateTime.of(2026, 8, 21, 9, 0);
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.findByRunId(42L)).thenReturn(Optional.empty());
-        when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
+        when(reportRepository.saveAndFlush(any())).thenReturn(NewsReport.builder().id(17L).reportStatus(ReportStatus.PENDING).build());
         when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
 
         ReportPersistenceService.Reservation reservation = service.reserve(42L, generatedAt);
@@ -333,7 +333,7 @@ class ReportPersistenceServiceTest {
         assertEquals(17L, reservation.reportId());
         assertTrue(reservation.owner());
         ArgumentCaptor<NewsReport> captor = ArgumentCaptor.forClass(NewsReport.class);
-        verify(reportRepository).save(captor.capture());
+        verify(reportRepository).saveAndFlush(captor.capture());
         assertEquals(ReportStatus.PENDING, captor.getValue().getReportStatus());
         verify(run).attachReport(17L);
     }
@@ -422,7 +422,7 @@ class ReportPersistenceServiceTest {
 
         assertEquals(17L, reservation.reportId());
         assertFalse(reservation.owner());
-        verify(reportRepository, never()).save(any());
+        verify(reportRepository, never()).saveAndFlush(any());
         assertEquals(17L, run.getReportId());
         verifyNoInteractions(observationRepository);
     }

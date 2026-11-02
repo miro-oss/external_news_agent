@@ -3,7 +3,7 @@ import test from 'node:test'
 import { setImmediate } from 'node:timers/promises'
 import { ApiError } from '../src/api/client.ts'
 import { loadReportEventFeedback, submitReportEventFeedback } from '../src/api/reportEventFeedback.ts'
-import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError } from '../src/features/reports/eventFeedbackState.ts'
+import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError, reportFeedbackHistoryHash, reportFeedbackHistoryId, submittedReportEventsRemain } from '../src/features/reports/eventFeedbackState.ts'
 import { nextFeedbackPoll } from '../src/features/feedback/feedbackState.ts'
 import { startReportEventFeedbackPolling } from '../src/features/reports/reportEventFeedbackPolling.ts'
 
@@ -13,6 +13,24 @@ const draft = { eventKey: target.eventKey, category: 'WRONG_CLUSTER', comment: '
 const saved = { ...draft, id: 1, status: 'PENDING', verdict: null, diagnosis: null, createdAt: '2026-09-29T15:00:00+09:00' }
 const context = { reportId: 17, events: [target], feedback: [] }
 const success = (result, status = 200) => new Response(JSON.stringify({ isSuccess: true, code: `COMMON${status}`, message: '성공입니다.', result }), { status })
+
+test('accepted event stays excluded if feedback context refreshes before a failed report refresh', () => {
+  const accepted = [target]
+  const refreshedContext = { ...context, events: [], feedback: [saved] }
+  assert.equal(matchReportFeedbackEvent(17, event, 0, refreshedContext), null)
+  assert.equal(submittedReportEventsRemain([event], accepted), true, 'old report must stay hidden despite the refreshed context')
+  const survivor = { ...event, title: '다른 이슈', sourceFindingIds: [504] }
+  assert.equal(submittedReportEventsRemain([survivor, event], accepted), true, 'position changes cannot restore accepted feedback')
+  assert.equal(submittedReportEventsRemain([survivor], accepted), false, 'the new server report releases the pending view')
+  assert.equal(submittedReportEventsRemain([event], []), false)
+})
+
+test('feedback history link selects only a valid report and is independent of interest criteria', () => {
+  assert.equal(reportFeedbackHistoryHash(17), '#/company-interests?reportId=17')
+  assert.equal(reportFeedbackHistoryId('#/company-interests?reportId=17&criterionId=2'), 17)
+  for (const value of ['', '0', '-1', '1.5', 'NaN', '9007199254740992'])
+    assert.equal(reportFeedbackHistoryId(`#/company-interests?reportId=${value}`), null)
+})
 
 test('event binding requires the report, position, exact text and every source finding, including repeated-article findings', () => {
   assert.equal(matchReportFeedbackEvent(17, event, 0, context), target)

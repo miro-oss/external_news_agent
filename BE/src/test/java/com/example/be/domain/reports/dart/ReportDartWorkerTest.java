@@ -3,6 +3,7 @@ package com.example.be.domain.reports.dart;
 import com.example.be.domain.dart.financial.DartFinancialService;
 import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.comparison.ReportCompleted;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +28,31 @@ class ReportDartWorkerTest {
         doThrow(new IllegalStateException("unavailable")).when(persistence).enqueue(18L);
         assertDoesNotThrow(() -> worker.completed(new ReportCompleted(18L)));
         verifyNoInteractions(financials);
+    }
+
+    @Test void unlistedAndMalformedLegacyJobsNeverClaimWorkOrRefreshCompanyData() {
+        for (var stockCode : new String[] {null, "", " ", "12345", "1234567", "0068y0"}) {
+            var company = new Company("99993210", "비상장 또는 잘못된 종목코드", stockCode);
+            worker.process(new ReportDartRepository.Job(17L, company, 0));
+            worker.refresh(company);
+        }
+        verifyNoInteractions(persistence, financials);
+    }
+
+    @Test void alphanumericListedCompanyStillFetchesAndRefreshes() {
+        var company = new Company("99993210", "영숫자 종목코드 회사", "0068Y0");
+        var listedJob = new ReportDartRepository.Job(17L, company, 0);
+        when(persistence.claim(eq(listedJob), anyString())).thenReturn(true);
+        when(persistence.cache(eq(company.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(null, true));
+        when(persistence.refreshAccess(eq(company.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(null, true));
+        when(financials.fetch(company)).thenReturn(data());
+
+        worker.process(listedJob);
+        worker.refresh(company);
+
+        verify(financials, times(2)).fetch(company);
+        verify(persistence).complete(eq(listedJob), anyString(), eq(data()), eq(true));
+        verify(persistence).refreshCache(eq(company.corpCode()), anyString(), eq(data()));
     }
 
     @Test void pollHydratesCachedReportsBeforeDisabledOrPausedProviderStopsExternalWork() {

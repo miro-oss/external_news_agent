@@ -59,4 +59,35 @@ class ReportComparisonWorkerTest {
         doThrow(new IllegalStateException("comparison store unavailable")).when(persistence).enqueue(101);
         assertDoesNotThrow(() -> worker.completed(new ReportCompleted(101)));
     }
+
+    @Test void moreThanOnePageWaitingForBaselinesCannotStarveLaterWorkAndAreRetriedOnWrap() {
+        var missing = java.util.stream.LongStream.rangeClosed(1, 13).boxed().toList();
+        var queued = new java.util.concurrent.atomic.AtomicBoolean();
+        var completed = new java.util.concurrent.atomic.AtomicBoolean();
+        when(repository.missingJobs(anyLong())).thenAnswer(call -> missing.stream()
+                .filter(id -> id > (long) call.getArgument(0) && (id != 13L || !completed.get()))
+                .limit(10).toList());
+        // The first twelve reports cannot register a job while their exact baseline is PENDING.
+        doAnswer(call -> { if ((long) call.getArgument(0) == 13L) queued.set(true); return null; })
+                .when(persistence).enqueue(anyLong());
+        when(repository.pending()).thenAnswer(call -> queued.get() ? List.of(13L) : List.of());
+        when(persistence.claim(13L)).thenReturn(Optional.of(job(13L)));
+        when(analyzer.analyze(eq(13L), anyLong(), anyList())).thenReturn(List.of());
+        doAnswer(call -> { completed.set(true); queued.set(false); return null; })
+                .when(persistence).finish(eq(13L), any());
+
+        worker.poll();
+        verify(persistence, never()).enqueue(13L);
+        worker.poll();
+
+        verify(persistence).enqueue(11L);
+        verify(persistence).enqueue(12L);
+        verify(persistence).finish(eq(13L), argThat(result -> result.status() == ReportChanges.Status.READY));
+        verify(persistence, never()).claim(1L);
+        worker.poll(); // Reaching the end resets the cursor without manufacturing baseline results.
+        worker.poll();
+        verify(persistence, times(2)).enqueue(1L);
+        verify(persistence, times(1)).enqueue(13L);
+        verify(analyzer, times(1)).analyze(eq(13L), anyLong(), anyList());
+    }
 }

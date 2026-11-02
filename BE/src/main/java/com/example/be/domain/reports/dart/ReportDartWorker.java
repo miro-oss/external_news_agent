@@ -63,6 +63,7 @@ public class ReportDartWorker {
     }
 
     void process(ReportDartRepository.Job job) {
+        if (!ReportDartEligibility.isListed(job.company())) return;
         String token = UUID.randomUUID().toString();
         try {
             if (!persistence.claim(job, token)) return;
@@ -88,6 +89,7 @@ public class ReportDartWorker {
     }
 
     void refresh(Company company) {
+        if (!ReportDartEligibility.isListed(company)) return;
         String token = UUID.randomUUID().toString();
         try {
             var cache = persistence.refreshAccess(company.corpCode(), token);

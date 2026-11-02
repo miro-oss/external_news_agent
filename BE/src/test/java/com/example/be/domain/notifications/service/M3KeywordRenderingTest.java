@@ -48,7 +48,8 @@ class M3KeywordRenderingTest {
         assertTrue(dom.select("script,img").isEmpty());
         assertTrue(dom.text().contains("8건 / 전체 10건 · 80%"));
         assertTrue(dom.text().contains("6건 / 전체 10건 · 60%"));
-        assertTrue(dom.text().contains("0건 / 전체 10건 · 0%"));
+        assertFalse(dom.text().contains("0건 / 전체 10건 · 0%"));
+        assertTrue(dom.text().contains("상위 3개 표시 · 나머지 등록 키워드 1개 생략"));
         assertTrue(dom.text().contains("함께 나온 키워드 · 패키징 5건"));
         assertTrue(dom.text().contains("비중 합이 100%를 넘을 수 있습니다"));
         assertTrue(html.contains("width=\"80%\""));
@@ -70,21 +71,68 @@ class M3KeywordRenderingTest {
         }
     }
 
+    @Test void bothFormatsShowOnlyTopThreeAndCountAllOmittedKeywordsForEachBasis() throws Exception {
+        var items = List.of(
+                new ReportKeywordDTO.Item("TOP1-HBM", 9, 90.0, List.of()),
+                new ReportKeywordDTO.Item("TOP2-패키징", 8, 80.0, List.of()),
+                new ReportKeywordDTO.Item("TOP3-장비", 7, 70.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED4-전력", 6, 60.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED5-냉각", 5, 50.0, List.of()),
+                new ReportKeywordDTO.Item("OMITTED6-공급망", 4, 40.0, List.of()));
+        for (String rule : List.of("report-keywords.v1", "report-keywords.recovered-selected.v1", "report-keywords.selected.v1")) {
+            var stats = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, rule,
+                    OffsetDateTime.parse("2026-11-02T09:00:00+09:00"), "해당 실행 수집 기준", 10, items, 4);
+            String emailText = Jsoup.parse(renderEmail(stats)).text();
+            try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, stats).bytes())) {
+                for (String text : List.of(emailText, new PDFTextStripper().getText(document))) {
+                    String compact = text.replaceAll("\\s", "");
+                    assertTrue(compact.contains("TOP1-HBM"));
+                    assertTrue(compact.contains("TOP2-패키징"));
+                    assertTrue(compact.contains("TOP3-장비"));
+                    assertFalse(compact.contains("OMITTED4"));
+                    assertFalse(compact.contains("OMITTED5"));
+                    assertFalse(compact.contains("OMITTED6"));
+                    assertTrue(compact.contains("상위3개표시·나머지등록키워드7개생략"));
+                    assertFalse(compact.contains("첨부PDF에는"));
+                    assertTrue(compact.contains(rule.contains("selected")
+                            ? "9건/보고서포함10건·90%" : "9건/전체10건·90%"));
+                }
+            }
+        }
+    }
+
     @Test void zeroDenominatorAndUnavailableAreNotPresentedAsZeroPercent() throws Exception {
         var empty = available(0, List.of(new ReportKeywordDTO.Item("HBM", 0, null, List.of())));
         String html = renderEmail(empty);
-        assertTrue(html.contains("비중 계산 안 함"));
+        assertFalse(html.contains(NotificationKeywordSection.TITLE));
         assertFalse(Jsoup.parse(html).text().contains("· 0%"));
         assertFalse(html.contains("bgcolor=\"#1b64da\""));
         for (String reason : List.of("NO_SNAPSHOT", "INCOMPLETE_SOURCE", "MISSING_COLLECTION_CONTEXT",
                 "INVALID_SNAPSHOT", "COMPANY_SCOPE_UNVERIFIED", "PERSONALIZATION_UNVERIFIED")) {
             var unavailable = new ReportKeywordDTO.View(ReportKeywordDTO.Status.UNAVAILABLE, reason, null, null,
                     "해당 실행 수집 기준", null, List.of(), 0);
-            String notice = NotificationKeywordSection.unavailable(reason);
-            assertTrue(renderEmail(unavailable).contains(notice));
+            assertFalse(renderEmail(unavailable).contains(NotificationKeywordSection.TITLE));
             assertFalse(renderEmail(unavailable).contains("전체 0건"));
             try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, unavailable).bytes())) {
-                assertTrue(new PDFTextStripper().getText(document).replaceAll("\\s", "").contains(notice.replaceAll("\\s", "")));
+                assertFalse(new PDFTextStripper().getText(document).contains(NotificationKeywordSection.TITLE));
+            }
+        }
+    }
+
+    @Test void recoveredSelectedIssuesUseAnExplicitReportOnlyBasisInBothFormats() throws Exception {
+        var stats = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null,
+                "report-keywords.recovered-selected.v1", OffsetDateTime.parse("2026-11-02T09:00:00+09:00"),
+                "2026-10-26 ~ 2026-11-01 수집 기준 (한국시간)", 4,
+                List.of(new ReportKeywordDTO.Item("HBM", 3, 75.0, List.of())), 0);
+        String emailText = Jsoup.parse(renderEmail(stats)).text();
+        try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, stats).bytes())) {
+            for (String text : List.of(emailText, new PDFTextStripper().getText(document))) {
+                String compact = text.replaceAll("\\s", "");
+                assertTrue(compact.contains("보고서포함이슈4건"));
+                assertTrue(compact.contains("이보고서에포함된유효이슈기준입니다."));
+                assertTrue(compact.contains("3건/보고서포함4건·75%"));
+                assertFalse(compact.contains("상위선정전"));
+                assertFalse(compact.contains("3건/전체4건"));
             }
         }
     }
@@ -94,6 +142,16 @@ class M3KeywordRenderingTest {
         var withKeywords = email.render(report, channel, view, null, null, Map.of(), null, null, available(10, List.of()));
         var without = email.render(report, channel, view, null, null, Map.of(), null, null, null);
         assertEquals(without.chunks(), withKeywords.chunks());
+    }
+
+    @Test void noMatchedKeywordOmitsTheWholeSectionInBothFormats() throws Exception {
+        for (var stats : List.of(available(10, List.of()), available(10,
+                List.of(new ReportKeywordDTO.Item("HBM", 0, 0.0, List.of()))))) {
+            assertFalse(renderEmail(stats).contains(NotificationKeywordSection.TITLE));
+            try (var document = Loader.loadPDF(pdf.renderDetailed(report, view, null, null, null, stats).bytes())) {
+                assertFalse(new PDFTextStripper().getText(document).contains(NotificationKeywordSection.TITLE));
+            }
+        }
     }
 
     private String renderEmail(ReportKeywordDTO.View stats) {

@@ -134,11 +134,11 @@ public class ReportResDTO {
         @Schema(description = "최종 표시 근거에 연결된 짧은 브리핑. 저장 이슈 최대 3개·관찰 최대 2개, 긴 항목은 상세에 보존. includeFindings=false에도 반환")
         @Builder.Default
         private final ReportBriefing briefing = ReportBriefing.empty();
-        @Schema(description = "상위 선정 전 고유 이슈의 등록 키워드 비중·동시 등장 단어. includeFindings=false에도 반환. 당시 근거가 없거나 전체 후보 제외 기준을 확인할 수 없으면 UNAVAILABLE이며 숫자를 추정하지 않음")
+        @Schema(description = "상위 선정 전 고유 이슈의 등록 키워드 비중·동시 등장 단어. 명시적 과거 복원의 제한 집계는 ruleVersion=report-keywords.recovered-selected.v1 및 periodLabel로 보고서 포함 이슈 기준임을 표시. includeFindings=false에도 반환. 회사 기준 전체 범위 미검증은 실제 본문의 저장 근거만 report-keywords.selected.v1 및 본문에 포함된 이슈 기준으로 제한 집계. 그 외 근거 누락은 UNAVAILABLE이며 숫자를 추정하지 않음")
         private final ReportKeywordDTO.View keywordStats;
         @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
         private final List<ReportCollectionContext> collectionContexts;
-        @Schema(description = "공시·실적 대상의 고정 회사. RUN/주제 WEEKLY 명시 선택 회사와 신규 RUN·DAILY·WEEKLY 기사에서 확인한 회사이며 현재 유효 근거·제외 기준을 적용함. includeFindings와 관계없이 반환하며 과거 자동 연결은 소급하지 않음", requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "공시·실적 대상의 고정 상장 회사. 6자리 영숫자 종목코드가 없는 비상장 회사는 과거 연결도 제외. RUN/주제 WEEKLY 명시 선택 회사와 신규 RUN·DAILY·WEEKLY 기사에서 확인한 회사이며 현재 유효 근거·제외 기준을 적용함. includeFindings와 관계없이 반환하며 과거 자동 연결은 소급하지 않음", requiredMode = Schema.RequiredMode.REQUIRED)
         @Builder.Default
         private final List<Company> dartCompanies = List.of();
         @Schema(description = "RUN은 runId, DAILY/전체 WEEKLY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 주제별 WEEKLY는 저장된 분석 입력 기사의 관측만 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)

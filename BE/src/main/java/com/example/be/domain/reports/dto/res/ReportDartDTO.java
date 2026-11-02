@@ -11,7 +11,7 @@ import java.util.List;
 public final class ReportDartDTO {
     private ReportDartDTO() { }
 
-    @Schema(name = "ReportDartResponse", description = "명시 선택 회사와 신규 보고서 기사에서 확인하여 고정한 회사의 저장 공시·실적. 현재 표시 가능한 근거만 반환하며 과거 자동 연결은 소급하지 않음")
+    @Schema(name = "ReportDartResponse", description = "명시 선택 회사와 신규 보고서 기사에서 확인하여 고정한 상장 회사의 저장 공시·실적. 6자리 영숫자 종목코드가 없는 비상장 회사는 제외. 현재 표시 가능한 근거만 반환하며 과거 자동 연결은 소급하지 않음")
     public record Result(Long reportId, List<CompanyAttachment> companies) { }
 
     @Schema(name = "ReportDartCompanyAttachment")

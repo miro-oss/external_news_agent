@@ -540,7 +540,9 @@ class NotificationAutomationOracleIntegrationTests {
         assertEquals(1,outbox.deliveries(reserved.reportId()).size());
         assertEquals("PENDING",outbox.deliveries(reserved.reportId()).getFirst().status());
         var work=outbox.claim().stream().filter(w->w.reportId().equals(reserved.reportId())).findFirst().orElseThrow();
-        assertTrue(work.body().contains("저장된 보고서 요약"));
+        assertTrue(work.body().contains("테스트 요약"));
+        assertTrue(work.body().contains("핵심 브리핑"));
+        assertFalse(work.body().contains("저장된 보고서 요약"));
         assertTrue(outbox.destinationStillActive(work));
         outbox.finish(work,"EMAIL","SENT","fake-message-id",null,false);
         assertEquals(0,outbox.retryFailed(reserved.reportId()));

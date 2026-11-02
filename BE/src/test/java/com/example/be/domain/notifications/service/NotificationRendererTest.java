@@ -66,7 +66,10 @@ class NotificationRendererTest {
                 renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                         view(report, List.of(), false), "https://news.example/#/feedback?token=test").chunks().getFirst())) {
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("핵심 브리핑") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("보고서 전체 보기") < body.indexOf("회사 실적 · 공시"));
+            if (body.contains("이슈 피드백 · 내 수신 기준"))
+                assertTrue(body.indexOf("이슈 피드백 · 내 수신 기준") < body.indexOf("회사 실적 · 공시"));
             assertTrue(body.contains(reportUrl));
             assertEquals(1, org.jsoup.Jsoup.parse(body).select("p:contains(회사 실적 · 공시)").size());
         }
@@ -75,16 +78,15 @@ class NotificationRendererTest {
     @Test
     void topicWeeklyPreviewAndPersonalizedEmailIncludeRealStoredDartSummary() throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
-        var original = new ReportContent(List.of("공용 주간 핵심 요약"), List.of(), List.of(), List.of());
+        var original = StoredReportDartFixture.readingView().readingContent().structuredContent();
         report.recordStructuredContent(original);
         var stored = new StoredReportDartFixture();
         stored.ready(report);
         var actualRenderer = new NotificationRenderer(findingRepository, relevancePolicy, projection,
                 new NotificationDartSummary(stored.service()));
         org.springframework.test.util.ReflectionTestUtils.setField(actualRenderer, "publicBaseUrl", "https://news.example/");
-        String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst();
-        var personalContent = new ReportContent(List.of("수신자에게 허용된 요약"), List.of(), List.of(), List.of());
-        var personalView = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent("", personalContent), false);
+        var personalView = StoredReportDartFixture.readingView();
+        String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE), personalView, null).chunks().getFirst();
         String feedbackUrl = "https://news.example/#/feedback?token=test";
         String personal = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
                 personalView, feedbackUrl).chunks().getFirst();
@@ -92,14 +94,20 @@ class NotificationRendererTest {
         for (String body : List.of(preview, personal)) {
             var document = org.jsoup.Jsoup.parse(body);
             assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
-            assertTrue(body.indexOf("핵심 요약") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("핵심 브리핑") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("보고서 전체 보기") < body.indexOf("회사 실적 · 공시"));
+            if (body.contains("이슈 피드백 · 내 수신 기준"))
+                assertTrue(body.indexOf("이슈 피드백 · 내 수신 기준") < body.indexOf("회사 실적 · 공시"));
             assertEquals(1, document.select("h2:containsOwn(회사 실적 · 공시)").size());
-            assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+            assertTrue(document.text().contains("SK하이닉스 연결재무제표 · 단위: 억원 (KRW)"));
+            assertTrue(document.text().contains("2026년 2분기 1,234.57 -12.35"));
+            assertFalse(document.text().contains("확인된 기업"));
+            assertFalse(document.text().contains("첨부 PDF p."));
             assertTrue(document.select("a").eachAttr("href").contains(StoredReportDartFixture.FILING_URL));
             assertFalse(document.text().contains("이전 공시"));
         }
         assertFalse(preview.contains("공용 주간 핵심 요약"));
-        assertTrue(preview.contains("새롭게 정리할 주요 내용이 없습니다."));
+        assertTrue(preview.contains("SK하이닉스 실적 발표"));
         assertFalse(preview.contains(feedbackUrl));
         assertFalse(personal.contains("수신자에게 허용된 요약"));
         assertTrue(personal.contains(feedbackUrl));
@@ -188,21 +196,24 @@ class NotificationRendererTest {
                 .generatedAt(LocalDateTime.of(2026, 9, 4, 0, 5)).build();
         when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(List.of(finding()));
         for (ChannelType type : ChannelType.values()) {
-            assertTrue(renderer.render(daily, channel(type, 3500)).chunks().getFirst().contains("검증된 핵심 요약"));
+            String body = renderer.render(daily, channel(type, 3500)).chunks().getFirst();
+            if (type == ChannelType.EMAIL) assertTrue(body.contains("HBM 공급 계약 확대"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("검증된 핵심 요약"));
         }
         org.mockito.Mockito.verify(findingRepository, org.mockito.Mockito.never())
                 .findForReportByRunId(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void emailContainsOnlySummaryAndSourceLink() {
+    void legacyEmailContainsOnlyFindingTitleAndSourceLink() {
         NewsReport report = report("# 내부 보고서\n기사 전문을 그대로 싣지 말 것");
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding()));
 
         RenderedNotification rendered = renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE));
 
         String body = rendered.chunks().getFirst();
-        assertTrue(body.contains("검증된 핵심 요약"));
+        assertTrue(body.contains("HBM 공급 계약 확대"));
+        assertFalse(body.contains("검증된 핵심 요약"));
         assertTrue(body.contains("https://example.com/article"));
         assertFalse(body.contains("기사 전문을 그대로 싣지 말 것"));
         assertFalse(body.contains("원문 전체 내용"));
@@ -325,11 +336,13 @@ class NotificationRendererTest {
                 var cards = document.select("td.email-card").stream()
                         .filter(card -> !card.select("h2:containsOwn(첫 번째 사건), h2:containsOwn(두 번째 사건)").isEmpty()).toList();
                 assertEquals(2, cards.size());
+                assertFalse(document.text().contains("첫 확인 이유"));
+                assertFalse(document.text().contains("읽을 포인트"));
                 assertTrue(cards.getFirst().html().contains("https://example.com/first"));
                 assertFalse(cards.getFirst().html().contains("https://example.com/second"));
                 assertTrue(cards.getLast().html().contains("https://example.com/second"));
                 assertFalse(cards.getLast().html().contains("https://example.com/first"));
-                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용", "첫 확인 이유", "둘째 확인 이유", "읽을 포인트"))
+                for (String visible : List.of("첫 사건 주요 내용", "둘째 사건 주요 내용"))
                     assertTrue(document.text().contains(visible));
                 assertFalse(body.contains("저장된 보고서의 핵심 결론")); // Unbound executive summary is not relabeled as a linked brief.
                 continue;
@@ -385,14 +398,20 @@ class NotificationRendererTest {
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
             assertTrue(body.contains("유효 사건 내용"));
-            assertTrue(body.contains("유효 확인 주제"));
-            assertTrue(body.contains("유효 확인 이유"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("유효 확인 주제"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("유효 확인 이유"));
             assertTrue(body.contains("https://example.com/valid"));
             for (String unsupported : List.of("없는 ID 사건", "기사 ID 사건", "배열 위치 사건", "일부만 유효 사건",
                     "근거 없는 사건", "일부만 유효 확인", "기사 ID 확인", "근거 없는 확인", "표시 금지")) {
                 assertFalse(body.contains(unsupported), unsupported + " must be omitted");
             }
             assertEquals(type == ChannelType.EMAIL, body.contains("다른 사건의 확인"));
+            if (type == ChannelType.EMAIL) {
+                var briefing = org.jsoup.Jsoup.parse(body).selectFirst("td[bgcolor='#e8f3ff']");
+                assertEquals(List.of("1. 유효 사건", "2. 후속 확인 · 다른 사건의 확인"), briefing.select("h3").eachText());
+                assertTrue(briefing.select("p").isEmpty());
+            }
+            assertFalse(body.contains("독립적인 관찰 이유"));
             assertFalse(body.contains("https://example.com/unrelated"));
         }
     }
@@ -409,7 +428,7 @@ class NotificationRendererTest {
             assertTrue(body.contains("저장된 주요 내용"));
             assertFalse(body.contains("후속 확인"));
             assertFalse(body.contains("확인할 점"));
-            assertEquals(type == ChannelType.EMAIL, body.contains("사용하지 않을 관점"));
+            assertFalse(body.contains("사용하지 않을 관점"));
         }
     }
 
@@ -443,8 +462,8 @@ class NotificationRendererTest {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
             assertTrue(body.contains("&lt;script&gt;사건&lt;/script&gt;"));
             assertTrue(body.contains("내용 &amp; &lt;img src=x&gt;"));
-            assertTrue(body.contains("&lt;b&gt;확인 주제&lt;/b&gt;"));
-            assertTrue(body.contains("이유 &amp; &lt;iframe&gt;"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("&lt;b&gt;확인 주제&lt;/b&gt;"));
+            assertEquals(type == ChannelType.TELEGRAM, body.contains("이유 &amp; &lt;iframe&gt;"));
             assertTrue(body.contains("https://example.com/safe?a=1&amp;b=2"));
             assertFalse(body.contains("javascript:"));
             assertTrue(org.jsoup.Jsoup.parse(body).select("script, img, iframe").isEmpty());
@@ -465,7 +484,7 @@ class NotificationRendererTest {
 
         for (ChannelType type : ChannelType.values()) {
             String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
-            int expectedCount = Math.min(type == ChannelType.EMAIL ? 5 : 3, eventCount);
+            int expectedCount = Math.min(type == ChannelType.EMAIL ? 2 : 3, eventCount);
             List<String> expectedHeadings = new ArrayList<>();
             for (int i = 1; i <= expectedCount; i++) {
                 expectedHeadings.add(type == ChannelType.EMAIL ? "사건 " + i : i + ". 사건 " + i);

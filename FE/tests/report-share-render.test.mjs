@@ -35,8 +35,10 @@ test('manual report sharing places an optional insight selection between targets
     assert.match(html, /delivery-target-picker[\s\S]*report-share-insight[\s\S]*report-share-actions/)
     assert.match(html, /<option value="" selected="">포함 안 함<\/option>/)
     assert.match(html, /이번 전달에만 적용됩니다/)
-    assert.match(html, /이메일·텔레그램에는 요약/)
-    assert.match(html, /이메일 PDF에는 상세 분석/)
+    assert.match(html, /PDF에는 핵심 브리핑·중요 이벤트·관찰 항목/)
+    assert.match(html, /이메일과 PDF에는 업무상 의미와 다음 확인점을 간단히/)
+    assert.match(html, /텔레그램에는 관점 요약/)
+    assert.doesNotMatch(html, /핵심 요약|PDF에는 상세 분석/)
     assert.match(html, /선택한 관점 하나/)
     assert.doesNotMatch(html, /크레딧 사용|분석 생성/)
   } finally { client.clear() }

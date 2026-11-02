@@ -48,11 +48,24 @@ public class ReportKeywordCapture {
     }
 
     public ReportKeywordSnapshot mergeWeekly(NewsReport report, List<NewsReport> sources, LocalDateTime now) {
+        return mergeWeekly(report, sources, now, null);
+    }
+
+    /** Explicit historical recovery uses recorded policy applications, never today's active criteria. */
+    public ReportKeywordSnapshot mergeRecoveredWeekly(NewsReport report, List<NewsReport> sources,
+            LocalDateTime now, Set<Long> recordedCriterionTopics) {
+        return mergeWeekly(report, sources, now, Set.copyOf(recordedCriterionTopics));
+    }
+
+    private ReportKeywordSnapshot mergeWeekly(NewsReport report, List<NewsReport> sources, LocalDateTime now,
+            Set<Long> recordedCriterionTopics) {
         if (sources.isEmpty() || sources.stream().anyMatch(source -> source.getReportKeywordSnapshot() == null
                 || !ReportKeywordSnapshot.RULE_VERSION.equals(source.getReportKeywordSnapshot().ruleVersion())
-                || source.getReportKeywordSnapshot().unavailableReason() != null))
+                || source.getReportKeywordSnapshot().unavailableReason() != null
+                    && !"COMPANY_SCOPE_UNVERIFIED".equals(source.getReportKeywordSnapshot().unavailableReason())))
             return unavailable(report, now, "INCOMPLETE_SOURCE");
 
+        boolean scopeKnown = sources.stream().allMatch(source -> source.getReportKeywordSnapshot().unavailableReason() == null);
         Map<String, ReportKeywordSnapshot.Definition> definitions = new TreeMap<>();
         Set<Pair> rejected = new HashSet<>();
         List<ReportKeywordSnapshot.Candidate> candidates = new ArrayList<>();
@@ -81,14 +94,21 @@ public class ReportKeywordCapture {
         Set<Long> unassessedTopics = kept.stream().filter(candidate -> !selected.contains(candidate.findingId()))
                 .map(ReportKeywordSnapshot.Candidate::topicId).collect(Collectors.toSet());
         if (!unassessedTopics.isEmpty()) {
-            try {
-                if (!companyInterests.activeForTopics(unassessedTopics).isEmpty())
-                    return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
-            } catch (RuntimeException unavailable) {
-                return unavailable(report, now, "COMPANY_SCOPE_UNVERIFIED");
+            if (recordedCriterionTopics != null) {
+                if (unassessedTopics.stream().anyMatch(recordedCriterionTopics::contains))
+                    scopeKnown = false;
+            } else {
+                try {
+                    if (!companyInterests.activeForTopics(unassessedTopics).isEmpty())
+                        scopeKnown = false;
+                } catch (RuntimeException unavailable) {
+                    scopeKnown = false;
+                }
             }
         }
-        return snapshot(report, now, null, List.copyOf(definitions.values()), kept);
+        // Preserve the frozen evidence even when its full policy scope is unknown. The reading
+        // projection may then count only completed body sources, without publishing this full universe.
+        return snapshot(report, now, scopeKnown ? null : "COMPANY_SCOPE_UNVERIFIED", List.copyOf(definitions.values()), kept);
     }
 
     private ReportKeywordSnapshot capture(NewsReport report, List<Finding> candidates, LocalDateTime now) {

@@ -25,7 +25,7 @@ public class ReportChangesController {
     private final ReportChangesQueryService comparisons;
 
     @GetMapping("/{reportId}/changes")
-    @Operation(summary = "보고서 변화 비교 조회", description = "완료된 RUN·DAILY·전체/주제별 WEEKLY와 생성 시 고정한 동일 주제의 이전 보고서 변화를 조회합니다. periods에 실제 양쪽 기간, keywordChanges에 조건이 검증된 고유 이슈 수·비중 차이(%p)를 제공합니다. 조건 변경·입력 없음은 수치로 추정하지 않으며 조회는 LLM을 호출하지 않습니다. 과거 저장 자료가 없으면 UNAVAILABLE입니다.")
+    @Operation(summary = "보고서 변화 비교 조회", description = "완료된 RUN은 같은 접수 주제 집합의 직전 생성 보고서, DAILY는 바로 전날, 전체/주제별 WEEKLY는 동일 topicId의 정확히 전주 보고서와 비교합니다. periods에 실제 양쪽 기간, keywordChanges에 조건이 검증된 고유 이슈 수·비중 차이(%p)를 제공합니다. 명시적 과거 복원 결과는 notes에 표시하며 보고서 포함 이슈로 제한해 복원한 키워드 집계는 전체 비중 차이에 사용하지 않습니다. 조건 변경·입력 없음은 수치로 추정하지 않으며 조회는 복원이나 LLM 호출을 하지 않습니다. 과거 저장 자료가 없으면 UNAVAILABLE입니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다.",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """

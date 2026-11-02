@@ -68,11 +68,12 @@ class DailyReportFeedbackExclusionsTest {
         assertEquals(List.of(21L, 22L, 23L), global.getReflectedFindingIds());
     }
 
-    @Test void selectionAppliesAConfirmedMondayIssueToTheWholeWeek() {
+    @Test void selectionAppliesASubmittedMondayOpinionToTheWholeWeekBeforeDiagnosis() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(
                 ReportScope.DAILY, monday, monday.plusDays(6))).thenReturn(List.of(daily));
-        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(confirmed(10, "current")));
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(
+                review(10, "current", Category.PREFERENCE, Status.PENDING, null, null, null, null)));
         when(comparisons.findInput(10)).thenReturn(Optional.of(snapshot(identity(11, 100, 1))));
         var candidates = snapshot(identity(21, 100, 1), identity(22, 100, 2), identity(23, 101, 1));
 
@@ -97,7 +98,7 @@ class DailyReportFeedbackExclusionsTest {
         assertEquals(List.of(11L), daily.getReflectedFindingIds());
     }
 
-    @Test void everySubmittedDailyOpinionPropagatesOnlyToWeeklyDeliveryWithinTheSavedIssueAndTopic() {
+    @Test void everySubmittedDailyOpinionPropagatesToWebAndDeliveryWithinTheSavedIssueAndTopic() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
         when(comparisons.findInput(10)).thenReturn(Optional.of(snapshot(identity(11, 100, 1))));
@@ -105,26 +106,29 @@ class DailyReportFeedbackExclusionsTest {
                 identity(21, 100, 1), identity(22, 101, 1), identity(23, 100, 2)));
         for (Category category : Category.values()) for (Status status : Status.values()) {
             var submitted = review(10, "current", category, status, null, null, null, null);
-            when(feedback.eventFeedback(10)).thenReturn(List.of(submitted));
+            when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(submitted));
             assertEquals(Set.of(21L), exclusions.forDelivery(target));
-            assertTrue(exclusions.forReport(target).isEmpty());
+            assertEquals(Set.of(21L), exclusions.forReport(target));
         }
     }
 
-    @Test void deliveryUsesVerifiedFrozenInputWhenTheSourceDailyEventWasRevised() {
+    @Test void webAndDeliveryUseVerifiedFrozenInputWhenTheSourceDailyEventWasRevised() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
         when(comparisons.findInput(10)).thenReturn(Optional.of(snapshot(identity(11, 100, 1))));
         var target = weekly(20L, 1L, monday, List.of(21L, 22L), snapshot(identity(21, 100, 1), identity(22, 101, 1)));
         var submitted = review(10, "old", Category.PREFERENCE, Status.PROCESSING, null, null, null, null);
         var original = item("old", List.of(11L), List.of(new Topic(1, "주제", List.of(), List.of())));
-        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(submitted, original)));
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(withInput(submitted, original)));
         assertEquals(Set.of(21L), exclusions.forDelivery(target));
-        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(submitted, item("wrong", List.of(11L), List.of()))));
+        assertEquals(Set.of(21L), exclusions.forReport(target));
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(withInput(submitted, item("wrong", List.of(11L), List.of()))));
         assertTrue(exclusions.forDelivery(target).isEmpty());
-        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(
+        assertTrue(exclusions.forReport(target).isEmpty());
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(withInput(
                 review(99, "old", Category.PREFERENCE, Status.PROCESSING, null, null, null, null), original)));
         assertTrue(exclusions.forDelivery(target).isEmpty());
+        assertTrue(exclusions.forReport(target).isEmpty());
     }
 
     @Test void legacyEvidenceUsesExactFindingIdsAndKeepsAnotherTopic() {
@@ -166,18 +170,12 @@ class DailyReportFeedbackExclusionsTest {
                 snapshot(identity(11, 100, 2)))).isEmpty());
     }
 
-    @Test void stalePendingUnconfirmedPersonalAndPreferenceReviewsNeverPropagate() {
+    @Test void staleWithoutVerifiedInputAndPrivateRecipientReviewsNeverPropagate() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any()))
                 .thenReturn(List.of(daily));
         when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(
                 review(10, "old-revision", Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null, null, null),
-                review(10, "current", Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null, null, null),
-                review(10, "current", Category.SUMMARY_ERROR, Status.PROCESSING, "CONFIRMED_ERROR", null, null, null),
-                review(10, "current", Category.SUMMARY_ERROR, Status.FAILED, "CONFIRMED_ERROR", null, null, null),
-                review(10, "current", Category.SUMMARY_ERROR, Status.COMPLETED, "NOT_CONFIRMED", null, null, null),
-                review(10, "current", Category.SUMMARY_ERROR, Status.COMPLETED, "INSUFFICIENT_EVIDENCE", null, null, null),
-                review(10, "current", Category.PREFERENCE, Status.COMPLETED, "CONFIRMED_ERROR", null, null, null),
                 review(10, "current", Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", 3L, null, null),
                 review(10, "current", Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null, 3L, null),
                 review(10, "current", Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null, null, 3L)));
@@ -243,18 +241,38 @@ class DailyReportFeedbackExclusionsTest {
         assertTrue(exclusions.forReport(target).isEmpty());
     }
 
-    @Test void keywordCandidatesUseAllSubmittedDailyOpinionsOnlyForDelivery() {
+    @Test void keywordCandidatesUseAllSubmittedDailyOpinionsForWebAndDelivery() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         org.springframework.test.util.ReflectionTestUtils.setField(daily, "reportKeywordSnapshot",
                 keywordSnapshot(keywordCandidate(11, 100, 1)));
         when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
-        when(feedback.eventFeedback(10L)).thenReturn(List.of(review(10, "current", Category.PREFERENCE, Status.PENDING,
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(review(10, "current", Category.PREFERENCE, Status.PENDING,
                 null, null, null, null)));
         var target = weekly(20L, 1L, monday, List.of(), null);
         var candidates = keywordSnapshot(keywordCandidate(21, 100, 1), keywordCandidate(22, 101, 1));
 
         assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, candidates, true));
-        assertTrue(exclusions.forKeywordCandidates(target, candidates, false).isEmpty());
+        assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, candidates, false));
+    }
+
+    @Test void restoredIncludedIssueKeywordsRetainSavedIdentityForSubmittedExclusions() {
+        NewsReport daily = reviewedDaily(10, monday, 11);
+        when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
+        when(feedback.eventReviewStates(anyCollection())).thenReturn(List.of(
+                review(10, "current", Category.PREFERENCE, Status.PROCESSING, null, null, null, null)));
+        var target = weekly(20L, 1L, monday, List.of(), null);
+        for (String rule : List.of("report-keywords.recovered-selected.v1", "report-keywords.selected.v1")) {
+            var source = keywordSnapshot(keywordCandidate(11, 100, 1));
+            org.springframework.test.util.ReflectionTestUtils.setField(daily, "reportKeywordSnapshot",
+                    new com.example.be.domain.reports.keyword.ReportKeywordSnapshot(rule, source.capturedAt(), source.periodLabel(),
+                            null, source.definitions(), source.candidates()));
+            var candidates = keywordSnapshot(keywordCandidate(21, 100, 1), keywordCandidate(22, 101, 1));
+            var restored = new com.example.be.domain.reports.keyword.ReportKeywordSnapshot(rule, candidates.capturedAt(),
+                    candidates.periodLabel(), null, candidates.definitions(), candidates.candidates());
+
+            assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, restored, false));
+            assertEquals(Set.of(21L), exclusions.forKeywordCandidates(target, restored, true));
+        }
     }
 
     private com.example.be.domain.reports.keyword.ReportKeywordSnapshot keywordSnapshot(

@@ -5,8 +5,8 @@ import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.reports.briefing.ReportBriefing;
 import com.example.be.domain.reports.comparison.ReportChanges;
 import com.example.be.domain.reports.comparison.ReportChangesQueryService;
-import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
+import com.example.be.domain.dart.model.DartModels.Quarter;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.coverage.ReportCoverageDTO;
 import com.example.be.domain.reports.coverage.ReportCoverageService;
@@ -24,10 +24,6 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -39,12 +35,15 @@ import java.util.regex.Pattern;
 
 /**
  * Offline attachment containing summaries, important events, watch items, the selected audience's
- * reading sections and a linked company performance/filings appendix. Standalone article analysis,
+ * reading sections and a compact company performance/filings appendix. Standalone article analysis,
  * collection notes and per-quarter financial source appendices are intentionally omitted.
  */
 @Component
 @RequiredArgsConstructor
 public class ReportPdfRenderer {
+    private NotificationArticleStatistics articleStatistics;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setArticleStatistics(NotificationArticleStatistics articleStatistics) { this.articleStatistics = articleStatistics; }
     private final ReportDartService dart;
     private ReportCoverageService coverageService;
     @org.springframework.beans.factory.annotation.Autowired
@@ -119,10 +118,12 @@ public class ReportPdfRenderer {
                                  ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage,
                                  Audience unavailableAudience, ReportKeywordDTO.View keywords, ReportChanges changes,
                                  List<CompanyAttachment> companies) {
+        companies = NotificationCompanyVisibility.visible(report, view, companies);
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
             pdf.title(report.getTitle());
+            if (articleStatistics != null) pdf.muted(articleStatistics.summary(report));
             if (report.getGeneratedAt() != null) pdf.muted("보고서 작성 " + report.getGeneratedAt().format(DATE_TIME) + " (한국시간)");
             if (report.getReportDate() != null) pdf.muted("보고서 기간 " + report.getReportDate()
                     + (report.getReportEndDate() == null ? "" : " ~ " + report.getReportEndDate()));
@@ -134,20 +135,18 @@ public class ReportPdfRenderer {
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
-            if (content != null) briefing(pdf, ReportBriefing.from(view), companies);
+            if (content != null) briefing(pdf, view);
             if (unavailableAudience != null) pdf.muted(NotificationBriefingSection.unavailable(unavailableAudience));
             ReportPdfInsightSection.brief(pdf, insight, view);
             NotificationChangesSection.pdfBrief(pdf, changes);
             NotificationKeywordSection.pdf(pdf, keywords);
             if (content != null) {
                 pdf.internalLink("이슈와 근거 자세히 보기", "report-detail");
-                if (insight != null) pdf.internalLink("관점 분석 자세히 보기", "insight-detail");
                 pdf.pageBreak();
             }
             pdf.anchor("report-detail");
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
-            else body(pdf, content, findings, coverage, companies);
-            ReportPdfInsightSection.write(pdf, insight, view);
+            else body(pdf, content, findings, coverage);
             NotificationChangesSection.pdfDetails(pdf, changes);
             Map<String, Integer> companyPages = companyData(pdf, companies);
             return new Result(pdf.save(), companyPages);
@@ -156,31 +155,17 @@ public class ReportPdfRenderer {
         }
     }
 
-    private void briefing(ReportPdfLayout pdf, ReportBriefing brief, List<CompanyAttachment> companies) throws IOException {
+    private void briefing(ReportPdfLayout pdf, ReportEventFeedbackProjection.View view) throws IOException {
         pdf.section("핵심 브리핑");
         int number = 0;
-        for (var item : brief.items()) {
-            pdf.reserve(110);
-            pdf.subheading((++number) + ". " + item.title());
-            pdf.paragraph(item.summary());
-            NotificationCompanySection.pdf(pdf, item.sourceFindingIds(), companies);
-            if (item.significance() != null && !item.significance().isBlank()) pdf.muted("읽을 포인트 · " + item.significance());
-        }
-        if (!brief.watchItems().isEmpty()) {
-            pdf.subheading("다음 확인점");
-            for (var item : brief.watchItems()) pdf.bullet(item.topic() + " · " + item.reason());
-        }
-        if (brief.omittedItemCount() > 0) pdf.muted("나머지 " + brief.omittedItemCount() + "개 항목은 뒤쪽 이슈와 근거에서 확인하세요.");
-        if (brief.items().isEmpty() && brief.watchItems().isEmpty() && brief.omittedItemCount() == 0)
-            pdf.muted("짧은 브리핑의 연결 근거가 없습니다. 뒤쪽의 저장된 요약을 확인하세요.");
+        var titles = NotificationBriefingSection.reportTitles(view);
+        for (String title : titles) pdf.subheading((++number) + ". " + title);
+        if (titles.isEmpty()) pdf.muted(NotificationBriefingSection.emptyReportMessage(view));
     }
 
     private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
-                      ReportCoverageDTO.View coverage, List<CompanyAttachment> companies) throws IOException {
-        pdf.section("핵심 요약");
+                      ReportCoverageDTO.View coverage) throws IOException {
         pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
-        if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
-        for (String summary : content.executiveSummary()) pdf.bullet(summary);
         pdf.reserve(140);
         pdf.section("중요 이벤트");
         var events = content.importantEvents().stream().filter(event -> !event.sourceFindingIds().isEmpty()
@@ -191,7 +176,6 @@ public class ReportPdfRenderer {
             var counts = coverage == null ? ReportCoverageDTO.unavailable(event.sourceFindingIds())
                     : coverage.forSources(event.sourceFindingIds());
             pdf.muted(NotificationCoverage.label(counts));
-            NotificationCompanySection.pdf(pdf, event.sourceFindingIds(), companies);
             pdf.paragraph(event.summaryKo());
             String significance = ReportBriefing.readingSignificance(event.significance());
             if (significance != null && !significance.isBlank()) pdf.keyValue("읽을 포인트", significance);
@@ -233,100 +217,81 @@ public class ReportPdfRenderer {
         pdf.gap(3);
     }
 
-    /** Reads only the report's stored company snapshot, including its recent disclosures. */
+    /** The final section uses only the report's saved, title-matched companies. */
     private Map<String, Integer> companyData(ReportPdfLayout pdf, List<CompanyAttachment> companies) throws IOException {
         if (companies.isEmpty()) return Map.of();
-        pdf.section("회사별 부록 바로가기");
-        pdf.muted("보고서에 연결해 둔 회사의 자료입니다. 회사명을 누르면 해당 부록으로 이동합니다.");
-        for (int index = 0; index < companies.size(); index++)
-            pdf.internalLink(companies.get(index).company().corpName(), "company-" + index);
         Map<String, Integer> pages = new LinkedHashMap<>();
-        for (int index = 0; index < companies.size(); index++) {
-            CompanyAttachment entry = companies.get(index);
-            pdf.pageBreak();
-            pdf.anchor("company-" + index);
-            pages.putIfAbsent(entry.company().corpCode(), pdf.destinationPage("company-" + index));
-            pdf.section("회사 실적 · 공시");
-            pdf.subheading(entry.company().corpName());
-            pdf.muted(entry.company().stockCode() == null || entry.company().stockCode().isBlank() ? "비상장" : entry.company().stockCode());
-            pdf.internalLink("핵심 요약으로 돌아가기", "summary");
-            if (!("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) || entry.data() == null) {
-                pdf.paragraph("표시할 저장된 실적·공시 자료가 없습니다.");
-                continue;
-            }
+        boolean first = true;
+        for (CompanyAttachment entry : companies) {
+            boolean ready = ("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) && entry.data() != null;
+            var quarters = ready ? CompanyFinancialBrief.quarters(entry.data()) : List.<Quarter>of();
+            String title = entry.company().corpName() + " · " + entry.company().stockCode();
             FinancialData data = entry.data();
-            pdf.muted(("CFS".equals(data.fsDiv()) ? "연결재무제표" : "OFS".equals(data.fsDiv()) ? "별도재무제표" : "재무 기준 미확인")
-                    + (data.fetchedAt() == null ? " · 자료 확인 시각 미상" : " · 자료 확인 "
-                    + data.fetchedAt().atZoneSameInstant(ApiTimeZone.ZONE).format(DATE_TIME) + " (한국시간)"));
-            if (data.quarters().isEmpty()) pdf.paragraph("표시할 분기 실적 자료가 없습니다.");
+            String metadata = ready ? CompanyFinancialBrief.basis(data.fsDiv()) + " · 단위: " + CompanyFinancialBrief.unit(data.currency())
+                    + ("PARTIAL".equals(entry.status()) ? " · 일부 자료 없음" : "")
+                    + (data.fetchedAt() == null ? " · 확인 시각 미상" : " · 확인 "
+                    + data.fetchedAt().atZoneSameInstant(ApiTimeZone.ZONE).format(DATE_TIME) + " (한국시간)")
+                    : switch (entry.status() == null ? "PENDING" : entry.status()) {
+                        case "FAILED" -> "공시 자료 확인 실패";
+                        case "DISABLED" -> "공시 자료 확인 불가";
+                        case "READY", "PARTIAL" -> "공시 자료 없음";
+                        default -> "공시 자료 준비 중";
+                    };
+            List<List<String>> rows = new ArrayList<>();
+            for (var quarter : quarters) rows.add(List.of(quarter.year() + "년 " + quarter.quarter() + "분기"
+                            + (quarter.derived() ? " · 산출값" : ""), amount(quarter.revenue(), data.currency()),
+                    amount(quarter.operatingProfit(), data.currency())));
+            pdf.reserveFinancialBlock(title, metadata, quarters, ready ? data.currency() : null, rows, first);
+            if (first) { pdf.section("회사 실적 · 공시"); first = false; }
+            pages.putIfAbsent(entry.company().corpCode(), pdf.pageNumber());
+            pdf.subheading(title);
+            pdf.muted(metadata);
+            if (!ready) continue;
+            if (quarters.isEmpty()) pdf.muted("표시할 분기 실적 자료가 없습니다.");
             else {
-                pdf.chart(data.quarters(), data.currency());
-                boolean won = "KRW".equals(data.currency());
-                String unit = won ? "억원" : data.currency() == null ? "통화 미확인" : data.currency();
-                pdf.muted("분기별 상세 실적 · 표 금액 단위: " + unit
-                        + (won ? " · 소수 둘째 자리까지 반올림합니다." : " · 원 금액을 그대로 표시합니다."));
-                pdf.muted((won ? "절댓값이 0보다 크고 0.01억원 미만인 금액은 범위로 표시합니다. " : "")
-                        + "자료 없음은 0이 아닙니다.");
-                List<List<String>> rows = new ArrayList<>();
-                for (var quarter : data.quarters()) rows.add(List.of(quarter.year() + "년 " + quarter.quarter() + "분기"
-                                + (quarter.derived() ? "\n산출값" : ""), amount(quarter.revenue(), data.currency()), amount(quarter.operatingProfit(), data.currency()),
-                        quarter.operatingMargin() == null ? "자료 없음" : quarter.operatingMargin().stripTrailingZeros().toPlainString() + "%"));
-                pdf.table(List.of("분기", "매출액 (" + unit + ")", "영업이익 (" + unit + ")", "영업이익률"), rows, new float[] { 1.1f, 1.8f, 1.8f, 1 });
-                if (data.quarters().stream().anyMatch(com.example.be.domain.dart.model.DartModels.Quarter::derived))
-                    pdf.muted("4분기 산출값은 같은 회계 기준의 연간 금액에서 3분기 누적 금액을 뺀 값입니다.");
+                pdf.chart(quarters, data.currency());
+                pdf.financialTable(rows);
             }
-            for (String note : data.notes()) pdf.muted(note);
-            pdf.muted("실적은 회사 전체 기준입니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
-            filingTable(pdf, entry);
+            // Preserve caveats for the displayed quarters and whole-series accounting constraints only.
+            for (String note : data.notes()) {
+                if (note == null || note.isBlank()) continue;
+                var period = Pattern.compile("^(\\d{4})년 ([1-4])분기").matcher(note);
+                if (period.find() && quarters.stream().noneMatch(q -> q.year() == Integer.parseInt(period.group(1))
+                        && q.quarter() == Integer.parseInt(period.group(2)))) continue;
+                if (note.endsWith("일부 실적 자료가 없습니다.")) continue;
+                pdf.muted(note);
+            }
+            latestFiling(pdf, entry);
+            pdf.gap(8);
+        }
+        boolean hasFinancials = companies.stream().filter(entry -> "READY".equals(entry.status()) || "PARTIAL".equals(entry.status()))
+                .anyMatch(entry -> entry.data() != null && !CompanyFinancialBrief.quarters(entry.data()).isEmpty());
+        if (hasFinancials) {
+            boolean won = companies.stream().filter(entry -> "READY".equals(entry.status()) || "PARTIAL".equals(entry.status()))
+                    .anyMatch(entry -> entry.data() != null && "KRW".equals(entry.data().currency()) && !CompanyFinancialBrief.quarters(entry.data()).isEmpty());
+            pdf.muted("자료 없음은 0이 아닙니다." + (won ? " KRW 금액은 소수 둘째 자리 반올림, 미세값은 원값을 유지합니다." : ""));
+            if (companies.stream().filter(entry -> ("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) && entry.data() != null)
+                    .flatMap(entry -> CompanyFinancialBrief.quarters(entry.data()).stream()).anyMatch(Quarter::derived))
+                pdf.muted("산출값: 같은 회계 기준의 연간 금액 − 3분기 누적 금액.");
         }
         return pages;
     }
 
-    private void filingTable(ReportPdfLayout pdf, CompanyAttachment entry) throws IOException {
-        pdf.reserve(130);
-        pdf.subheading("공시 상세");
-        pdf.muted("확인 범위: 저장한 최근 공시 최대 5건 + 12분기 실적의 근거 공시");
-        pdf.muted("직접 인용은 기사에 명시된 접수번호가 일치한다는 뜻이며 기사 전체의 사실 검증을 뜻하지 않습니다.");
-        if (entry.filingRows().stream().noneMatch(row -> "DIRECT_REFERENCE".equals(row.relevance())))
-            pdf.muted("확보한 공시에서 직접 인용 확인 안 됨");
-        if (entry.filingRows().isEmpty()) {
-            pdf.paragraph("저장된 공시 자료가 없습니다.");
-            return;
-        }
-        List<List<String>> rows = new ArrayList<>();
-        List<String> urls = new ArrayList<>();
-        for (var row : entry.filingRows()) {
-            Filing filing = row.filing();
-            rows.add(List.of(filing.filedAt() == null ? "미확인" : filing.filedAt(),
-                    (filing.corrected() && (filing.reportName() == null || !filing.reportName().contains("정정")) ? "[정정] " : "")
-                            + (filing.reportName() == null ? "공시 원문" : filing.reportName())
-                            + "\n접수 " + filing.rceptNo(),
-                    NotificationCompanySection.roles(row), NotificationCompanySection.relevance(row),
-                    DartFilingLinks.isSafe(filing) ? "원문" : "미확인"));
-            urls.add(DartFilingLinks.isSafe(filing) ? filing.url() : "");
-        }
-        pdf.linkedTable(List.of("접수일", "공시명 · 접수번호", "자료 구분", "기사와의 연결", "DART"), rows,
-                new float[]{1.2f, 3.3f, 1.3f, 1.5f, 0.65f}, urls);
+    private void latestFiling(ReportPdfLayout pdf, CompanyAttachment entry) throws IOException {
+        var filing = CompanyFinancialBrief.latestFiling(entry.data());
+        if (filing == null) { pdf.muted("최근 공시 · 저장된 공시 자료가 없습니다."); return; }
+        String title = filing.reportName() == null || filing.reportName().isBlank() ? "공시 원문" : filing.reportName();
+        title = NotificationRenderer.prose(title);
+        if (title.codePointCount(0, title.length()) > 100) title = title.substring(0, title.offsetByCodePoints(0, 99)) + "…";
+        String label = "최근 공시 · " + (filing.filedAt() == null ? "접수일 미확인" : filing.filedAt()) + " · "
+                + (filing.corrected() && !title.contains("정정") ? "[정정] " : "") + title;
+        if (DartFilingLinks.isSafe(filing)) pdf.link(label, filing.url());
+        else pdf.muted(label);
     }
 
-    /**
-     * Displays KRW in hundred-million-won units with two-decimal HALF_UP rounding. Nonzero amounts
-     * below 0.01 of that unit retain their sign as an interval; other currencies keep their original
-     * decimal precision. Missing or invalid values remain distinct from an actual zero.
-     */
+    /** Shared delivery units preserve missing, zero, negative and sub-rounding monetary values. */
     static String amount(String value, String currency) {
-        if (value == null || !value.matches("-?\\d+(?:\\.\\d+)?")) return "자료 없음";
-        BigDecimal amount = new BigDecimal(value);
-        if ("KRW".equals(currency)) {
-            amount = amount.movePointLeft(8);
-            if (amount.signum() != 0 && amount.abs().compareTo(new BigDecimal("0.01")) < 0)
-                return amount.signum() < 0 ? "-0.01 < 값 < 0" : "0 < 값 < 0.01";
-            amount = amount.setScale(2, RoundingMode.HALF_UP).stripTrailingZeros();
-        }
-        DecimalFormat format = new DecimalFormat("#,##0", DecimalFormatSymbols.getInstance(java.util.Locale.KOREA));
-        format.setMinimumFractionDigits(Math.max(0, amount.scale()));
-        format.setMaximumFractionDigits(Math.max(0, amount.scale()));
-        return format.format(amount);
+        return CompanyFinancialBrief.number(value, currency);
     }
 
     /**

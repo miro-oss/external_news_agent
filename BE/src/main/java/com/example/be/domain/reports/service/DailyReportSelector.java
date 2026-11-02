@@ -45,8 +45,16 @@ public class DailyReportSelector {
 
     @Transactional(readOnly = true)
     public Prepared prepare(LocalDate date, int limit) {
+        return prepare(date, limit, null);
+    }
+
+    /** Historical repair limits the candidates before choosing the latest observation of each issue. */
+    @Transactional(readOnly = true)
+    public Prepared prepare(LocalDate date, int limit, Set<Long> savedRunIds) {
         List<Finding> candidates = findingRepository.findDailyReportCandidates(
                 date.atStartOfDay(), date.plusDays(1).atStartOfDay());
+        if (savedRunIds != null) candidates = candidates.stream()
+                .filter(finding -> savedRunIds.contains(finding.getRun().getId())).toList();
         List<Long> articleIds = candidates.stream().map(f -> f.getArticle().getId()).distinct().toList();
         List<IssueArticle> memberships = OracleInClause.batches(articleIds).stream()
                 .flatMap(ids -> membershipRepository.findByArticleIds(ids).stream()).toList();

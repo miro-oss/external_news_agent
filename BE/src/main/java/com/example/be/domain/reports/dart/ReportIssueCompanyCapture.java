@@ -87,6 +87,8 @@ public class ReportIssueCompanyCapture {
                 if (!stockCodes.isEmpty()) matching = matching.stream().filter(company -> stockCodes.contains(company.stockCode())).toList();
                 if (matching.size() != 1) continue;
                 Company company = matching.getFirst();
+                // Resolve identity before excluding unlisted namesakes, or an ambiguous name could become a false match.
+                if (!ReportDartEligibility.isListed(company)) continue;
                 if (ambiguousName(key) && stockCodes.isEmpty()) continue;
                 var mention = mentionPattern(name).matcher(body);
                 if (!mention.find() || !seen.add(company.corpCode())) continue;
@@ -108,7 +110,8 @@ public class ReportIssueCompanyCapture {
         var sources = input.sources().stream().filter(source -> source.reflectedFindingIds().stream().anyMatch(ids::contains)).toList();
         if (sources.stream().anyMatch(source -> source.companySnapshot() == null || !source.companySnapshot().valid())) return null;
         var links = sources.stream().flatMap(source -> source.companySnapshot().reflected(source.reflectedFindingIds())
-                        .reflected(selected).links().stream()).distinct().toList();
+                        .reflected(selected).links().stream())
+                .filter(link -> ReportDartEligibility.isListed(link.company())).distinct().toList();
         return new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION,
                 now.atZone(ApiTimeZone.ZONE).toOffsetDateTime(), links);
     }

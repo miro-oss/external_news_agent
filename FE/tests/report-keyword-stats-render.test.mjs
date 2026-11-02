@@ -45,6 +45,16 @@ test('counts and percentages use the complete server denominator instead of disp
   assert.deepEqual(stats, original)
 })
 
+for (const ruleVersion of ['report-keywords.recovered-selected.v1', 'report-keywords.selected.v1']) test(`${ruleVersion} labels report-only counts`, () => {
+  const stats = { ...fixture(), ruleVersion }
+  const html = render(stats)
+  assert.match(html, /보고서 포함 이슈 <strong>12건<\/strong>/)
+  assert.match(html, /이 보고서에 포함된 유효 이슈 기준입니다/)
+  assert.match(html, /8건 \/ 보고서 포함 12건/)
+  assert.match(html, /66\.7%/)
+  assert.doesNotMatch(html, /상위 선정 전|전체 유효 이슈|8건 \/ 전체 12건/)
+})
+
 test('related registered words retain same-issue counts and do not become inferred trends', () => {
   const html = render(fixture())
   assert.match(html, /함께 등장/)

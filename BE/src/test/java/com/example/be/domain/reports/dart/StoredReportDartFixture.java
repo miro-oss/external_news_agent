@@ -62,6 +62,17 @@ public final class StoredReportDartFixture {
                 .generatedAt(LocalDateTime.of(2026, 10, 19, 9, 0)).markdownBody("").build();
     }
 
+    public static com.example.be.domain.reports.service.ReportEventFeedbackProjection.View readingView() {
+        var content = new com.example.be.domain.reports.entity.ReportContent(List.of(), List.of(
+                new com.example.be.domain.reports.entity.ReportContent.ImportantEvent("SK하이닉스 실적 발표",
+                        "SK하이닉스가 분기 실적을 발표했다.", "", List.of(51L))), List.of(), List.of());
+        var finding = com.example.be.domain.analysis.entity.Finding.builder().id(51L)
+                .article(com.example.be.domain.collection.entity.Article.builder().id(101L)
+                        .canonicalUrl("https://example.com/news/101").build()).build();
+        return new com.example.be.domain.reports.service.ReportEventFeedbackProjection.View(List.of(finding),
+                new com.example.be.domain.reports.service.ReportReadingContent("", content), false);
+    }
+
     public static FinancialData financials() {
         return new FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-14T16:30:00Z"), List.of(
                 new Quarter(2026, 1, "10000000000", "5000000000", null, false, List.of()),

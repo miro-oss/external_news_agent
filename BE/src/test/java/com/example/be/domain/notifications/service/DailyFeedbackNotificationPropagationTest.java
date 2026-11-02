@@ -95,13 +95,16 @@ class DailyFeedbackNotificationPropagationTest {
         for (Status status : Status.values()) {
             Feedback submitted = review(fixture, Category.PREFERENCE, status,
                     status == Status.COMPLETED ? "NO_ERROR" : null);
-            when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(submitted));
+            when(store.eventReviewStates(anyCollection())).thenReturn(List.of(submitted));
             clearInvocations(feedback, pdfRenderer);
+            var webView = projection.project(fixture.weekly(), new ReportFindings.Visible(fixture.weeklyFindings(), false), List.of());
+            assertEquals(List.of(22L), webView.findings().stream().map(Finding::getId).toList());
+            assertRejectedContentAbsent(webView.readingContent().markdownBody());
             for (String body : allEntryPoints(fixture.weekly(), channelType)) {
                 assertRejectedContentAbsent(body);
                 assertTrue(body.contains("정상 주간 사건"));
                 assertTrue(body.contains("정상 주간 요약"));
-                assertTrue(body.contains("정상 후속 확인"));
+                assertEquals(channelType == ChannelType.TELEGRAM, body.contains("정상 후속 확인"));
                 assertTrue(body.contains("https://example.com/source-22"));
             }
 
@@ -132,7 +135,7 @@ class DailyFeedbackNotificationPropagationTest {
         Fixture fixture = fixture(topicWeekly, false);
         prepare(fixture, Set.of());
         Feedback completed = review(fixture, Status.COMPLETED);
-        when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(completed));
+        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(completed));
 
         for (String body : allEntryPoints(fixture.weekly(), channelType)) {
             assertRejectedContentAbsent(body);
@@ -156,7 +159,7 @@ class DailyFeedbackNotificationPropagationTest {
         Fixture fixture = fixture(topicWeekly, true);
         prepare(fixture, Set.of(22L));
         Feedback completed = review(fixture, Status.COMPLETED);
-        when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(completed));
+        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(completed));
 
         for (boolean queued : List.of(false, true)) {
             String body = delivery(fixture.weekly(), channelType, queued);

@@ -6,6 +6,8 @@ import { formatMediumDate } from '../../lib/datetime'
 import { CompanyInterestProgress } from './CompanyInterestProgress'
 import { companyInterestDraftError, companyInterestIdFromHash } from './companyInterestState'
 import { useCompanyInterests } from './useCompanyInterests'
+import { ReportFeedbackHistory } from '../reports/ReportFeedbackHistory'
+import { reportFeedbackHistoryId } from '../reports/eventFeedbackState'
 import './companyInterests.css'
 
 const FILTERS: ReadonlyArray<SegmentedOption<CompanyInterestStatus | 'ALL'>> = [
@@ -13,14 +15,16 @@ const FILTERS: ReadonlyArray<SegmentedOption<CompanyInterestStatus | 'ALL'>> = [
   { value: 'ACTIVE', label: '사용 중' }, { value: 'REVOKED', label: '사용 중지' },
 ]
 const selectedCriterion = () => typeof window === 'undefined' ? null : companyInterestIdFromHash(window.location.hash)
+const selectedReport = () => typeof window === 'undefined' ? null : reportFeedbackHistoryId(window.location.hash)
 
 export function CompanyInterestsPage() {
   const { criteria, error, busy, refresh, record } = useCompanyInterests()
   const [filter, setFilter] = useState<CompanyInterestStatus | 'ALL'>('ALL')
   const [selected, setSelected] = useState(selectedCriterion)
+  const [historyReportId, setHistoryReportId] = useState(selectedReport)
   const [notice, setNotice] = useState('')
   useEffect(() => {
-    function sync() { setSelected(selectedCriterion()); setFilter('ALL') }
+    function sync() { setSelected(selectedCriterion()); setHistoryReportId(selectedReport()); setFilter('ALL') }
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -36,12 +40,13 @@ export function CompanyInterestsPage() {
       <div><h1>회사 관심 기준</h1><p className="muted">보고서에 남긴 관심 의견을 검토하고, 회사에 필요한 소식을 고르는 기준으로 적용합니다.</p></div>
       <button type="button" className="secondary-button" disabled={busy} onClick={refresh}>{busy ? '확인 중…' : '최신 상태 확인'}</button>
     </header>
+    {historyReportId !== null && <ReportFeedbackHistory key={historyReportId} reportId={historyReportId} criteria={criteria ?? []} />}
     <ol className="company-interest-steps" aria-label="회사 관심 기준 반영 순서">
       <li><strong>1. 의견 검토 완료</strong><span>관심 의견에서 기준 초안을 만듭니다.</span></li>
       <li><strong>2. 기준 확인 후 적용</strong><span>기준과 주제를 확인해 사용을 시작합니다.</span></li>
       <li><strong>3. 실제 반영 완료</strong><span>새 보고서의 검토·제외 결과를 확인합니다.</span></li>
     </ol>
-    <p className="company-interest-scope">적용한 기준은 선택한 주제의 이후 보고서 선정에 사용합니다. 기존 보고서는 유지되며, 개인 알림 기준에는 적용하지 않습니다. 의견을 남긴 이슈의 메일·텔레그램 전달 제외는 기준 활성화와 별도로, 의견 접수 즉시 적용됩니다.</p>
+    <p className="company-interest-scope">적용한 기준은 선택한 주제의 이후 보고서 선정에 사용합니다. 개인 알림 기준에는 적용하지 않습니다. 의견을 남긴 이슈의 보고서 화면·메일·텔레그램 전달 제외는 기준 활성화와 별도로, 의견 접수 즉시 적용됩니다.</p>
     <div className="company-interest-toolbar">
       <Segmented options={FILTERS} value={filter} onSelect={setFilter} label="회사 관심 기준 상태" />
       {criteria && <span>{criteria.filter(criterion => criterion.status === 'DRAFT').length}개 확인 대기 · {criteria.filter(criterion => criterion.status === 'ACTIVE').length}개 사용 중</span>}

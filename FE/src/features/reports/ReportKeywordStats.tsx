@@ -16,20 +16,24 @@ export function ReportKeywordStats({ stats }: { stats?: KeywordStats | null }) {
   if (!stats) return null
   const available = stats.status === 'AVAILABLE' && stats.denominatorIssueCount !== null
   const denominator = stats.denominatorIssueCount
+  const selectedBasis = stats.ruleVersion === 'report-keywords.recovered-selected.v1'
+    || stats.ruleVersion === 'report-keywords.selected.v1'
   return <section className="card report-keyword-stats" aria-label="키워드로 보는 이슈">
     <header className="report-keyword-heading">
       <h3>키워드로 보는 이슈</h3>
-      {available && <p className="report-keyword-basis">전체 유효 이슈 <strong>{number(denominator!)}건</strong> · 상위 선정 전</p>}
+      {available && <p className="report-keyword-basis">{selectedBasis ? '보고서 포함 이슈 ' : '전체 유효 이슈 '}
+        <strong>{number(denominator!)}건</strong>{!selectedBasis && ' · 상위 선정 전'}</p>}
       <p className="report-keyword-period">{stats.periodLabel}</p>
     </header>
     {!available ? <p className="report-keyword-empty"><strong>집계 자료 없음</strong>
       {(stats.unavailableReason && unavailableMessages[stats.unavailableReason]) || '키워드 집계 자료를 확인할 수 없습니다.'}</p>
       : <>
+        {selectedBasis && <p className="report-keyword-note">이 보고서에 포함된 유효 이슈 기준입니다.</p>}
         {denominator === 0 && <p className="report-keyword-empty">집계 대상인 유효 이슈가 0건이어서 비중을 계산하지 않았습니다.</p>}
         {stats.items.length === 0 ? <p className="report-keyword-empty">집계할 등록 키워드가 없습니다.</p>
           : <ol className="report-keyword-list">{stats.items.map(item => <li className="report-keyword-item" key={item.keyword}>
             <div className="report-keyword-row"><h4>{item.keyword}</h4>
-              <div className="report-keyword-numbers"><span>{number(item.issueCount)}건 / 전체 {number(denominator!)}건</span>
+              <div className="report-keyword-numbers"><span>{number(item.issueCount)}건 / {selectedBasis ? '보고서 포함' : '전체'} {number(denominator!)}건</span>
                 <strong>{item.sharePercent === null ? '비중 없음' : `${number(item.sharePercent)}%`}</strong></div>
             </div>
             <div className="report-keyword-track" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(100, item.sharePercent ?? 0))}%` }} /></div>

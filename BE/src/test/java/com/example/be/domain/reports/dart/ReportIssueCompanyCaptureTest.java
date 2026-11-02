@@ -60,6 +60,29 @@ class ReportIssueCompanyCaptureTest {
                 List.of(finding(101, "삼성전자(005930)는 발표했다.", "삼성전자")), NOW).companies());
     }
 
+    @Test void skipsUnlistedCompaniesButRetainsAlphanumericListedCodes() {
+        var unlisted = new Company("99999001", "비상장기업", "");
+        var listed = new Company("99999002", "신규상장기업", "0068Y0");
+        when(catalog.findExactCandidates(any())).thenReturn(List.of(SAMSUNG, unlisted, listed));
+
+        var snapshot = capture.captureFindings(report(), List.of(finding(101,
+                "삼성전자와 비상장기업은 발표했다. 신규상장기업(0068Y0)도 투자했다.",
+                "삼성전자", "비상장기업", "신규상장기업")), NOW);
+
+        assertTrue(snapshot.valid());
+        assertEquals(List.of(SAMSUNG, listed), snapshot.companies());
+    }
+
+    @Test void unlistedNamesakeStillMakesTheIdentityAmbiguousUntilStockEvidenceResolvesIt() {
+        var namesake = new Company("99999001", "삼성전자", "");
+        when(catalog.findExactCandidates(any())).thenReturn(List.of(SAMSUNG, namesake));
+
+        assertTrue(capture.captureFindings(report(),
+                List.of(finding(101, "삼성전자는 발표했다.", "삼성전자")), NOW).links().isEmpty());
+        assertEquals(List.of(SAMSUNG), capture.captureFindings(report(),
+                List.of(finding(101, "삼성전자(005930)는 발표했다.", "삼성전자")), NOW).companies());
+    }
+
     @Test void nfkcEquivalentLegalNamesRemainAmbiguousAcrossDifferentCorporations() {
         when(catalog.findExactCandidates(any())).thenReturn(List.of(
                 new Company("99999001", "ABC기업", "000001"), new Company("99999002", "ＡＢＣ기업", "000002")));
@@ -144,6 +167,23 @@ class ReportIssueCompanyCaptureTest {
         var legacy = new WeeklyReportInput.DailySource(1L, NOW.toLocalDate(), "제목", "본문", null, List.of(101L));
         var input = new WeeklyReportInput(NOW.toLocalDate(), NOW.toLocalDate(), List.of(legacy), List.of());
         assertNull(capture.captureSelected(NewsReport.builder().reportScope(ReportScope.WEEKLY).build(), List.of(101L), input, NOW));
+        verifyNoInteractions(catalog);
+    }
+
+    @Test void weeklyFiltersUnlistedLinksInLegacySourcesWithoutDiscardingTheirListedEvidence() {
+        var unlisted = new Company("99999001", "비상장기업", "");
+        var snapshot = new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION,
+                NOW.atOffset(java.time.ZoneOffset.ofHours(9)), List.of(link(unlisted, 101), link(SAMSUNG, 102)));
+        var source = new WeeklyReportInput.DailySource(1L, NOW.toLocalDate(), "제목", "본문", null,
+                List.of(101L, 102L), null, snapshot);
+        var input = new WeeklyReportInput(NOW.toLocalDate(), NOW.toLocalDate(), List.of(source), List.of());
+
+        var merged = capture.captureSelected(NewsReport.builder().reportScope(ReportScope.WEEKLY).build(),
+                List.of(101L, 102L), input, NOW);
+
+        assertTrue(snapshot.valid(), "legacy mixed snapshots remain readable");
+        assertEquals(List.of(SAMSUNG), merged.companies());
+        assertEquals(2, snapshot.links().size(), "the saved source remains unchanged");
         verifyNoInteractions(catalog);
     }
 

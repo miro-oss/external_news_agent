@@ -83,7 +83,7 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertThrows(ReportException.class,()->service.context(report));
     }
 
-    @Test void batchReviewStatesKeepReportIsolationOrderAndLeaveFrozenInputsOnSingleReportReads() {
+    @Test void batchReviewStatesKeepReportIsolationOrderAndFrozenInputForRevisionExclusions() {
         long first=report(List.of(item('a',2,null),item('b',2,null)));
         long second=report(List.of(item('a',2,null)));
         long untouched=report(List.of(item('a',2,null)));
@@ -102,7 +102,8 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertEquals("CONFIRMED_ERROR",states.getFirst().verdict());
         assertEquals("a".repeat(64),states.getFirst().eventKey());
         assertEquals("a".repeat(64),states.get(1).eventKey());
-        assertTrue(states.stream().allMatch(feedback->feedback.input()==null && feedback.diagnosis()==null));
+        assertTrue(states.stream().allMatch(feedback->feedback.input()!=null && feedback.diagnosis()==null));
+        assertEquals(inputs.get(first).getFirst(),states.getFirst().input());
         assertTrue(store.eventReviewStates(List.of()).isEmpty());
         var complete=store.eventFeedback(first);
         assertEquals(List.of(firstReview.id(),laterReview.id()),complete.stream().map(Feedback::id).toList());
@@ -191,7 +192,7 @@ class ReportEventFeedbackOracleIntegrationTests {
                 Integer.class,submitted.id()));
     }
 
-    @Test void confirmedErrorDisappearsAcrossReloadsWithoutChangingOtherEventsOrSavedEvidence() {
+    @Test void allSubmittedOpinionsDisappearAcrossReloadsWithoutChangingSavedEventsOrEvidence() {
         // These events intentionally share finding IDs: one incorrect event does not invalidate its siblings.
         var originals=IntStream.range(0,6).mapToObj(i->item((char)('a'+i),2,null)).toList();
         long report=report(originals);
@@ -201,12 +202,12 @@ class ReportEventFeedbackOracleIntegrationTests {
         var preference=service.submit(report,request('d',"preference","PREFERENCE"));
         var insufficient=service.submit(report,request('e',"insufficient","SUMMARY_ERROR"));
         var processing=service.submit(report,request('f',"processing","OTHER"));
-        assertEquals(6,service.context(report).events().size());
+        assertTrue(service.context(report).events().isEmpty(), "all submitted events hide before review starts");
 
         when(gateway.review(isNull(),eq(report),any())).thenReturn(result("CONFIRMED_ERROR"));
         worker.process(job(rejected.id()));
         store.reviewed(store.byId(notConfirmed.id()).orElseThrow(),"NOT_CONFIRMED","오류를 확인하지 못했습니다.",result("NOT_CONFIRMED"),now());
-        // Even an unexpected error verdict on personal preference must never suppress a common event.
+        // Review outcome never revokes the explicit display exclusion from submitting an opinion.
         store.reviewed(store.byId(preference.id()).orElseThrow(),"CONFIRMED_ERROR","관심에 대한 의견입니다.",result("CONFIRMED_ERROR"),now());
         store.reviewed(store.byId(insufficient.id()).orElseThrow(),"INSUFFICIENT_EVIDENCE","검토 근거가 부족합니다.",result("INSUFFICIENT_EVIDENCE"),now());
         jdbc.update("UPDATE news_feedback SET status='PROCESSING',verdict='CONFIRMED_ERROR' WHERE id=?",processing.id());
@@ -217,10 +218,7 @@ class ReportEventFeedbackOracleIntegrationTests {
         clearInvocations(gateway);
 
         var refreshed=service.context(report);
-        assertEquals(List.of('b','c','d','e','f').stream().map(key->String.valueOf(key).repeat(64)).toList(),
-                refreshed.events().stream().map(event->event.eventKey()).toList());
-        assertEquals(List.of(0,1,2,3,4),refreshed.events().stream().map(event->event.eventIndex()).toList());
-        assertTrue(refreshed.events().stream().allMatch(event->event.sourceFindingIds().equals(List.of(501L,502L))));
+        assertTrue(refreshed.events().isEmpty());
         assertEquals(6,refreshed.feedback().size());
         assertEquals("CONFIRMED_ERROR",refreshed.feedback().stream().filter(feedback->feedback.id()==rejected.id()).findFirst().orElseThrow().verdict());
         assertEquals("PENDING",refreshed.feedback().stream().filter(feedback->feedback.id()==pending.id()).findFirst().orElseThrow().status());
@@ -240,7 +238,7 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertEquals(frozenInput,store.byId(rejected.id()).orElseThrow().input());verifyNoInteractions(gateway);
     }
 
-    @Test void errorReviewOfOlderEventRevisionDoesNotSuppressTheCurrentEvent() {
+    @Test void submittedOlderEventRevisionKeepsItsVerifiedEvidenceHiddenAfterTheKeyChanges() {
         var original=item('a',2,null);
         long report=report(List.of(original));
         var submitted=service.submit(report,request('a',"old-revision","SUMMARY_ERROR"));
@@ -253,8 +251,7 @@ class ReportEventFeedbackOracleIntegrationTests {
         var revised=new Item(null,null,null,original.articles(),null,null,null,null,"report-v1","fixture",null,revisedEvent);
         inputs.put(report,List.of(revised));
         var current=service.context(report);
-        assertEquals(1,current.events().size());assertEquals("b".repeat(64),current.events().getFirst().eventKey());
-        assertEquals(0,current.events().getFirst().eventIndex());
+        assertTrue(current.events().isEmpty());
         assertEquals("a".repeat(64),current.feedback().getFirst().eventKey());
         assertEquals(original,store.byId(submitted.id()).orElseThrow().input());
         assertEquals(current,service.context(report));verifyNoInteractions(gateway);
@@ -276,7 +273,7 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertTrue(json.valueToTree(deliveredFeedback.export(submitted.id()-1,1)).path("cases").isEmpty());
     }
 
-    @Test void submittedPreferenceImmediatelyDisappearsFromMailBeforeReviewOrCriterionActivation() {
+    @Test void submittedPreferenceImmediatelyDisappearsFromReadingAndMailBeforeReviewOrCriterionActivation() {
         var originals=List.of(item('a',1,null),item('b',2,null));
         long reportId=report(originals);
         var report=new TransactionTemplate(manager).execute(tx->em.find(NewsReport.class,reportId));
@@ -291,14 +288,20 @@ class ReportEventFeedbackOracleIntegrationTests {
                 .channelType(com.example.be.domain.notifications.entity.ChannelType.EMAIL).maxLength(Integer.MAX_VALUE).build();
         java.util.function.Supplier<String> mail=()->String.join("\n",notificationRenderer.render(report,channel,
                 deliveryProjection.projectForDelivery(report,visible,deliveryProjection.reviews(reportId)),null).chunks());
+        java.util.function.Supplier<com.example.be.domain.reports.service.ReportEventFeedbackProjection.View> reading=
+                ()->deliveryProjection.project(report,visible,deliveryProjection.reviews(reportId));
         assertTrue(mail.get().contains("이벤트a"));
+        assertEquals(2,reading.get().readingContent().structuredContent().importantEvents().size());
 
         var submitted=service.submit(reportId,request('a',"mail-preference","PREFERENCE"));
 
         assertEquals("PENDING",submitted.status());
         assertFalse(mail.get().contains("이벤트a"));
         assertTrue(mail.get().contains("이벤트b"));
-        assertEquals(2,service.context(reportId).events().size());
+        assertEquals(List.of("b".repeat(64)),service.context(reportId).events().stream().map(event->event.eventKey()).toList());
+        assertEquals(List.of("이벤트b"),reading.get().readingContent().structuredContent().importantEvents().stream()
+                .map(ReportContent.ImportantEvent::title).toList());
+        assertFalse(reading.get().readingContent().markdownBody().contains("이벤트a"));
         assertTrue(companyInterests.list().criteria().stream().noneMatch(c->c.feedbackId()==submitted.id()));
         verifyNoInteractions(gateway);
         when(gateway.review(isNull(),eq(reportId),any())).thenReturn(result("PREFERENCE"));
@@ -310,7 +313,9 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertNull(draft.lastApplication());
         assertFalse(mail.get().contains("이벤트a"));
         assertTrue(mail.get().contains("이벤트b"));
-        assertEquals(2,service.context(reportId).events().size());
+        assertEquals(List.of("b".repeat(64)),service.context(reportId).events().stream().map(event->event.eventKey()).toList());
+        assertEquals(List.of("이벤트b"),reading.get().readingContent().structuredContent().importantEvents().stream()
+                .map(ReportContent.ImportantEvent::title).toList());
         assertEquals(savedReport,reportSnapshot(reportId));
         assertEquals(originals.getFirst(),store.byId(submitted.id()).orElseThrow().input());
         verifyNoInteractions(gateway);

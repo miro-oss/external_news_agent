@@ -7,6 +7,7 @@ import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.FilingRow;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.IssueLink;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 
@@ -27,7 +28,8 @@ public final class ReportIssueCompanyProjection {
     public static List<IssueLink> storedLinks(NewsReport report, String corpCode) {
         var snapshot = report.getReportIssueCompanySnapshot();
         if (snapshot == null || !snapshot.valid()) return List.of();
-        return snapshot.links().stream().filter(link -> corpCode.equals(link.company().corpCode()))
+        return snapshot.links().stream().filter(link -> ReportDartEligibility.isListed(link.company())
+                        && corpCode.equals(link.company().corpCode()))
                 .map(link -> new IssueLink(link.findingId(), link.articleId(), link.issueId(), link.matchedName(),
                         link.evidenceText(), link.evidenceUrl(), link.rceptNos())).distinct().toList();
     }
@@ -41,23 +43,68 @@ public final class ReportIssueCompanyProjection {
 
     public static List<CompanyAttachment> project(NewsReport report, ReportEventFeedbackProjection.View view,
                                                  List<CompanyAttachment> companies) {
-        if (companies == null || companies.isEmpty()) return List.of();
+        if (companies == null || companies.isEmpty() || view == null || view.readingContent() == null
+                || view.readingContent().structuredContent() == null) return List.of();
         Map<Long, Long> visibleArticles = new LinkedHashMap<>();
-        if (view != null) view.findings().stream()
+        view.findings().stream()
                 .filter(finding -> !view.excludedEvidenceFindingIds().contains(finding.getId())
                         && !report.getCompanySuppressedFindingIds().contains(finding.getId()))
                 .forEach(finding -> visibleArticles.put(finding.getId(),
                         finding.getArticle() == null ? null : finding.getArticle().getId()));
+        var events = view.readingContent().structuredContent().importantEvents().stream()
+                .filter(event -> event.sourceFindingIds() != null && !event.sourceFindingIds().isEmpty()
+                        && event.sourceFindingIds().stream().allMatch(id -> visibleArticles.get(id) != null)).toList();
+        if (events.isEmpty()) return List.of();
+        var titleNames = titleNames(report, events, visibleArticles);
         Set<String> selected = visibleSelections(report, view, visibleArticles.keySet());
         List<CompanyAttachment> result = new ArrayList<>();
         for (var company : companies) {
+            if (!ReportDartEligibility.isListed(company.company())) continue;
             var links = company.issueLinks().stream().filter(link -> visibleArticles.containsKey(link.findingId())
                     && Long.valueOf(link.articleId()).equals(visibleArticles.get(link.findingId()))).toList();
+            var verified = Set.copyOf(storedLinks(report, company.company().corpCode()));
+            Set<Long> titledSources = new HashSet<>();
+            for (var event : events) {
+                var names = titleNames.get(event);
+                boolean named = ReportCompanyTitleMatcher.name(event.title(), company.company().corpName(), names)
+                        || ReportCompanyTitleMatcher.stockCode(event.title(), company.company().stockCode())
+                        || links.stream().filter(verified::contains)
+                            .filter(link -> event.sourceFindingIds().contains(link.findingId()))
+                            .anyMatch(link -> ReportCompanyTitleMatcher.name(event.title(), link.matchedName(), names));
+                if (named) titledSources.addAll(event.sourceFindingIds());
+            }
+            if (titledSources.isEmpty()) continue;
+            // A company named by one issue must not retain links from incidental mentions in another issue.
+            links = links.stream().filter(link -> titledSources.contains(link.findingId())).toList();
             if (links.isEmpty() && !selected.contains(company.company().corpCode())) continue;
             result.add(new CompanyAttachment(company.company(), company.status(), company.message(), company.data(), links,
                     filingRows(company.data(), links)));
         }
         return List.copyOf(result);
+    }
+
+    /** Hidden or unlisted saved identities may disambiguate a title, but never become visible candidates. */
+    private static Map<ReportContent.ImportantEvent, List<ReportCompanyTitleMatcher.Match>> titleNames(
+            NewsReport report, List<ReportContent.ImportantEvent> events, Map<Long, Long> visibleArticles) {
+        Set<String> names = new HashSet<>();
+        if (report.getTopicDartCompany() != null) names.add(report.getTopicDartCompany().corpName());
+        if (report.getCollectionContexts() != null) report.getCollectionContexts().forEach(context ->
+                context.topics().stream().map(topic -> topic.dartCompany()).filter(java.util.Objects::nonNull)
+                        .forEach(company -> names.add(company.corpName())));
+        var snapshot = report.getReportIssueCompanySnapshot();
+        if (snapshot != null) snapshot.links().stream().map(ReportIssueCompanySnapshot.Link::company)
+                .filter(java.util.Objects::nonNull).forEach(company -> names.add(company.corpName()));
+        var links = snapshot != null && snapshot.valid() ? snapshot.links() : List.<ReportIssueCompanySnapshot.Link>of();
+        Map<ReportContent.ImportantEvent, List<ReportCompanyTitleMatcher.Match>> result = new LinkedHashMap<>();
+        for (var event : events) {
+            Set<String> identities = new HashSet<>(names);
+            links.stream().filter(link -> event.sourceFindingIds().contains(link.findingId())
+                            && Long.valueOf(link.articleId()).equals(visibleArticles.get(link.findingId())))
+                    .forEach(link -> identities.add(link.matchedName()));
+            result.put(event, identities.stream().flatMap(name -> ReportCompanyTitleMatcher.matches(event.title(), name).stream())
+                    .distinct().toList());
+        }
+        return result;
     }
 
     private static Set<String> visibleSelections(NewsReport report, ReportEventFeedbackProjection.View view,

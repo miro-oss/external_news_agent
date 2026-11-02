@@ -232,7 +232,7 @@ class ReportInsightSnapshotAssemblerTest {
         assertEquals("이 리포트는 인사이트에 사용할 검증된 근거가 없습니다.", exception.getMessage());
     }
 
-    @Test void stalePendingUnconfirmedPreferencesAndRecipientErrorsKeepTheInsightInputHash() {
+    @Test void submittedLocalOpinionsInvalidateInsightsButUnboundAndRecipientReviewsDoNot() {
         var selected = event("저장된 사건", 50L);
         var report = NewsReport.builder().id(10L).title("일일 리포트").reportScope(ReportScope.DAILY)
                 .reflectedFindingIds(List.of(50L)).structuredContent(new ReportContent(List.of(),
@@ -244,15 +244,22 @@ class ReportInsightSnapshotAssemblerTest {
         var original = assembler.assemble(10L);
         for (var review : List.of(
                 review('b', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null),
+                review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", 99L))) {
+            when(feedback.eventFeedback(10L)).thenReturn(List.of(review));
+            assertEquals(original.inputHash(), assembler.assemble(10L).inputHash());
+        }
+        for (var review : List.of(
                 review('a', Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null),
                 review('a', Category.SUMMARY_ERROR, Status.PROCESSING, "CONFIRMED_ERROR", null),
                 review('a', Category.SUMMARY_ERROR, Status.FAILED, "CONFIRMED_ERROR", null),
                 review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "NOT_CONFIRMED", null),
                 review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "INSUFFICIENT_EVIDENCE", null),
-                review('a', Category.PREFERENCE, Status.COMPLETED, "CONFIRMED_ERROR", null),
-                review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", 99L))) {
+                review('a', Category.PREFERENCE, Status.COMPLETED, "PREFERENCE", null))) {
             when(feedback.eventFeedback(10L)).thenReturn(List.of(review));
-            assertEquals(original.inputHash(), assembler.assemble(10L).inputHash());
+            var read = assembler.assembleForRead(10L);
+            assertTrue(read.findings().isEmpty());
+            assertNotEquals(original.inputHash(), read.inputHash(), "submitted opinions must hide stale insights immediately");
+            assertThrows(GeneralException.class, () -> assembler.assemble(10L));
         }
     }
 

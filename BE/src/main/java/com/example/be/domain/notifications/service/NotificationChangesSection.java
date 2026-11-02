@@ -15,82 +15,73 @@ final class NotificationChangesSection {
     private static final String BASIS = "새로 포함은 사건의 최초 발생을 뜻하지 않습니다. 수치는 수집한 유효 이슈 기준입니다.";
 
     static void email(StringBuilder html, ReportChanges changes) {
-        if (changes == null) return;
+        if (!hasContent(changes)) return;
         html.append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"table-layout:fixed;margin-top:20px\"><tbody><tr><td class=\"email-card\" bgcolor=\"#f8fafc\" style=\"padding:24px;border:1px solid #dde3eb;border-radius:12px;background:#f8fafc\"><h2 style=\"margin:0 0 10px;font-size:18px;color:#191f28\">")
                 .append(TITLE).append("</h2>");
         note(html, periods(changes));
-        if (changes.status() != ReportChanges.Status.READY) note(html, changes.message());
-        else {
+        if (hasIssueContent(changes)) {
             note(html, counts(changes));
-            if (changes.items().isEmpty()) note(html, "비교할 이슈 근거가 없습니다. 변화가 없다는 뜻은 아닙니다.");
             for (var item : briefItems(changes)) {
                 html.append("<p style=\"margin:14px 0 4px;font-size:14px;line-height:1.6;color:#191f28;overflow-wrap:anywhere\"><strong>")
                         .append(escape(type(item.type()) + " · " + item.title())).append("</strong></p>");
                 note(html, item.summary());
             }
-            if (changes.items().size() > briefItems(changes).size()) note(html, "나머지 변화와 양쪽 근거는 첨부 PDF의 변화 비교 상세에서 확인하세요.");
-            changes.notes().forEach(value -> note(html, value));
+            if (visibleItems(changes).size() > briefItems(changes).size()) note(html, "나머지 변화와 양쪽 근거는 첨부 PDF의 변화 비교 상세에서 확인하세요.");
             note(html, BASIS);
         }
         var keywords = changes.keywordChanges();
-        if (keywords != null) {
+        if (hasKeywordContent(keywords)) {
             html.append("<h3 style=\"margin:20px 0 8px;font-size:15px;color:#191f28\">키워드 변화</h3>");
             note(html, keywords.message());
-            if (keywords.status() == ReportChanges.KeywordStatus.AVAILABLE) {
-                note(html, denominator(keywords));
-                note(html, "이전(회색) → 이번(파랑) · 비중 0~100% 동일 눈금");
-                for (var item : keywords.items()) {
-                    html.append("<p style=\"margin:12px 0 4px;font-size:13px;color:#191f28;overflow-wrap:anywhere\"><strong>")
-                            .append(escape(item.keyword())).append("</strong></p>");
-                    note(html, amount(item));
-                    bar(html, item.previousSharePercent(), "#94a3b8");
-                    bar(html, item.currentSharePercent(), "#1b64da");
-                }
-                if (keywords.lowSample()) note(html, "유효 이슈가 5건 미만인 기간이 있어 작은 변화에도 비중이 크게 달라질 수 있습니다.");
+            note(html, denominator(keywords));
+            note(html, "이전(회색) → 이번(파랑) · 비중 0~100% 동일 눈금");
+            for (var item : keywords.items().stream().limit(3).toList()) {
+                html.append("<p style=\"margin:12px 0 4px;font-size:13px;color:#191f28;overflow-wrap:anywhere\"><strong>")
+                        .append(escape(item.keyword())).append("</strong></p>");
+                note(html, amount(item));
+                bar(html, item.previousSharePercent(), "#94a3b8");
+                bar(html, item.currentSharePercent(), "#1b64da");
             }
+            if (keywords.lowSample()) note(html, "유효 이슈가 5건 미만인 기간이 있어 작은 변화에도 비중이 크게 달라질 수 있습니다.");
         }
         html.append("</td></tr></tbody></table>");
     }
 
     static void pdfBrief(ReportPdfLayout pdf, ReportChanges changes) throws IOException {
-        if (changes == null) return;
+        if (!hasContent(changes)) return;
         pdf.reserve(140);
         pdf.section(TITLE);
         pdf.muted(periods(changes));
-        if (changes.status() != ReportChanges.Status.READY) pdf.muted(changes.message());
-        else {
+        if (hasIssueContent(changes)) {
             pdf.muted(counts(changes));
-            if (changes.items().isEmpty()) pdf.muted("비교할 이슈 근거가 없습니다. 변화가 없다는 뜻은 아닙니다.");
             for (var item : briefItems(changes)) {
                 pdf.reserve(85);
                 pdf.subheading(type(item.type()) + " · " + item.title());
                 pdf.paragraph(item.summary());
             }
-            for (String note : changes.notes()) pdf.muted(note);
             pdf.muted(BASIS);
-            if (!changes.items().isEmpty()) pdf.internalLink("변화 비교 상세와 양쪽 근거", "changes-detail");
+            pdf.internalLink("변화 비교 상세와 양쪽 근거", "changes-detail");
         }
         var keywords = changes.keywordChanges();
-        if (keywords == null) return;
+        if (!hasKeywordContent(keywords)) return;
         pdf.reserve(100);
         pdf.subheading("키워드 변화");
         pdf.muted(keywords.message());
-        if (keywords.status() != ReportChanges.KeywordStatus.AVAILABLE) return;
         pdf.muted(denominator(keywords));
         pdf.muted("이전(회색) → 이번(파랑) · 비중 0~100% 동일 눈금");
-        for (var item : keywords.items()) pdf.keywordComparison(item.keyword(), amount(item),
+        for (var item : keywords.items().stream().limit(3).toList()) pdf.keywordComparison(item.keyword(), amount(item),
                 bounded(item.previousSharePercent()), bounded(item.currentSharePercent()));
         if (keywords.lowSample()) pdf.muted("유효 이슈가 5건 미만인 기간이 있어 작은 변화에도 비중이 크게 달라질 수 있습니다.");
     }
 
     static void pdfDetails(ReportPdfLayout pdf, ReportChanges changes) throws IOException {
-        if (changes == null || changes.status() != ReportChanges.Status.READY || changes.items().isEmpty()) return;
+        if (changes == null || !hasIssueContent(changes)) return;
         pdf.pageBreak();
         pdf.anchor("changes-detail");
         pdf.section("변화 비교 상세");
         pdf.internalLink("핵심 브리핑으로 돌아가기", "summary");
         pdf.muted(periods(changes));
-        for (var item : changes.items()) {
+        for (var item : visibleItems(changes)) {
             pdf.reserve(100);
             pdf.subheading(type(item.type()) + " · " + item.title());
             pdf.paragraph(item.summary());
@@ -114,10 +105,24 @@ final class NotificationChangesSection {
     }
 
     private static List<ReportChanges.Item> briefItems(ReportChanges changes) {
-        return changes.items().stream().filter(item -> item.type() != ReportChanges.Type.UNCHANGED)
+        return visibleItems(changes).stream().filter(item -> item.type() != ReportChanges.Type.UNCHANGED)
                 .sorted(Comparator.comparingInt(item -> switch (item.type()) {
                     case REFUTATION -> 0; case UPDATED -> 1; case NEWLY_INCLUDED -> 2; default -> 3;
                 })).filter(item -> shortEnough(item.title(), 110) && shortEnough(item.summary(), 240)).limit(3).toList();
+    }
+    private static boolean hasContent(ReportChanges changes) {
+        return changes != null && (hasIssueContent(changes) || hasKeywordContent(changes.keywordChanges()));
+    }
+    private static boolean hasIssueContent(ReportChanges changes) {
+        return changes.status() == ReportChanges.Status.READY && !visibleItems(changes).isEmpty();
+    }
+    private static List<ReportChanges.Item> visibleItems(ReportChanges changes) {
+        // Global comparison notes may describe these omitted items, so delivery omits those notes too.
+        return changes.items().stream().filter(item -> item.type() != ReportChanges.Type.UNDETERMINED).toList();
+    }
+    private static boolean hasKeywordContent(ReportChanges.KeywordChanges keywords) {
+        return keywords != null && keywords.status() == ReportChanges.KeywordStatus.AVAILABLE
+                && !keywords.items().isEmpty();
     }
     private static boolean shortEnough(String value, int limit) { return value == null || value.codePointCount(0, value.length()) <= limit; }
     private static String type(ReportChanges.Type type) {
@@ -127,8 +132,8 @@ final class NotificationChangesSection {
         };
     }
     private static String counts(ReportChanges changes) {
-        return java.util.Arrays.stream(ReportChanges.Type.values()).map(type -> type(type) + " "
-                + changes.items().stream().filter(item -> item.type() == type).count() + "건")
+        return java.util.Arrays.stream(ReportChanges.Type.values()).filter(type -> type != ReportChanges.Type.UNDETERMINED)
+                .map(type -> type(type) + " " + visibleItems(changes).stream().filter(item -> item.type() == type).count() + "건")
                 .collect(java.util.stream.Collectors.joining(" · "));
     }
     private static String periods(ReportChanges changes) {

@@ -36,6 +36,7 @@ public class ReportDartRepository {
     }
 
     void enqueue(long reportId, Company company, boolean enabled, LocalDateTime now) {
+        if (!ReportDartEligibility.isListed(company)) return;
         jdbc.update("""
                 INSERT INTO news_report_dart_attachments
                     (report_id, corp_code, corp_name, stock_code, status, message, next_attempt_at, created_at, updated_at)
@@ -54,15 +55,27 @@ public class ReportDartRepository {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
                 WHERE report.id > ? AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
-                  AND ((((report.report_scope = 'RUN'
-                        AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode'))
+                  AND ((report.report_scope = 'RUN'
+                        AND EXISTS (SELECT 1 FROM JSON_TABLE(report.collection_contexts,
+                            '$[*].topics[*].dartCompany' COLUMNS (
+                                corp_code VARCHAR2(100) PATH '$.corpCode',
+                                stock_code VARCHAR2(100) PATH '$.stockCode')) selected
+                            WHERE REGEXP_LIKE(selected.corp_code, '^[0-9]{8}$', 'c')
+                              AND REGEXP_LIKE(selected.stock_code, '^[0-9A-Z]{6}$', 'c')
+                              AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                                WHERE attachment.report_id = report.id AND attachment.corp_code = selected.corp_code)))
                        OR (report.report_scope = 'WEEKLY' AND report.topic_id IS NOT NULL
-                           AND report.topic_dart_corp_code IS NOT NULL))
-                    AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment WHERE attachment.report_id = report.id))
+                           AND REGEXP_LIKE(report.topic_dart_corp_code, '^[0-9]{8}$', 'c')
+                           AND REGEXP_LIKE(report.topic_dart_stock_code, '^[0-9A-Z]{6}$', 'c')
+                           AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                             WHERE attachment.report_id = report.id AND attachment.corp_code = report.topic_dart_corp_code))
                     OR (JSON_VALUE(report.report_issue_company_snapshot, '$.version') = 'report-issue-companies.v1'
                         AND EXISTS (SELECT 1 FROM JSON_TABLE(report.report_issue_company_snapshot,
-                            '$.links[*]' COLUMNS (corp_code VARCHAR2(8) PATH '$.company.corpCode')) linked
-                            WHERE NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
+                            '$.links[*]' COLUMNS (corp_code VARCHAR2(100) PATH '$.company.corpCode',
+                                stock_code VARCHAR2(100) PATH '$.company.stockCode')) linked
+                            WHERE REGEXP_LIKE(linked.corp_code, '^[0-9]{8}$', 'c')
+                              AND REGEXP_LIKE(linked.stock_code, '^[0-9A-Z]{6}$', 'c')
+                              AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment
                                 WHERE attachment.report_id = report.id AND attachment.corp_code = linked.corp_code))))
                 ORDER BY report.id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1), afterReportId);
@@ -79,6 +92,7 @@ public class ReportDartRepository {
                 JOIN news_reports report ON report.id = attachment.report_id
                 JOIN news_dart_financial_cache cache ON cache.corp_code = attachment.corp_code
                 WHERE attachment.report_id > ? AND attachment.payload_json IS NULL
+                  AND REGEXP_LIKE(attachment.stock_code, '^[0-9A-Z]{6}$', 'c')
                   AND attachment.status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
                   AND cache.payload_json IS NOT NULL
                   AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
@@ -120,6 +134,7 @@ public class ReportDartRepository {
                 JOIN news_reports report ON report.id = attachment.report_id
                 JOIN news_dart_financial_cache cache ON cache.corp_code = attachment.corp_code
                 WHERE cache.payload_json IS NOT NULL AND cache.cached_at <= ?
+                  AND REGEXP_LIKE(attachment.stock_code, '^[0-9A-Z]{6}$', 'c')
                   AND (cache.lease_token IS NULL OR cache.lease_expires_at <= ?)
                   AND attachment.created_at > cache.cached_at
                   AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
@@ -139,6 +154,7 @@ public class ReportDartRepository {
                 SELECT attachment.report_id, attachment.corp_code, attachment.corp_name, attachment.stock_code, attachment.attempts
                 FROM news_report_dart_attachments attachment JOIN news_reports report ON report.id = attachment.report_id
                 WHERE attachment.status = 'PENDING' AND attachment.next_attempt_at <= ?
+                  AND REGEXP_LIKE(attachment.stock_code, '^[0-9A-Z]{6}$', 'c')
                   AND report.deleted_at IS NULL AND report.report_status <> 'PENDING'
                 ORDER BY attachment.next_attempt_at, attachment.report_id FETCH FIRST 10 ROWS ONLY
                 """, (rs, row) -> new Job(rs.getLong(1), new Company(rs.getString(2), rs.getString(3), rs.getString(4)),
@@ -165,6 +181,7 @@ public class ReportDartRepository {
             jdbc.update("""
                     UPDATE news_report_dart_attachments SET status = 'PENDING', message = ?, next_attempt_at = ?, updated_at = ?
                     WHERE status = 'DISABLED'
+                      AND REGEXP_LIKE(stock_code, '^[0-9A-Z]{6}$', 'c')
                     """, ReportDartMessages.PENDING, ts(now), ts(now));
         } else {
             jdbc.update("""
@@ -179,6 +196,7 @@ public class ReportDartRepository {
                 UPDATE news_report_dart_attachments SET status = ?, message = ?, attempts = 0, next_attempt_at = ?, updated_at = ?,
                     lease_token = NULL, lease_expires_at = NULL
                 WHERE report_id = ? AND status IN ('FAILED', 'DISABLED')
+                  AND REGEXP_LIKE(stock_code, '^[0-9A-Z]{6}$', 'c')
                 """, enabled ? "PENDING" : "DISABLED", enabled ? ReportDartMessages.PENDING : ReportDartMessages.DISABLED,
                 ts(now), ts(now), reportId);
     }

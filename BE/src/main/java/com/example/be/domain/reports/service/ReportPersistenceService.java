@@ -114,7 +114,8 @@ public class ReportPersistenceService {
             return new Reservation(null, false);
         }
 
-        NewsReport report = reportRepository.save(NewsReport.builder()
+        // JDBC comparison input references this row before the transaction commits.
+        NewsReport report = reportRepository.saveAndFlush(NewsReport.builder()
                 .run(run)
                 .collectionContexts(java.util.List.of(ReportCollectionContext.from(run)))
                 .title(PENDING_TITLE)

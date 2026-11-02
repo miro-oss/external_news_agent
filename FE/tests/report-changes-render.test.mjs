@@ -124,6 +124,27 @@ test('unavailable keyword comparisons show a reason and cannot revive retained n
   assert.doesNotMatch(notReady, /고유 이슈 2개 → 9개|width:20%|\+25%p/)
 })
 
+test('unavailable comparison prints a shared exclusion reason once, including keyword fallback wording', () => {
+  const message = '표시에서 제외된 자료가 있어 키워드 증감을 비교하지 않습니다.'
+  for (const keywordMessage of [message, ` ${message} `, '']) {
+    const html = render({ ...reportChangesFixture(117, 'unavailable'), message,
+      keywordChanges: keywordComparison({ status: 'UNAVAILABLE', reason: 'FILTERED_INPUT', message: keywordMessage }) })
+    assert.equal(html.split(message).length - 1, 1)
+    assert.doesNotMatch(html, /class="report-changes-footnote"/)
+    assert.doesNotMatch(html, /고유 이슈 2개 → 9개|width:20%|\+25%p/)
+  }
+})
+
+test('unavailable comparison preserves a distinct keyword explanation', () => {
+  const message = '보고서의 변화 비교를 완료하지 못했습니다.'
+  const keywordMessage = '수집 조건이 달라 키워드 증감을 비교하지 않습니다.'
+  const html = render({ ...reportChangesFixture(117, 'failed'), message,
+    keywordChanges: keywordComparison({ status: 'UNAVAILABLE', reason: 'CONDITIONS_CHANGED', message: '' }) })
+  assert.equal(html.split(message).length - 1, 1)
+  assert.equal(html.split(keywordMessage).length - 1, 1)
+  assert.ok(html.includes(`<p class="report-changes-footnote">${keywordMessage}</p>`))
+})
+
 test('first three verified changes stay concise while all other changes and long explanations remain readable on expansion', () => {
   const data = reportChangesFixture()
   const longText = '긴 설명의 조건과 근거를 모두 보존합니다. '.repeat(15) + '마지막 반증 조건도 유지합니다.'

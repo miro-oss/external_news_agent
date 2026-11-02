@@ -83,7 +83,8 @@ class PersonalizedNotificationRendererTest {
         when(changesService.projectForDelivery(eq(fixture.report()), any(), eq(true))).thenReturn(changes);
         var channel = NotificationChannel.builder().channelType(ChannelType.EMAIL).maxLength(3500).build();
         var result = personalized.render(fixture.report(), channel, RECIPIENT_ID);
-        assertTrue(result.chunks().getFirst().contains(changes.message()));
+        assertFalse(result.chunks().getFirst().contains(changes.message()));
+        assertFalse(result.chunks().getFirst().contains("지난 보고서와 달라진 점"));
         verify(changesService, times(1)).projectForDelivery(eq(fixture.report()), any(), eq(true));
         verify(pdfRenderer).renderDetailed(eq(fixture.report()), any(), any(), any(), any(), any(), same(changes), any());
         verify(changesService, never()).get(anyLong());
@@ -107,7 +108,7 @@ class PersonalizedNotificationRendererTest {
         assertFalse(body.contains("공용 제외"));
         assertFalse(body.contains("숨겨진 헤드라인"));
         assertTrue(body.contains("허용된 관점 해석"));
-        assertTrue(body.contains("허용된 전제"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
     }
 
     @ParameterizedTest
@@ -122,6 +123,13 @@ class PersonalizedNotificationRendererTest {
             assertTrue(body.contains("정상 사건 제목"));
             assertTrue(body.contains("정상 사건 주요 내용"));
             assertTrue(body.contains("정상 후속 확인"));
+            if (type == ChannelType.EMAIL) {
+                var briefing = org.jsoup.Jsoup.parse(body).selectFirst("td[bgcolor='#e8f3ff']");
+                // The main event shares excluded evidence 12; only watch evidence 13 is eligible here.
+                assertEquals(List.of("1. 후속 확인 · 정상 후속 확인"), briefing.select("h3").eachText());
+                assertTrue(briefing.select("p").isEmpty());
+                assertFalse(body.contains("정상 확인 이유"));
+            }
             assertTrue(body.contains("https://example.com/source-12"));
             assertTrue(body.contains("https://example.com/source-13"));
             assertTrue(body.contains("https://news.example.com/#/reports?reportId=17"));
@@ -204,7 +212,7 @@ class PersonalizedNotificationRendererTest {
 
     @ParameterizedTest
     @EnumSource(ChannelType.class)
-    void localOpinionsImmediatelyChangeManualAndQueuedDeliveryWithoutChangingPublicReading(ChannelType type) {
+    void localOpinionsImmediatelyChangePublicReadingAndBothDeliveryEntryPoints(ChannelType type) {
         Fixture fixture = fixture(false);
         List<Feedback> reviews = List.of(
                 review('a', Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null),
@@ -223,7 +231,11 @@ class PersonalizedNotificationRendererTest {
                 assertTrue(body.contains("정상 사건 제목"));
             }
             var publicView = projection.project(fixture.report(), new ReportFindings.Visible(fixture.findings(), false), List.of(review));
-            assertSame(fixture.report().getStructuredContent(), publicView.readingContent().structuredContent());
+            assertRejectedContentAbsent(publicView.readingContent().markdownBody());
+            assertEquals(List.of("정상 사건 제목"), eventTitles(publicView));
+            assertEquals(List.of(12L, 13L), publicView.findings().stream().map(Finding::getId).toList());
+            assertEquals(Set.of(11L, 12L), publicView.excludedEvidenceFindingIds());
+            assertTrue(publicView.excludedEvents());
         }
 
         for (var view : preparedViews(fixture.report(), reviews.size() * 2)) {
@@ -282,6 +294,10 @@ class PersonalizedNotificationRendererTest {
     @ValueSource(booleans = {false, true})
     void topicWeeklyPreparedEmailContainsRealPdfWithStoredRecentFilings(boolean queuedDelivery) throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
+        report.recordStructuredContent(StoredReportDartFixture.readingView().readingContent().structuredContent());
+        ReflectionTestUtils.setField(report, "reflectedFindingIds", List.of(51L));
+        when(findings.findForReportByIdIn(List.of(51L))).thenReturn(List.of(finding(51)));
+        when(relevance.filterTopicFindings(eq(29L), anyList())).thenAnswer(call -> call.getArgument(1));
         var stored = new StoredReportDartFixture();
         stored.ready(report);
         var actualRenderer = new NotificationRenderer(findings, relevance, projection,
@@ -308,24 +324,26 @@ class PersonalizedNotificationRendererTest {
         assertEquals("application/pdf", attachment.contentType());
         try (var document = Loader.loadPDF(attachment.content())) {
             String text = new PDFTextStripper().getText(document);
-            int companyPage = document.getDocumentCatalog().getNames().getDests().getValue("company-0")
-                    .retrievePageNumber() + 1;
-            assertTrue(html.contains("첨부 PDF p. " + companyPage + "에서 상세 확인"));
+            assertNull(document.getDocumentCatalog().getNames().getDests().getValue("company-0"));
+            assertFalse(html.contains("에서 상세 확인"));
+            assertTrue(html.indexOf("회사 실적 · 공시") > html.indexOf("주요 이슈"));
+            assertTrue(text.indexOf("회사 실적 · 공시") > text.indexOf("중요 이벤트"));
             for (String expected : List.of("회사 실적 · 공시", "SK하이닉스", "최근 공시",
-                    "[정정] 반기보고서 (가상 검증 자료)", "2026-08-14", "이전 공시 (가상 검증 자료)",
-                    "2026-05-15")) assertTrue(text.contains(expected), expected);
+                    "[정정] 반기보고서 (가상 검증 자료)", "2026-08-14")) assertTrue(text.contains(expected), expected);
+            assertFalse(text.contains("이전 공시 (가상 검증 자료)"));
             var links = new ArrayList<String>();
             for (var page : document.getPages()) for (var annotation : page.getAnnotations())
                 if (annotation instanceof PDAnnotationLink link && link.getAction() instanceof PDActionURI uri)
                     links.add(uri.getURI());
             assertTrue(links.contains(StoredReportDartFixture.FILING_URL));
-            assertTrue(links.contains("https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515001234"));
+            assertFalse(links.contains("https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515001234"));
         }
         verify(feedback).prepare(eq(report), eq(RECIPIENT_ID), any(ReportEventFeedbackProjection.View.class));
         verify(feedback).hasActivePersonalPolicies(RECIPIENT_ID);
         verify(reports, times(queuedDelivery ? 1 : 0)).findById(report.getId());
         verifyNoMoreInteractions(reports, feedback);
-        verifyNoInteractions(pdfRenderer, findings, snapshots);
+        verify(findings).findForReportByIdIn(List.of(51L));
+        verifyNoInteractions(pdfRenderer);
         stored.verifyStoredReads(report.getId(), 1);
     }
 
@@ -367,7 +385,7 @@ class PersonalizedNotificationRendererTest {
                 assertTrue(text.contains("정상 사건"));
                 if (ready) {
                     assertTrue(text.contains("자동 전달에서 허용된 판단"));
-                    assertTrue(text.contains("자동 전달에서 유지할 조건"));
+                    assertFalse(text.contains("자동 전달에서 유지할 조건"));
                 } else {
                     assertTrue(text.replaceAll("\\s", "").contains("관점분석이준비되지않아기본보고서만전달합니다."));
                 }
@@ -408,7 +426,7 @@ class PersonalizedNotificationRendererTest {
             String pdfText = new PDFTextStripper().getText(document);
             for (var text : List.of(org.jsoup.Jsoup.parse(result.chunks().getFirst()).text(), pdfText)) {
                 if (active) {
-                    assertTrue(text.replaceAll("\\s", "").contains("개인수신기준을전체후보에확인할수없어"));
+                    assertFalse(text.contains("키워드로 보는 이슈"));
                     assertFalse(text.contains("HBM"));
                 } else assertTrue(text.replaceAll("\\s", "").contains("4건/전체10건·40%"));
             }

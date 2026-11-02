@@ -30,7 +30,7 @@ from app.schemas.report import (
     WatchItem,
 )
 
-PROMPT_VERSION = "report.ko.v1.6"
+PROMPT_VERSION = "report.ko.v1.7"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
@@ -449,7 +449,7 @@ def _deterministic_title(request: ReportRequest) -> str:
         return f"{request.run.report_date.isoformat()} 일일 통합 뉴스 보고서"
     day = request.run.finished_at.date().isoformat()
     topics = list(dict.fromkeys(request.run.topics))
-    prefix = topics[0] if len(topics) == 1 else "통합" if topics else "반도체"
+    prefix = topics[0] if len(topics) == 1 else "통합" if topics else "일반"
     return _truncate_utf8(f"{day} {prefix} 뉴스 모니터링 보고서", 500)
 
 

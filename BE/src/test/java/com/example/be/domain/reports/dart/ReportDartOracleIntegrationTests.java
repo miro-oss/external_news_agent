@@ -8,6 +8,7 @@ import com.example.be.domain.dart.financial.DartFinancialService;
 import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
+import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -42,7 +43,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @ActiveProfiles("local")
 @EnabledIfSystemProperty(named = "news.integration.db", matches = "true")
 class ReportDartOracleIntegrationTests {
-    static final Company COMPANY = new Company("99993201", "공시 첨부 통합검증 회사", "");
+    static final Company COMPANY = new Company("99993201", "공시 첨부 통합검증 회사", "932001");
     @Autowired NewsReportRepository reports;
     @Autowired CollectionRunRepository runs;
     @Autowired ReportDartRepository repository;
@@ -52,11 +53,14 @@ class ReportDartOracleIntegrationTests {
     @MockitoBean DartFinancialService financials;
     final List<Long> reportIds = new ArrayList<>();
     final List<Long> runIds = new ArrayList<>();
+    final List<String> extraCacheCorpCodes = new ArrayList<>();
 
     @AfterEach void removeOwnedFixtures() {
         for (var id : reportIds) jdbc.update("DELETE FROM news_reports WHERE id = ?", id);
         for (var id : runIds) jdbc.update("DELETE FROM news_collection_runs WHERE id = ?", id);
         jdbc.update("DELETE FROM news_dart_financial_cache WHERE corp_code = ?", COMPANY.corpCode());
+        for (var corpCode : extraCacheCorpCodes)
+            jdbc.update("DELETE FROM news_dart_financial_cache WHERE corp_code = ?", corpCode);
     }
 
     private NewsReport create(boolean selected, ReportStatus status) {
@@ -68,6 +72,11 @@ class ReportDartOracleIntegrationTests {
     }
 
     private NewsReport create(ReportScope scope, boolean selected, ReportStatus status,
+                              ReportIssueCompanySnapshot issueCompanies) {
+        return create(scope, selected ? COMPANY : null, status, issueCompanies);
+    }
+
+    private NewsReport create(ReportScope scope, Company selected, ReportStatus status,
                               ReportIssueCompanySnapshot issueCompanies) {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
@@ -81,17 +90,59 @@ class ReportDartOracleIntegrationTests {
             builder.topicId(run.getId()).topicName("주제 주간 검증").reportDate(monday).reportEndDate(monday.plusDays(6))
                     .weeklyInput(new WeeklyReportInput(monday, monday.plusDays(6), List.of(), List.of(), run.getId(), "주제 주간 검증"))
                     .sourceRunIds(List.of(run.getId())).sourceReportCount(0L)
-                    .topicDartCorpCode(selected ? COMPANY.corpCode() : null)
-                    .topicDartCorpName(selected ? COMPANY.corpName() : null)
-                    .topicDartStockCode(selected ? COMPANY.stockCode() : null)
+                    .topicDartCorpCode(selected == null ? null : selected.corpCode())
+                    .topicDartCorpName(selected == null ? null : selected.corpName())
+                    .topicDartStockCode(selected == null ? null : selected.stockCode())
                     // Old collection settings must not supply a company to legacy/unselected topic reports.
                     .collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, HYNIX)))));
         } else {
-            builder.run(run).collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, selected ? COMPANY : null)))));
+            builder.run(run).collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, selected)))));
         }
         var value = reports.saveAndFlush(builder.build());
         reportIds.add(value.getId());
         return value;
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void unlistedSelectionsAndSnapshotLinksDoNotConsumeMissingRecoveryPages(ReportScope scope) {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE).atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+        var ineligible = List.of(
+                new Company("99993401", "비상장", ""),
+                new Company("99993402", "종목 코드 없음", null),
+                new Company("99993403", "잘못된 종목 코드", "0068y0"),
+                new Company("9999340X", "잘못된 회사 코드", "0068Y0"));
+        var hidden = new ArrayList<Long>();
+        for (int index = 0; index < 12; index++) {
+            var company = ineligible.get(index % ineligible.size());
+            // WEEKLY columns already enforce the corporation-code format; JSON inputs do not.
+            if (scope != ReportScope.WEEKLY || company.corpCode().matches("[0-9]{8}"))
+                hidden.add(create(scope, company, ReportStatus.GENERATED, null).getId());
+            var snapshot = new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION, now,
+                    List.of(new ReportIssueCompanySnapshot.Link(company, 51L, 61L, 71L,
+                            company.corpName(), "회사 공시", "https://example.com/61", List.of())));
+            hidden.add(create(scope, false, ReportStatus.GENERATED, snapshot).getId());
+        }
+        var listed = new Company("99993499", "영숫자 상장 종목", "0068Y0");
+        var explicit = create(scope, listed, ReportStatus.GENERATED, null);
+        var linked = create(scope, false, ReportStatus.GENERATED,
+                new ReportIssueCompanySnapshot(ReportIssueCompanySnapshot.RULE_VERSION, now,
+                        List.of(new ReportIssueCompanySnapshot.Link(listed, 51L, 61L, 71L,
+                                listed.corpName(), "상장 회사 공시", "https://example.com/61", List.of()))));
+
+        assertEquals(List.of(explicit.getId(), linked.getId()), repository.missing(hidden.getFirst() - 1));
+        for (var reportId : hidden) {
+            persistence.enqueue(reportId);
+            assertTrue(repository.find(reportId).isEmpty());
+        }
+        persistence.enqueue(explicit.getId());
+        persistence.enqueue(linked.getId());
+        assertEquals(List.of(listed), repository.find(explicit.getId()).stream()
+                .map(ReportDartRepository.Attachment::company).toList());
+        assertEquals(List.of(listed), repository.find(linked.getId()).stream()
+                .map(ReportDartRepository.Attachment::company).toList());
+        assertTrue(repository.missing(hidden.getFirst() - 1).isEmpty());
+        verifyNoInteractions(financials);
     }
 
     @ParameterizedTest
@@ -140,6 +191,32 @@ class ReportDartOracleIntegrationTests {
 
     @ParameterizedTest
     @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void legacyUnlistedAttachmentDoesNotHideMissingExplicitListedCompany(ReportScope scope) {
+        var report = create(scope, true, ReportStatus.GENERATED);
+        jdbc.update("""
+                INSERT INTO news_report_dart_attachments (report_id, corp_code, corp_name, stock_code, status, message)
+                VALUES (?, '99993500', '기존 비상장 회사', NULL, 'DISABLED', '기존 저장 자료')
+                """, report.getId());
+        var legacy = repository.find(report.getId()).getFirst();
+
+        assertEquals(List.of(report.getId()), repository.missing(report.getId() - 1));
+        persistence.enqueue(report.getId());
+        persistence.enqueue(report.getId());
+
+        var attachments = repository.find(report.getId());
+        assertEquals(2, attachments.size());
+        assertTrue(attachments.contains(legacy), "repair preserves the historical attachment");
+        assertEquals(List.of(COMPANY), attachments.stream()
+                .filter(row -> row.company().corpCode().equals(COMPANY.corpCode()))
+                .map(ReportDartRepository.Attachment::company).toList());
+        assertEquals(List.of(COMPANY), service.getStored(report).companies().stream()
+                .map(ReportDartDTO.CompanyAttachment::company).toList());
+        assertTrue(repository.missing(report.getId() - 1).isEmpty());
+        verifyNoInteractions(financials);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
     void snapshotIntentRecoversMissedCompletionAndEnqueueIsIdempotent(ReportScope scope) {
         var eligible = create(scope, true, ReportStatus.GENERATED);
         var legacy = create(scope, false, ReportStatus.GENERATED);
@@ -160,8 +237,10 @@ class ReportDartOracleIntegrationTests {
         persistence.enqueue(eligible.getId());
         assertEquals(1, repository.find(eligible.getId()).size());
         assertFalse(repository.missing().contains(eligible.getId()));
-        assertEquals("PENDING", service.get(eligible.getId()).companies().getFirst().status());
+        assertEquals("PENDING", service.getStored(eligible).companies().getFirst().status());
         assertTrue(service.get(legacy.getId()).companies().isEmpty());
+        assertTrue(service.get(eligible.getId()).companies().isEmpty(),
+                "A stored selection without a visible structured issue title stays hidden");
         verifyNoInteractions(financials);
     }
 
@@ -181,7 +260,7 @@ class ReportDartOracleIntegrationTests {
         assertTrue(repository.saveCache(COMPANY.corpCode(), "correction", data(), now));
         persistence.retry(report.getId());
         persistence.complete(job, "first", data(), false);
-        assertEquals(original, service.get(report.getId()).companies().getFirst().data());
+        assertEquals(original, service.getStored(report).companies().getFirst().data());
         assertEquals(data(), persistence.cache(COMPANY.corpCode(), "other-report").data());
         verifyNoInteractions(financials);
     }
@@ -202,7 +281,7 @@ class ReportDartOracleIntegrationTests {
             cacheStart.countDown();
             assertNotEquals(firstCache.get(10, TimeUnit.SECONDS), secondCache.get(10, TimeUnit.SECONDS));
         }
-        assertEquals("PENDING", service.get(report.getId()).companies().getFirst().status());
+        assertEquals("PENDING", service.getStored(report).companies().getFirst().status());
         verifyNoInteractions(financials);
     }
 
@@ -216,7 +295,7 @@ class ReportDartOracleIntegrationTests {
         var date = java.time.LocalDate.of(1600, 1, 1).plusDays(run.getId());
         if (scope == ReportScope.WEEKLY) date = java.time.LocalDate.of(1600, 1, 1)
                 .with(java.time.DayOfWeek.MONDAY).plusWeeks(run.getId());
-        var second = new Company("99993202", "추가 공시 연결 검증 회사", "");
+        var second = new Company("99993202", "추가 공시 연결 검증 회사", "932002");
         var snapshot = new ReportIssueCompanySnapshot("report-issue-companies.v1", now.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
                 List.of(new ReportIssueCompanySnapshot.Link(COMPANY, 51L, 61L, 71L, COMPANY.corpName(),
                                 COMPANY.corpName() + " 공시", "https://example.com/61", List.of()),
@@ -289,7 +368,7 @@ class ReportDartOracleIntegrationTests {
 
         persistence.enqueue(report.getId());
 
-        var attachment = service.get(report.getId()).companies().getFirst();
+        var attachment = service.getStored(report).companies().getFirst();
         assertEquals("READY", attachment.status());
         assertEquals(data(), attachment.data());
         assertEquals(data().fetchedAt(), attachment.data().fetchedAt());
@@ -318,13 +397,13 @@ class ReportDartOracleIntegrationTests {
         assertTrue(repository.reusableReports().containsAll(waiting.stream().map(NewsReport::getId).toList()));
         for (var report : waiting) {
             persistence.enqueue(report.getId());
-            var attachment = service.get(report.getId()).companies().getFirst();
+            var attachment = service.getStored(report).companies().getFirst();
             assertEquals("READY", attachment.status());
             assertEquals(data(), attachment.data());
             // An in-flight request may refresh the company cache, but cannot overwrite this report.
             repository.complete(new ReportDartRepository.Job(report.getId(), COMPANY, 0), "old-owner",
                     new FinancialData(null, null, data().fetchedAt(), List.of(), List.of(), List.of()), now);
-            assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+            assertEquals(data(), service.getStored(report).companies().getFirst().data());
         }
         assertTrue(repository.reusableReports().isEmpty());
         verifyNoInteractions(financials);
@@ -337,14 +416,14 @@ class ReportDartOracleIntegrationTests {
         seedCache(partial, now.minusDays(2));
         var report = create(true, ReportStatus.GENERATED);
         persistence.enqueue(report.getId());
-        assertEquals("PARTIAL", service.get(report.getId()).companies().getFirst().status());
-        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+        assertEquals("PARTIAL", service.getStored(report).companies().getFirst().status());
+        assertEquals(partial, service.getStored(report).companies().getFirst().data());
 
         seedCache(data(), LocalDateTime.now(ApiTimeZone.ZONE).plusSeconds(1));
         persistence.enqueue(report.getId());
         persistence.retry(report.getId());
 
-        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+        assertEquals(partial, service.getStored(report).companies().getFirst().data());
         assertTrue(repository.staleCompanies(now.plusDays(3), now.plusDays(4)).isEmpty());
         verifyNoInteractions(financials);
     }
@@ -362,7 +441,65 @@ class ReportDartOracleIntegrationTests {
         assertFalse(repository.claimCache(COMPANY.corpCode(), "other", now.plusMinutes(4), now.plusMinutes(34)));
         assertEquals(List.of(COMPANY.corpCode()), repository.staleCompanies(now.minusHours(24), now.plusMinutes(6))
                 .stream().map(Company::corpCode).toList());
-        assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+        assertEquals(data(), service.getStored(report).companies().getFirst().data());
+    }
+
+    @Test void legacyUnlistedJobsCannotStarveListedPollingOrResumeThroughRetryAndKeyRecovery() {
+        // Use an exact persisted timestamp so Oracle precision cannot move a job just past the poll cutoff.
+        var now = LocalDateTime.now(ApiTimeZone.ZONE).withNano(0);
+        var report = create(false, ReportStatus.GENERATED);
+        var listed = new Company("99993300", "영숫자 상장 종목", "0068Y0");
+        var unlistedCodes = new ArrayList<String>();
+        // These legacy rows predate the listed-only enqueue guard. There are more than both polling page limits.
+        for (int index = 1; index <= 12; index++) {
+            String corpCode = String.format("999933%02d", index);
+            unlistedCodes.add(corpCode);
+            jdbc.update("""
+                    INSERT INTO news_report_dart_attachments
+                        (report_id, corp_code, corp_name, stock_code, status, message, next_attempt_at, created_at, updated_at)
+                    VALUES (?, ?, '비상장 과거 연결', NULL, 'PENDING', '공시 자료를 준비하고 있습니다.', ?, ?, ?)
+                    """, report.getId(), corpCode, java.sql.Timestamp.valueOf(now.minusHours(1)),
+                    java.sql.Timestamp.valueOf(now.minusDays(1)), java.sql.Timestamp.valueOf(now.minusDays(1)));
+            seedExtraCache(corpCode, now.minusDays(3), now);
+        }
+        repository.enqueue(report.getId(), listed, true, now.minusMinutes(1));
+        seedExtraCache(listed.corpCode(), now.minusDays(2), now);
+
+        assertEquals(List.of(listed), repository.pending(now).stream()
+                .filter(job -> job.reportId() == report.getId()).map(ReportDartRepository.Job::company).toList());
+        var stale = repository.staleCompanies(now.minusHours(24), now).stream().map(Company::corpCode).toList();
+        assertTrue(stale.contains(listed.corpCode()));
+        assertTrue(stale.stream().noneMatch(unlistedCodes::contains));
+        assertTrue(repository.reusableReports().contains(report.getId()));
+
+        jdbc.update("UPDATE news_report_dart_attachments SET status = 'FAILED' WHERE report_id = ?", report.getId());
+        repository.retry(report.getId(), true, now);
+        assertEquals(12, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM news_report_dart_attachments
+                WHERE report_id = ? AND stock_code IS NULL AND status = 'FAILED'
+                """, Integer.class, report.getId()));
+        assertEquals("PENDING", repository.find(report.getId()).stream()
+                .filter(row -> row.company().corpCode().equals(listed.corpCode())).findFirst().orElseThrow().status());
+
+        jdbc.update("UPDATE news_report_dart_attachments SET status = 'DISABLED' WHERE report_id = ?", report.getId());
+        repository.recover(now, true);
+        assertEquals(12, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM news_report_dart_attachments
+                WHERE report_id = ? AND stock_code IS NULL AND status = 'DISABLED'
+                """, Integer.class, report.getId()));
+        assertEquals("PENDING", repository.find(report.getId()).stream()
+                .filter(row -> row.company().corpCode().equals(listed.corpCode())).findFirst().orElseThrow().status());
+
+        jdbc.update("DELETE FROM news_report_dart_attachments WHERE report_id = ? AND corp_code = ?",
+                report.getId(), listed.corpCode());
+        assertFalse(repository.reusableReports().contains(report.getId()), "Unlisted cached attachments do not re-enter recovery");
+        verifyNoInteractions(financials);
+    }
+
+    private void seedExtraCache(String corpCode, LocalDateTime cachedAt, LocalDateTime now) {
+        extraCacheCorpCodes.add(corpCode);
+        assertTrue(repository.claimCache(corpCode, "seed", now, now.plusMinutes(30)));
+        assertTrue(repository.saveCache(corpCode, "seed", data(), cachedAt));
     }
 
     private void seedCache(FinancialData snapshot, LocalDateTime cachedAt) {

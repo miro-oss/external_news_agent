@@ -29,6 +29,19 @@ class DailyReportSelectorTest {
     private final Topic topic = Topic.builder().id(1L).build();
 
     @Test
+    void recoveryRestrictsSavedRunsBeforeChoosingLatestIssueObservation() {
+        Finding saved = finding(1, 1, "grounded");
+        Finding later = finding(2, 2, "grounded");
+        LocalDate date = LocalDate.of(2026, 9, 3);
+        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay()))
+                .thenReturn(List.of(saved, later));
+        when(memberships.findByArticleIds(List.of(1L))).thenReturn(List.of(link(saved, issue(10, 90))));
+
+        assertEquals(List.of(saved), selector.prepare(date, 10, java.util.Set.of(1L)).candidates());
+        verify(memberships).findByArticleIds(List.of(1L));
+    }
+
+    @Test
     void companyExclusionPrecedesTopNAndUnownedPreparationNeverCallsIt() {
         var interests = mock(CompanyInterestSelection.class);
         var selecting = new DailyReportSelector(findings, memberships, relevancePolicy, interests);

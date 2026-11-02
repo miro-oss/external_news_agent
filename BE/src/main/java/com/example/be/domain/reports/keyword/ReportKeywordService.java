@@ -24,7 +24,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Projects only frozen candidates. Final top-N selection must not become the denominator. */
+/** Projects frozen candidates; explicitly labeled historical repairs may use the original included issues. */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -53,14 +53,19 @@ public class ReportKeywordService {
 
     /** Includes every registered key before presentation limits; callers must not compare top-six lists. */
     public FullAggregation aggregate(NewsReport report, ReportEventFeedbackProjection.View view, boolean delivery) {
-        var snapshot = report.getReportKeywordSnapshot();
-        if (snapshot == null) return unavailableAggregation(report, "NO_SNAPSHOT");
-        if (!ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())) return unavailableAggregation(report, "INVALID_SNAPSHOT");
-        if (snapshot.unavailableReason() != null) return unavailableAggregation(report, snapshot.unavailableReason());
-        if (!valid(snapshot)) return unavailableAggregation(report, "INVALID_SNAPSHOT");
+        var stored = report.getReportKeywordSnapshot();
+        if (stored == null) return unavailableAggregation(report, "NO_SNAPSHOT");
+        if (!ReportKeywordSnapshot.RULE_VERSION.equals(stored.ruleVersion())
+                && !ReportKeywordSnapshot.selectedBasis(stored.ruleVersion()))
+            return unavailableAggregation(report, "INVALID_SNAPSHOT");
+        if (stored.unavailableReason() != null && !"COMPANY_SCOPE_UNVERIFIED".equals(stored.unavailableReason()))
+            return unavailableAggregation(report, stored.unavailableReason());
+        if (!valid(stored)) return unavailableAggregation(report, "INVALID_SNAPSHOT");
+        var snapshot = stored.unavailableReason() == null ? stored : includedInBody(report, stored);
+        if (snapshot == null) return unavailableAggregation(report, stored.unavailableReason());
 
         Map<Long, Set<Pair>> identities = new HashMap<>();
-        snapshot.candidates().forEach(candidate -> identities.computeIfAbsent(candidate.findingId(), ignored -> new HashSet<>())
+        stored.candidates().forEach(candidate -> identities.computeIfAbsent(candidate.findingId(), ignored -> new HashSet<>())
                 .add(new Pair(candidate.issueId(), candidate.topicId())));
         // Some excluded event sources are different representatives of an otherwise eligible candidate.
         var coverage = report.getReportCoverageSnapshot();
@@ -70,7 +75,7 @@ public class ReportKeywordService {
                             .add(new Pair(binding.issueId(), binding.topicId())));
         }
         Set<Long> dynamicRejected = new HashSet<>(view.excludedEvidenceFindingIds());
-        dynamicRejected.addAll(dailyExclusions.forKeywordCandidates(report, snapshot, delivery));
+        dynamicRejected.addAll(dailyExclusions.forKeywordCandidates(report, stored, delivery));
         Set<Long> rejected = new HashSet<>(dynamicRejected);
         rejected.addAll(report.getCompanySuppressedFindingIds());
         // An unbound rejected representative could belong to any surviving frozen issue. Do not
@@ -117,6 +122,19 @@ public class ReportKeywordService {
         var result = new ReportKeywordDTO.View(ReportKeywordDTO.Status.AVAILABLE, null, snapshot.ruleVersion(), snapshot.capturedAt(),
                 snapshot.periodLabel(), issueIds.size(), items, Math.max(0, ordered.size() - items.size()));
         return new FullAggregation(result, all, !dynamicRejected.isEmpty() || permitted.size() != candidates.size());
+    }
+
+    /** Keep the uncertain full universe intact; describe only evidence already used in the saved report body. */
+    private static ReportKeywordSnapshot includedInBody(NewsReport report, ReportKeywordSnapshot stored) {
+        var content = report.getStructuredContent();
+        if (content == null) return null;
+        Set<Long> included = new HashSet<>();
+        content.importantEvents().forEach(event -> included.addAll(event.sourceFindingIds()));
+        content.watchItems().forEach(item -> included.addAll(item.sourceFindingIds()));
+        var candidates = stored.candidates().stream().filter(candidate -> included.contains(candidate.findingId())).toList();
+        if (candidates.isEmpty()) return null;
+        return new ReportKeywordSnapshot(ReportKeywordSnapshot.SELECTED_RULE_VERSION, stored.capturedAt(),
+                stored.periodLabel() + " · 보고서 본문에 포함된 이슈 기준", null, stored.definitions(), candidates);
     }
 
     private FullAggregation unavailableAggregation(NewsReport report, String reason) {

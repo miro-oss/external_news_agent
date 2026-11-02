@@ -7,6 +7,7 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.reports.coverage.ReportCoverageSnapshot;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
@@ -154,6 +155,75 @@ class ReportKeywordServiceTest {
         verifyNoInteractions(articles, relevance, inherited);
     }
 
+    @Test void incompleteCompanyScopeUsesOnlyActualBodySourcesWithoutRewritingStoredUniverse() {
+        var stored = uncertain(List.of(candidate(1, 11, "hbm"), candidate(2, 22, "gpu"),
+                candidate(3, 33, "패키징"), candidate(4, 44, "gpu")));
+        var report = bodyReport(stored, List.of(1L, 999L), List.of(3L), List.of());
+        fullText(1, 2, 3, 4);
+
+        var result = service.project(report, view(List.of(1L, 2L, 3L, 4L), Set.of()));
+
+        assertEquals(ReportKeywordDTO.Status.AVAILABLE, result.status());
+        assertEquals(ReportKeywordSnapshot.SELECTED_RULE_VERSION, result.ruleVersion());
+        assertEquals(2, result.denominatorIssueCount());
+        assertTrue(result.periodLabel().endsWith("보고서 본문에 포함된 이슈 기준"));
+        assertEquals(0, result.items().stream().filter(item -> item.keyword().equals("GPU")).findFirst().orElseThrow().issueCount());
+        assertSame(stored, report.getReportKeywordSnapshot());
+        assertEquals("COMPANY_SCOPE_UNVERIFIED", stored.unavailableReason());
+        assertEquals(4, stored.candidates().size());
+        assertEquals(NOW, result.capturedAt());
+    }
+
+    @Test void boundedBodyStatisticsStillApplyCompanyFeedbackInheritedAndRelevanceExclusions() {
+        var stored = uncertain(List.of(candidate(1, 11, "hbm"), candidate(2, 22, "패키징"),
+                candidate(3, 33, "gpu"), candidate(4, 11, "패키징"), candidate(5, 55, "hbm"), candidate(6, 66, "gpu")));
+        var report = bodyReport(stored, List.of(1L, 2L, 3L), List.of(5L, 6L), List.of(2L));
+        when(inherited.forKeywordCandidates(report, stored, true)).thenReturn(Set.of(3L));
+        when(relevance.excludedKeys(1L)).thenReturn(Set.of(new TopicRelevanceGate.Key(6L, 10L)));
+        fullText(1, 2, 3, 4, 5, 6);
+
+        var result = service.projectForDelivery(report, view(List.of(1L, 2L, 3L, 5L, 6L), Set.of(4L)));
+
+        assertEquals(1, result.denominatorIssueCount());
+        assertEquals("HBM", result.items().getFirst().keyword());
+        assertEquals(100.0, result.items().getFirst().sharePercent());
+        assertTrue(result.items().stream().skip(1).allMatch(item -> item.issueCount() == 0));
+        verify(inherited).forKeywordCandidates(report, stored, true);
+    }
+
+    @Test void missingBodyEvidenceAndOtherUnavailableReasonsDoNotCreatePartialStatistics() {
+        var stored = uncertain(List.of(candidate(1, 11, "hbm")));
+        for (var report : List.of(report(stored), bodyReport(stored, List.of(), List.of(), List.of()),
+                bodyReport(stored, List.of(999L), List.of(), List.of()))) {
+            var result = service.project(report, view(List.of(1L), Set.of()));
+            assertEquals("COMPANY_SCOPE_UNVERIFIED", result.unavailableReason());
+            assertNull(result.denominatorIssueCount());
+        }
+        for (var reason : List.of("INCOMPLETE_SOURCE", "MISSING_COLLECTION_CONTEXT", "PERSONALIZATION_UNVERIFIED")) {
+            var blocked = new ReportKeywordSnapshot(stored.ruleVersion(), NOW, "기간", reason, WORDS, stored.candidates());
+            var result = service.project(bodyReport(blocked, List.of(1L), List.of(), List.of()), view(List.of(1L), Set.of()));
+            assertEquals(reason, result.unavailableReason());
+            assertTrue(result.items().isEmpty());
+        }
+        var malformed = uncertain(List.of(candidate(1, 11, "unknown")));
+        assertEquals("INVALID_SNAPSHOT", service.project(bodyReport(malformed, List.of(1L), List.of(), List.of()),
+                view(List.of(1L), Set.of())).unavailableReason());
+        verifyNoInteractions(articles, relevance, inherited);
+    }
+
+    @Test void knownFullUniverseIsNotNarrowedByBodySourcesAndEmptyFilteredSubsetIsNotAClaimOfZeroShare() {
+        var candidates = List.of(candidate(1, 11, "hbm"), candidate(2, 22, "패키징"));
+        fullText(1, 2);
+        var full = service.project(bodyReport(snapshot(candidates), List.of(1L), List.of(), List.of()), view(List.of(1L), Set.of()));
+        assertEquals(2, full.denominatorIssueCount());
+        assertEquals(ReportKeywordSnapshot.RULE_VERSION, full.ruleVersion());
+        var selected = service.project(bodyReport(uncertain(candidates), List.of(1L), List.of(), List.of(1L)),
+                view(List.of(), Set.of()));
+        assertEquals(0, selected.denominatorIssueCount());
+        assertEquals(ReportKeywordSnapshot.SELECTED_RULE_VERSION, selected.ruleVersion());
+        assertTrue(selected.items().stream().allMatch(item -> item.sharePercent() == null));
+    }
+
     @Test void unboundRejectedEvidenceMakesTheWholeCountUnavailableInsteadOfGuessingItsIssue() {
         var report = report(snapshot(List.of(candidate(1, 11, "hbm"))));
         var result = service.project(report, view(List.of(1L), Set.of(999L)));
@@ -190,6 +260,17 @@ class ReportKeywordServiceTest {
     }
     private static ReportKeywordSnapshot snapshot(List<ReportKeywordSnapshot.Candidate> candidates) {
         return new ReportKeywordSnapshot(ReportKeywordSnapshot.RULE_VERSION, NOW, "2026-10-28 수집 기준", null, WORDS, candidates);
+    }
+    private static ReportKeywordSnapshot uncertain(List<ReportKeywordSnapshot.Candidate> candidates) {
+        return new ReportKeywordSnapshot(ReportKeywordSnapshot.RULE_VERSION, NOW, "2026-10-28 수집 기준",
+                "COMPANY_SCOPE_UNVERIFIED", WORDS, candidates);
+    }
+    private static NewsReport bodyReport(ReportKeywordSnapshot snapshot, List<Long> events, List<Long> watch, List<Long> suppressed) {
+        return NewsReport.builder().id(99L).reportScope(ReportScope.DAILY).reportDate(LocalDate.of(2026, 10, 28))
+                .reportKeywordSnapshot(snapshot).reflectedFindingIds(List.of(1L, 2L, 3L, 4L, 5L, 6L))
+                .companySuppressedFindingIds(suppressed).structuredContent(new ReportContent(List.of(),
+                        List.of(new ReportContent.ImportantEvent("이슈", "요약", "", events)),
+                        List.of(new ReportContent.WatchItem("후속 확인", "이유", watch)), List.of())).build();
     }
     private static ReportKeywordSnapshot.Candidate candidate(long finding, long issue, String... keys) {
         return new ReportKeywordSnapshot.Candidate(finding, finding, 1L, 10L, issue, List.of(keys));

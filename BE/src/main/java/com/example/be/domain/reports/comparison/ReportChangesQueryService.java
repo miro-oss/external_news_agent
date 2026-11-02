@@ -135,8 +135,10 @@ public class ReportChangesQueryService {
 
     private static ReportChanges unavailable(ReportChanges result, String reason) {
         var state = ReportChanges.Status.UNAVAILABLE;
+        var keywordChanges = ReportKeywordChangesService.unavailable(reason);
+        String message = "FILTERED_INPUT".equals(reason) ? keywordChanges.message() : state.message;
         return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(), result.baseReportDate(),
-                state, state.message, false, List.of(), List.of(), result.periods(), ReportKeywordChangesService.unavailable(reason));
+                state, message, false, List.of(), List.of(), result.periods(), keywordChanges);
     }
 
     private static ReportChanges.Periods periods(NewsReport current, NewsReport previous, ComparisonWork work) {

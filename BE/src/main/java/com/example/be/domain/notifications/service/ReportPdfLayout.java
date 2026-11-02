@@ -38,6 +38,11 @@ final class ReportPdfLayout implements AutoCloseable {
     private static final Color MUTED = new Color(99, 108, 120);
     private static final Color BLUE = new Color(27, 100, 218);
     private static final Color GREEN = new Color(22, 132, 109);
+    private static final float FINANCIAL_PLOT_HEIGHT = 80;
+    private static final float FINANCIAL_CHART_HEIGHT = 120;
+    private static final float FINANCIAL_TABLE_AFTER = 16;
+    private static final List<String> FINANCIAL_HEADERS = List.of("기간", "매출", "영업이익");
+    private static final float[] FINANCIAL_WIDTHS = {WIDTH * 1.4f / 4.4f, WIDTH * 1.5f / 4.4f, WIDTH * 1.5f / 4.4f};
     private static final Color RULE = new Color(221, 227, 235);
     private final PDDocument document;
     private final PDType0Font regular;
@@ -149,6 +154,7 @@ final class ReportPdfLayout implements AutoCloseable {
     }
 
     Integer destinationPage(String name) { return destinationPages.get(name); }
+    int pageNumber() { return document.getNumberOfPages(); }
 
     /** Forward links reserve their page label, which is resolved after all appendix pages exist. */
     void internalLink(String label, String destination) throws IOException {
@@ -363,7 +369,12 @@ final class ReportPdfLayout implements AutoCloseable {
     }
 
     private void tablePart(List<List<String>> cells, float[] widths, int offset, int count, boolean header, boolean linked) throws IOException {
-        float height = count * 12 + 12;
+        tablePart(cells, widths, offset, count, header, linked, 12, 12);
+    }
+
+    private void tablePart(List<List<String>> cells, float[] widths, int offset, int count, boolean header, boolean linked,
+                           float leading, float padding) throws IOException {
+        float height = count * leading + padding;
         if (header) {
             stream.setNonStrokingColor(new Color(232, 243, 255));
             stream.addRect(MARGIN, y - height, WIDTH, height);
@@ -373,12 +384,48 @@ final class ReportPdfLayout implements AutoCloseable {
         for (int column = 0; column < cells.size(); column++) {
             List<String> lines = cells.get(column);
             for (int i = 0; i < count && offset + i < lines.size(); i++)
-                draw(lines.get(offset + i), x + 6, y - 14 - i * 12, header ? bold : regular, 8,
+                draw(lines.get(offset + i), x + 6, y - 8 - padding / 2 - i * leading, header ? bold : regular, 8,
                         header || linked && column == cells.size() - 1 ? BLUE : INK);
             x += widths[column];
         }
         y -= height;
         line(MARGIN, y, MARGIN + WIDTH, y, RULE, 0.5f);
+    }
+
+    /** Measure the actual title, metadata, graph and table rows before keeping one company together. */
+    void reserveFinancialBlock(String title, String metadata, List<Quarter> quarters, String currency,
+                               List<List<String>> rows, boolean section) throws IOException {
+        float height = (section ? 60 : 0) + Math.max(48, 9 + readingTextHeight(title, bold, 11.5f, 17)
+                + 4 + readingTextHeight(metadata, regular, 8.5f, 13));
+        if (!quarters.isEmpty()) height += financialChartHeight(quarters, currency) + financialTableHeight(rows);
+        ensure(Math.min(height, TOP - BOTTOM));
+    }
+
+    private float financialTableHeight(List<List<String>> rows) throws IOException {
+        float height = maxLines(cells(FINANCIAL_HEADERS, bold, FINANCIAL_WIDTHS)) * 11 + 8 + FINANCIAL_TABLE_AFTER;
+        for (var row : rows) height += maxLines(cells(row, regular, FINANCIAL_WIDTHS)) * 11 + 8;
+        return height;
+    }
+
+    void financialTable(List<List<String>> rows) throws IOException {
+        ensure(Math.min(financialTableHeight(rows), TOP - BOTTOM));
+        var headers = cells(FINANCIAL_HEADERS, bold, FINANCIAL_WIDTHS);
+        tablePart(headers, FINANCIAL_WIDTHS, 0, maxLines(headers), true, false, 11, 8);
+        for (var row : rows) {
+            var values = cells(row, regular, FINANCIAL_WIDTHS);
+            tablePart(values, FINANCIAL_WIDTHS, 0, maxLines(values), false, false, 11, 8);
+        }
+        // Links draw at the current baseline; leave room for their glyphs above it.
+        gap(FINANCIAL_TABLE_AFTER);
+    }
+
+    private static float financialChartHeight(List<Quarter> quarters, String currency) {
+        boolean anyValue = quarters.stream().anyMatch(q -> chartAmount(q.revenue(), currency) != null
+                || chartAmount(q.operatingProfit(), currency) != null);
+        if (!anyValue) return 17;
+        boolean missing = quarters.stream().anyMatch(q -> chartAmount(q.revenue(), currency) == null
+                || chartAmount(q.operatingProfit(), currency) == null);
+        return FINANCIAL_CHART_HEIGHT + (missing ? 17 : 0);
     }
 
     void chart(List<Quarter> quarters, String currency) throws IOException {
@@ -388,12 +435,12 @@ final class ReportPdfLayout implements AutoCloseable {
         revenue.stream().filter(java.util.Objects::nonNull).forEach(values::add);
         profit.stream().filter(java.util.Objects::nonNull).forEach(values::add);
         if (values.isEmpty()) { muted("확인된 금액이 없어 실적 차트를 표시할 수 없습니다."); return; }
-        ensure(238);
+        ensure(financialChartHeight(quarters, currency));
         draw("매출액", MARGIN + 12, y, bold, 9, BLUE);
         draw("영업이익", MARGIN + 80, y, bold, 9, GREEN);
-        draw("차트 단위: " + ("KRW".equals(currency) ? "억원" : nullable(currency)), MARGIN + 160, y, regular, 8.5f, MUTED);
+        draw("최근 " + quarters.size() + "분기 · " + CompanyFinancialBrief.unit(currency), MARGIN + 160, y, regular, 8.5f, MUTED);
         float chartTop = y - 20;
-        float chartBottom = chartTop - 158;
+        float chartBottom = chartTop - FINANCIAL_PLOT_HEIGHT;
         float left = MARGIN + 67;
         float right = MARGIN + WIDTH - 16;
         double min = Math.min(0, values.stream().mapToDouble(Double::doubleValue).min().orElse(0));
@@ -403,12 +450,12 @@ final class ReportPdfLayout implements AutoCloseable {
         max += padding;
         for (int i = 0; i <= 4; i++) {
             double value = min + (max - min) * i / 4;
-            float yy = chartBottom + 158 * i / 4;
+            float yy = chartBottom + FINANCIAL_PLOT_HEIGHT * i / 4;
             line(left, yy, right, yy, RULE, .5f);
             String label = chartTick(value);
             draw(label, left - width(label, regular, 7.5f) - 7, yy - 3, regular, 7.5f, MUTED);
         }
-        float zero = chartBottom + (float) ((0 - min) / (max - min) * 158);
+        float zero = chartBottom + (float) ((0 - min) / (max - min) * FINANCIAL_PLOT_HEIGHT);
         line(left, zero, right, zero, MUTED, .7f);
         chartSeries(revenue, left, right, chartBottom, min, max, BLUE, false);
         chartSeries(profit, left, right, chartBottom, min, max, GREEN, true);
@@ -416,10 +463,10 @@ final class ReportPdfLayout implements AutoCloseable {
             var quarter = quarters.get(i);
             String label = String.format(java.util.Locale.ROOT, "%02d.%dQ", quarter.year() % 100, quarter.quarter());
             float x = chartX(i, quarters.size(), left, right);
-            draw(label, x - width(label, regular, 7) / 2, chartBottom - 16, regular, 7, MUTED);
+            draw(label, x - width(label, regular, 7) / 2, chartBottom - 13, regular, 7, MUTED);
         }
-        y = chartBottom - 34;
-        muted("자료가 없는 분기는 선을 연결하지 않습니다. 분기별 수치는 아래 표에서 확인할 수 있습니다.");
+        y = chartBottom - 20;
+        if (revenue.contains(null) || profit.contains(null)) muted("자료가 없는 분기는 선을 연결하지 않습니다.");
     }
 
     private void chartSeries(List<Double> values, float left, float right, float bottom,
@@ -429,9 +476,9 @@ final class ReportPdfLayout implements AutoCloseable {
             Double value = values.get(i);
             if (value == null) { previous = null; continue; }
             float x = chartX(i, values.size(), left, right);
-            float yy = bottom + (float) ((value - min) / (max - min) * 158);
+            float yy = bottom + (float) ((value - min) / (max - min) * FINANCIAL_PLOT_HEIGHT);
             if (previous != null) line(chartX(i - 1, values.size(), left, right),
-                    bottom + (float) ((previous - min) / (max - min) * 158), x, yy, color, 1.5f);
+                    bottom + (float) ((previous - min) / (max - min) * FINANCIAL_PLOT_HEIGHT), x, yy, color, 1.5f);
             stream.setNonStrokingColor(color);
             if (square) stream.addRect(x - 2.3f, yy - 2.3f, 4.6f, 4.6f);
             else {
@@ -451,8 +498,9 @@ final class ReportPdfLayout implements AutoCloseable {
     }
 
     private static Double chartAmount(String value, String currency) {
-        if (value == null || !value.matches("-?\\d+(?:\\.\\d+)?")) return null;
-        double result = new BigDecimal(value).movePointLeft("KRW".equals(currency) ? 8 : 0).doubleValue();
+        BigDecimal amount = CompanyFinancialBrief.value(value);
+        if (amount == null) return null;
+        double result = amount.movePointLeft("KRW".equals(currency) ? 8 : 0).doubleValue();
         return Double.isFinite(result) && Math.abs(result) < 1e100 ? result : null;
     }
 

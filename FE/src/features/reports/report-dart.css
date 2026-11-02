@@ -10,7 +10,8 @@
 .report-dart-issue-scope { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem .8rem; padding: .75rem .85rem; margin-top: 1rem; background: var(--surface); border-left: 2px solid var(--primary-strong); border-radius: 4px; font-size: .76rem; color: var(--fg-2); }
 .report-dart-issue-scope .text-button { font-size: .72rem; }
 .report-dart-filing-section { margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.report-dart-filing-section h5 { margin: 0; font-size: .88rem; }
+.report-dart-filing-section summary { font-weight: 600; }
+.report-dart-filing-section summary:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 3px; }
 .report-dart-reference-note { color: var(--fg-2); font-size: .75rem; margin: .65rem 0; }
 .report-dart-table.report-dart-filing-table th, .report-dart-table.report-dart-filing-table td { text-align: left; white-space: normal; line-height: 1.65; }
 .report-dart-filing-table td:first-child { white-space: nowrap; }
@@ -62,7 +63,7 @@
 .dart-chart-tooltip .dart-chart-tooltip-heading { fill: var(--fg-3); font-size: 11px; }
 .dart-chart-tooltip .dart-chart-tooltip-label { fill: var(--fg-2); }
 .dart-chart-tooltip .dart-chart-tooltip-value { font-weight: 650; font-variant-numeric: tabular-nums; }
-.report-dart-table-details summary, .report-dart-disclosures summary { color: var(--primary-strong); font-size: .79rem; cursor: pointer; padding: .3rem 0; }
+.report-dart-table-details summary, .report-dart-disclosures summary, .report-dart-filing-section summary { color: var(--primary-strong); font-size: .79rem; cursor: pointer; padding: .3rem 0; }
 .report-dart-table { width: 100%; min-width: 620px; border-collapse: collapse; margin-top: .65rem; font-size: .73rem; }
 .report-dart-table caption { text-align: left; color: var(--fg-3); font-size: .72rem; margin-bottom: .6rem; line-height: 1.7; }
 .report-dart-table th, .report-dart-table td { padding: .7rem .5rem; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; vertical-align: top; white-space: nowrap; }

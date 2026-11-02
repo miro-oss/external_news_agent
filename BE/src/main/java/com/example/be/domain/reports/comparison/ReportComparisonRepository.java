@@ -97,7 +97,7 @@ public class ReportComparisonRepository {
                 """, (rs, row) -> rs.getLong(1), Timestamp.valueOf(from), Timestamp.valueOf(before));
     }
 
-    /** Page executions, not reports, so a reportless immediate run can never be silently skipped. */
+    /** Page accepted executions so report order and saved topic identity never depend on live topic settings. */
     public List<RunCandidate> previousRuns(LocalDateTime before, long beforeId) {
         var rows = jdbc.query("""
                 SELECT run.id, run.report_id, run.started_at, item.topic_id, item.topic_snapshot
@@ -132,14 +132,19 @@ public class ReportComparisonRepository {
                                Set<Long> topicIds, boolean known) { }
 
     public List<Long> missingJobs() {
+        return missingJobs(0L);
+    }
+
+    /** Stable keyset paging lets reserved baselines wait without blocking later completed reports. */
+    public List<Long> missingJobs(long afterReportId) {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
                 JOIN news_report_comparison_inputs input ON input.report_id = report.id
-                WHERE report.report_scope IN ('RUN', 'DAILY', 'WEEKLY') AND report.report_status <> 'PENDING'
+                WHERE report.id > ? AND report.report_scope IN ('RUN', 'DAILY', 'WEEKLY') AND report.report_status <> 'PENDING'
                   AND report.deleted_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM news_report_comparisons job WHERE job.report_id = report.id)
-                ORDER BY report.generated_at, report.id FETCH FIRST 10 ROWS ONLY
-                """, (rs, row) -> rs.getLong(1));
+                ORDER BY report.id FETCH FIRST 10 ROWS ONLY
+                """, (rs, row) -> rs.getLong(1), afterReportId);
     }
 
     public List<Long> pending() {

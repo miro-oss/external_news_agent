@@ -164,7 +164,7 @@ class ReportQueryServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void batchReviewStatesOnlyRecalculateTheReportWithCompletedConfirmedFactErrors() {
+    void batchReviewStatesRecalculateAllSubmittedLocalReportsButIgnorePrivateRecipientOpinions() {
         var stored = new ReportContent(List.of("원본 요약"), List.of(
                 new ReportContent.ImportantEvent("잘못된 이슈", "오류 요약", "영향", List.of(1L)),
                 new ReportContent.ImportantEvent("남은 이슈", "정상 요약", "영향", List.of(2L))), List.of(), List.of());
@@ -192,28 +192,31 @@ class ReportQueryServiceImplTest {
                 eventReview(4L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.COMPLETED, "NOT_CONFIRMED"),
                 eventReview(5L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.COMPLETED, "INSUFFICIENT_EVIDENCE"),
                 eventReview(6L, FeedbackModels.Category.PREFERENCE, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR"),
-                eventReview(7L, FeedbackModels.Category.WRONG_CLUSTER, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR")));
+                eventReview(7L, FeedbackModels.Category.WRONG_CLUSTER, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR"),
+                new FeedbackModels.Feedback(8L, 80L, 81L, 8L, null, FeedbackModels.Category.SUMMARY_ERROR, "개인 의견", false,
+                        "private-request", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", null,
+                        LocalDateTime.of(2026, 10, 1, 10, 1), null, "a".repeat(64))));
         when(findingRepository.findForReportByIdIn(List.of(1L, 2L))).thenReturn(List.of(
                 finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT),
                 finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE)));
-        NewsReport affected = reports.get(6);
-        when(eventSnapshots.capture(eq(affected), any())).thenReturn(List.of(
+        List<NewsReport> affected = reports.subList(0, 7);
+        affected.forEach(report -> when(eventSnapshots.capture(eq(report), any())).thenReturn(List.of(
                 eventItem('a', 0, stored.importantEvents().getFirst()),
-                eventItem('b', 1, stored.importantEvents().getLast())));
+                eventItem('b', 1, stored.importantEvents().getLast()))));
 
         var result = service.getReports(null, null, 0, 20);
 
         assertEquals(ids, result.getContent().stream().map(ReportResDTO.Summary::getId).toList());
-        assertEquals(List.of(2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L), result.getContent().stream()
+        assertEquals(List.of(1L, 1L, 1L, 1L, 1L, 1L, 1L, 2L), result.getContent().stream()
                 .map(ReportResDTO.Summary::getFindingCount).toList());
-        assertEquals(List.of(1L, 1L, 1L, 1L, 1L, 1L, 0L, 1L), result.getContent().stream()
+        assertEquals(List.of(0L, 0L, 0L, 0L, 0L, 0L, 0L, 1L), result.getContent().stream()
                 .map(ReportResDTO.Summary::getHighSensitivityCount).toList());
         verify(feedbackStore, times(1)).eventReviewStates(ids);
         verify(feedbackStore, never()).eventFeedback(org.mockito.ArgumentMatchers.anyLong());
-        verify(findingRepository, times(1)).findForReportByIdIn(List.of(1L, 2L));
+        verify(findingRepository, times(7)).findForReportByIdIn(List.of(1L, 2L));
         verify(findingRepository, never()).findForReportByRunId(any());
-        verify(eventSnapshots, times(1)).capture(eq(affected), any());
-        reports.stream().filter(report -> report != affected).forEach(report -> {
+        affected.forEach(report -> verify(eventSnapshots, times(1)).capture(eq(report), any()));
+        reports.stream().filter(report -> !affected.contains(report)).forEach(report -> {
             verify(eventSnapshots, never()).capture(eq(report), any());
             verify(report, never()).getMarkdownBody();
             verify(report, never()).getStructuredContent();
@@ -295,14 +298,18 @@ class ReportQueryServiceImplTest {
     }
 
     @Test
-    void detailAndLatestExposeFrozenDartCompaniesRegardlessOfFindings() {
+    void detailAndLatestExposeOnlyFrozenCompaniesNamedInVisibleIssuesRegardlessOfFindingsFlag() {
         var selected = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
         var historical = new com.example.be.domain.dart.model.DartModels.Company("00164779", "SK하이닉스", "000660");
         var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "수집 당시", null,
                 List.of(), List.of(), List.of(), 10, 60, historical)));
         var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
                 .topicDartCorpCode(selected.corpCode()).topicDartCorpName(selected.corpName())
-                .topicDartStockCode(selected.stockCode()).collectionContexts(List.of(context)).build();
+                .topicDartStockCode(selected.stockCode()).collectionContexts(List.of(context))
+                .reflectedFindingIds(List.of(1L)).structuredContent(companyIssue("삼성전자의 실적 발표")).build();
+        var findings = List.of(finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT));
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(findings);
+        when(relevancePolicy.filterTopicFindings(1L, findings)).thenReturn(findings);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
@@ -314,6 +321,10 @@ class ReportQueryServiceImplTest {
             assertEquals(List.of(selected), service.getLatest(includeFindings, ReportScope.WEEKLY).getDartCompanies());
             assertEquals(List.of(context), service.getReport(17L, includeFindings).getCollectionContexts());
         }
+        report.recordStructuredContent(companyIssue("행안부 공공 시스템 점검"));
+        assertTrue(service.getReport(17L, false).getDartCompanies().isEmpty());
+        assertTrue(service.getLatest(true).getDartCompanies().isEmpty());
+        assertEquals(selected, report.getTopicDartCompany(), "Projection preserves the saved selection");
     }
 
     @Test
@@ -321,16 +332,29 @@ class ReportQueryServiceImplTest {
         var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
         var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "당시 주제", null,
                 List.of(), List.of(), List.of(), 10, 60, company)));
+        var findings = List.of(finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(findings);
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(findings);
         for (var scope : ReportScope.values()) {
             var report = NewsReport.builder().id(17L).reportScope(scope)
+                    .run(scope == ReportScope.RUN ? CollectionRun.builder().id(42L).build() : null)
+                    .reflectedFindingIds(List.of(1L)).structuredContent(companyIssue("삼성전자 실적 발표"))
                     .collectionContexts(List.of(context, context)).build();
             when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
             assertEquals(scope == ReportScope.RUN ? List.of(company) : List.of(), service.getReport(17L, false).getDartCompanies());
+            report.recordStructuredContent(null);
+            assertTrue(service.getReport(17L, false).getDartCompanies().isEmpty(),
+                    "Legacy reports without structured issue titles cannot qualify selected companies");
         }
         var legacy = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
                 .collectionContexts(List.of(context)).build();
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(legacy));
         assertEquals(List.of(), service.getReport(17L, false).getDartCompanies());
+    }
+
+    private ReportContent companyIssue(String title) {
+        return new ReportContent(List.of("삼성전자와 SK하이닉스"),
+                List.of(new ReportContent.ImportantEvent(title, "이슈 요약", "", List.of(1L))), List.of(), List.of());
     }
 
     @Test
@@ -423,7 +447,7 @@ class ReportQueryServiceImplTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(ReportScope.class)
     @SuppressWarnings("unchecked")
-    void confirmedEventDisappearsFromReloadedDetailLatestAndCountsWithoutChangingSavedReport(ReportScope scope) {
+    void submittedEventDisappearsFromReloadedDetailLatestAndCountsWithoutWaitingForDiagnosis(ReportScope scope) {
         var run = CollectionRun.builder().id(42L).build();
         var stored = new ReportContent(List.of("잘못된 이슈 저장 요약"), List.of(
                 new ReportContent.ImportantEvent("잘못된 이슈", "잘못된 사건 내용", "잘못된 영향", List.of(1L)),
@@ -449,7 +473,7 @@ class ReportQueryServiceImplTest {
         when(eventSnapshots.capture(eq(report), any())).thenReturn(List.of(first, second));
         var reviews = List.of(new FeedbackModels.Feedback(
                 9L, null, null, 17L, null, FeedbackModels.Category.SUMMARY_ERROR, "오류입니다", false,
-                "request-hash", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", "검토 설명",
+                "request-hash", FeedbackModels.Status.PENDING, null, null,
                 LocalDateTime.of(2026, 10, 1, 10, 1), first, first.event().key()));
         when(feedbackStore.eventFeedback(17L)).thenReturn(reviews);
         when(feedbackStore.eventReviewStates(List.of(17L))).thenReturn(reviews);

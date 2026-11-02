@@ -109,7 +109,7 @@ public class ReportController {
     }
 
     @GetMapping("/latest")
-    @Operation(summary = "최신 보고서 조회", description = "저장된 보고서 구조·수집 조건·고유 기사 통계와 dartCompanies 회사 스냅샷을 includeFindings와 관계없이 함께 조회합니다. 보고서가 없으면 200과 null을 반환합니다.")
+    @Operation(summary = "최신 보고서 조회", description = "저장된 보고서 구조·수집 조건·고유 기사 통계와 dartCompanies를 includeFindings와 관계없이 함께 조회합니다. 회사는 최종 표시 가능한 중요 이슈 제목에 직접 나온 저장 상장 회사만 포함하며 원문·요약·관찰 항목에만 언급된 회사는 제외합니다. 보고서가 없으면 200과 null을 반환합니다.")
     public ApiResponse<ReportResDTO.Detail> getLatest(
             @RequestParam(defaultValue = "true") boolean includeFindings,
             @Parameter(description = "RUN 실행별 / DAILY 일일 통합 / WEEKLY 주간 통합. 생략하면 전체에서 최신")
@@ -123,7 +123,7 @@ public class ReportController {
     }
 
     @GetMapping("/{reportId}")
-    @Operation(summary = "보고서 상세 조회", description = "마크다운과 구조화 본문, 실행 접수 당시 수집 조건, 고유 기사 통계 및 근거 findings를 조회합니다. WEEKLY는 월~일 집계 기간과 입력 일일 보고서 ID·날짜 및 빠진 날짜를 함께 반환합니다. dartCompanies는 명시 선택 회사와 신규 보고서 기사에서 확인하여 고정한 회사 중 현재 표시 가능한 대상이며 includeFindings와 관계없이 반환합니다. 이전 보고서의 structuredContent는 null일 수 있습니다.")
+    @Operation(summary = "보고서 상세 조회", description = "마크다운과 구조화 본문, 실행 접수 당시 수집 조건, 고유 기사 통계 및 근거 findings를 조회합니다. WEEKLY는 월~일 집계 기간과 입력 일일 보고서 ID·날짜 및 빠진 날짜를 함께 반환합니다. dartCompanies는 최종 표시 가능한 중요 이슈 제목에 직접 나온 저장 상장 회사만 포함하며 includeFindings와 관계없이 반환합니다. 제목에 없는 명시 선택 회사, 원문·요약·관찰 항목에만 언급된 회사는 제외하고 그룹·계열사를 추정하지 않습니다. 이전 보고서의 structuredContent는 null일 수 있으며 구조화 이슈 제목이 없으면 회사 배열은 비어 있습니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(

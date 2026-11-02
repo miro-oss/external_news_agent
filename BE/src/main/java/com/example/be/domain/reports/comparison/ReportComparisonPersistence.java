@@ -32,6 +32,9 @@ public class ReportComparisonPersistence {
         if (!visible(report) || comparisons.find(reportId).isPresent()) return;
         var current = input(report);
         var selected = baseline(report, current);
+        // A catch-up report may complete before its preceding period. Leave it in missingJobs
+        // until that reserved report completes instead of freezing a permanent NO_BASELINE.
+        if (selected.pending()) return;
         var baseline = selected.report();
         var previous = input(baseline);
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
@@ -52,13 +55,13 @@ public class ReportComparisonPersistence {
     private Baseline baseline(NewsReport report, ReportComparisonSnapshot current) {
         if (report.getReportScope() != ReportScope.RUN) {
             if (report.getReportDate() == null) return new Baseline(null, true);
-            // Keep the existing DAILY query for historical compatibility; WEEKLY must separate topic/null.
-            if (report.getReportScope() == ReportScope.DAILY) return new Baseline(reports
-                    .findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
-                            ReportScope.DAILY, report.getReportDate(), ReportStatus.PENDING).orElse(null), false);
-            return new Baseline(reports.findPreviousComparisonReports(report.getReportScope(), report.getTopicId(),
-                    report.getReportDate(), org.springframework.data.domain.PageRequest.of(0, 1))
-                    .stream().findFirst().orElse(null), false);
+            var previousDate = report.getReportScope() == ReportScope.DAILY
+                    ? report.getReportDate().minusDays(1) : report.getReportDate().minusWeeks(1);
+            var previous = (report.getTopicId() == null
+                    ? reports.findByReportScopeAndReportDate(report.getReportScope(), previousDate)
+                    : reports.findByReportScopeAndReportDateAndTopicId(report.getReportScope(), previousDate, report.getTopicId()))
+                    .orElse(null);
+            return completedBaseline(previous);
         }
         if (current == null || current.period() == null || current.period().runStartedAt() == null
                 || !current.hasKnownScopes()) return new Baseline(null, true);
@@ -69,12 +72,19 @@ public class ReportComparisonPersistence {
             var candidates = comparisons.previousRuns(before, beforeId);
             if (candidates.isEmpty()) return new Baseline(null, false);
             for (var candidate : candidates) {
-                if (!candidate.known() && candidate.topicIds().stream().anyMatch(topicIds::contains))
+                // Executions without new articles intentionally have no report. They must not
+                // break the chain between reports generated for the same accepted topic set.
+                if (candidate.reportId() == null) continue;
+                boolean uncertain = !candidate.known() && candidate.topicIds().stream().anyMatch(topicIds::contains);
+                boolean matches = candidate.known() && candidate.savedTopicIds().equals(topicIds);
+                if (!uncertain && !matches) continue;
+                var previous = reports.findById(candidate.reportId()).orElse(null);
+                // A removed report is not part of the reading history, even if its saved topics are unknown.
+                if (previous == null || previous.getDeletedAt() != null) continue;
+                if (uncertain)
                     return new Baseline(null, true);
-                if (candidate.known() && candidate.savedTopicIds().equals(topicIds)) {
-                    var previous = candidate.reportId() == null ? null : reports.findById(candidate.reportId()).orElse(null);
-                    return new Baseline(visible(previous) && previous.getReportScope() == ReportScope.RUN ? previous : null, false);
-                }
+                return previous.getReportScope() == ReportScope.RUN
+                        ? completedBaseline(previous) : new Baseline(null, false);
             }
             var last = candidates.getLast();
             before = last.startedAt();
@@ -83,7 +93,15 @@ public class ReportComparisonPersistence {
         }
         return new Baseline(null, true);
     }
-    private record Baseline(NewsReport report, boolean unknown) { }
+    private static Baseline completedBaseline(NewsReport report) {
+        if (report != null && report.getDeletedAt() == null && report.getReportStatus() == ReportStatus.PENDING)
+            return new Baseline(null, false, true);
+        return new Baseline(visible(report) ? report : null, false);
+    }
+
+    private record Baseline(NewsReport report, boolean unknown, boolean pending) {
+        private Baseline(NewsReport report, boolean unknown) { this(report, unknown, false); }
+    }
 
     private ReportComparisonSnapshot input(NewsReport report) {
         if (report == null) return null;

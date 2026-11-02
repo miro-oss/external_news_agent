@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Propagate a confirmed DAILY decision using saved issue/topic identities, never mutable memberships. */
+/** Propagate submitted local DAILY exclusions using saved issue/topic identities, never mutable memberships. */
 @Service
 @RequiredArgsConstructor
 public class DailyReportFeedbackExclusions {
@@ -48,12 +48,9 @@ public class DailyReportFeedbackExclusions {
                 rejectedByPeriod(List.of(period)).getOrDefault(period, List.of()));
     }
 
-    /** Delivery omits submitted opinions immediately, without promoting them to factual rejections. */
+    /** Web and delivery share submitted exclusions without promoting opinions to factual verdicts. */
     public Set<Long> forDelivery(NewsReport report) {
-        Period period = period(report);
-        if (period == null || report.getReflectedFindingIds().isEmpty()) return Set.of();
-        return matching(report.getReflectedFindingIds(), identities(report), report.getTopicId(),
-                rejectedByPeriod(List.of(period), true).getOrDefault(period, List.of()));
+        return forReport(report);
     }
 
     /** Keyword denominators include eligible candidates omitted only by the final top-N selection. */
@@ -63,7 +60,7 @@ public class DailyReportFeedbackExclusions {
         Map<Long, Set<IssueIdentity>> identities = new LinkedHashMap<>();
         addKeywordIdentities(identities, snapshot);
         return matching(snapshot.candidates().stream().map(ReportKeywordSnapshot.Candidate::findingId).distinct().toList(),
-                identities, report.getTopicId(), rejectedByPeriod(List.of(period), delivery, true).getOrDefault(period, List.of()));
+                identities, report.getTopicId(), rejectedByPeriod(List.of(period), true).getOrDefault(period, List.of()));
     }
 
     /** A list page shares DAILY reads and revision validation between global and topic weeks. */
@@ -100,11 +97,7 @@ public class DailyReportFeedbackExclusions {
         return rejectedByPeriod(periods, false);
     }
 
-    private Map<Period, List<RejectedEvidence>> rejectedByPeriod(Collection<Period> periods, boolean delivery) {
-        return rejectedByPeriod(periods, delivery, false);
-    }
-
-    private Map<Period, List<RejectedEvidence>> rejectedByPeriod(Collection<Period> periods, boolean delivery, boolean keywordCandidates) {
+    private Map<Period, List<RejectedEvidence>> rejectedByPeriod(Collection<Period> periods, boolean keywordCandidates) {
         Map<Period, List<NewsReport>> dailyByPeriod = new LinkedHashMap<>();
         Map<Long, NewsReport> dailyById = new LinkedHashMap<>();
         for (Period period : periods) {
@@ -115,20 +108,19 @@ public class DailyReportFeedbackExclusions {
                             && report.getReportDate() != null
                             && !report.getReportDate().isBefore(period.from())
                             && !report.getReportDate().isAfter(period.through())).toList();
-            // Hiding a report is not a revocation of its completed factual review.
+            // Hiding a report is not a revocation of a submitted exclusion.
             dailyByPeriod.put(period, daily);
             daily.forEach(report -> dailyById.putIfAbsent(report.getId(), report));
         }
         if (dailyById.isEmpty()) return Map.of();
-        Map<Long, List<Feedback>> reviews = delivery ? dailyById.keySet().stream()
-                .flatMap(id -> feedback.eventFeedback(id).stream().filter(review -> ReportEventFeedbackProjection.localEvent(review, id)))
-                .collect(Collectors.groupingBy(Feedback::reportId))
-                : feedback.eventReviewStates(dailyById.keySet()).stream()
-                    .filter(ReportEventFeedbackProjection::confirmedError).collect(Collectors.groupingBy(Feedback::reportId));
+        Map<Long, List<Feedback>> reviews = feedback.eventReviewStates(dailyById.keySet()).stream()
+                .filter(review -> dailyById.containsKey(review.reportId())
+                        && ReportEventFeedbackProjection.localEvent(review, review.reportId()))
+                .collect(Collectors.groupingBy(Feedback::reportId));
         Map<Long, List<RejectedEvidence>> rejectedById = new LinkedHashMap<>();
         dailyById.forEach((id, report) -> {
             List<Feedback> decisions = reviews.getOrDefault(id, List.of());
-            if (!decisions.isEmpty()) rejectedById.put(id, rejected(report, decisions, delivery, keywordCandidates));
+            if (!decisions.isEmpty()) rejectedById.put(id, rejected(report, decisions, keywordCandidates));
         });
         Map<Period, List<RejectedEvidence>> result = new LinkedHashMap<>();
         dailyByPeriod.forEach((period, daily) -> result.put(period, daily.stream()
@@ -136,18 +128,16 @@ public class DailyReportFeedbackExclusions {
         return result;
     }
 
-    private List<RejectedEvidence> rejected(NewsReport report, List<Feedback> reviews, boolean delivery, boolean keywordCandidates) {
+    private List<RejectedEvidence> rejected(NewsReport report, List<Feedback> reviews, boolean keywordCandidates) {
         Set<String> keys = reviews.stream().map(Feedback::eventKey).collect(Collectors.toSet());
         var visible = ReportFindings.loadVisible(report, findings, relevance);
         List<EventContext> current = snapshots.capture(report, visible).stream()
                 .map(item -> item.event()).filter(java.util.Objects::nonNull).toList();
         List<EventContext> events = new ArrayList<>(current.stream().filter(event -> keys.contains(event.key())).toList());
-        if (delivery) {
-            Set<String> currentKeys = current.stream().map(EventContext::key).collect(Collectors.toSet());
-            reviews.stream().filter(review -> !currentKeys.contains(review.eventKey()))
-                    .map(review -> ReportEventFeedbackProjection.submittedEvent(review, report.getId()))
-                    .filter(java.util.Objects::nonNull).forEach(events::add);
-        }
+        Set<String> currentKeys = current.stream().map(EventContext::key).collect(Collectors.toSet());
+        reviews.stream().filter(review -> !currentKeys.contains(review.eventKey()))
+                .map(review -> ReportEventFeedbackProjection.submittedEvent(review, report.getId()))
+                .filter(java.util.Objects::nonNull).forEach(events::add);
         if (events.isEmpty()) return List.of();
         Map<Long, Set<IssueIdentity>> identities = new LinkedHashMap<>();
         comparisons.findInput(report.getId()).ifPresent(snapshot -> addIdentities(identities, snapshot));
@@ -198,7 +188,8 @@ public class DailyReportFeedbackExclusions {
     }
 
     private static void addKeywordIdentities(Map<Long, Set<IssueIdentity>> identities, ReportKeywordSnapshot snapshot) {
-        if (snapshot == null || !ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())) return;
+        if (snapshot == null || !ReportKeywordSnapshot.RULE_VERSION.equals(snapshot.ruleVersion())
+                && !ReportKeywordSnapshot.selectedBasis(snapshot.ruleVersion())) return;
         snapshot.candidates().stream().filter(candidate -> candidate.findingId() != null && candidate.findingId() > 0
                         && candidate.issueId() != null && candidate.issueId() > 0 && candidate.topicId() != null && candidate.topicId() > 0)
                 .forEach(candidate -> identities.computeIfAbsent(candidate.findingId(), ignored -> new LinkedHashSet<>())
