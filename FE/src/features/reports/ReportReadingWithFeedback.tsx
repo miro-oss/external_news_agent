@@ -15,6 +15,7 @@ import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftE
 import { useReportEventFeedback } from './useReportEventFeedback'
 import './reportEventFeedback.css'
 
+/** Bind event opinions and watch promotion to the report, retaining drafts while server projections refresh. */
 export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOtherAnalysis, onRefreshReport, onFeedbackSubmitted, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void

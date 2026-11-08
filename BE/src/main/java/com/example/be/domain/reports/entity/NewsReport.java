@@ -164,6 +164,7 @@ public class NewsReport {
     @Column(name = "promoted_watch_item_keys")
     private List<String> promotedWatchItemKeys = List.of();
 
+    /** Records a saved watch's content identity once, preserving selection order and the generated report. */
     public void promoteWatchItem(int index) {
         if (structuredContent == null || index < 0 || index >= structuredContent.watchItems().size()) {
             throw new IllegalArgumentException("저장된 관찰 항목을 찾을 수 없습니다.");

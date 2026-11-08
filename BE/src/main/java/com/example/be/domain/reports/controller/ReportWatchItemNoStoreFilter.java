@@ -15,6 +15,7 @@ import java.io.IOException;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class ReportWatchItemNoStoreFilter extends OncePerRequestFilter {
+    /** Sets cache policy before access checks so errors and rejected requests cannot be cached either. */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {

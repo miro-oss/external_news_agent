@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReportWatchItem } from '../../api/reportWatchItems'
 import { createWatchItemPromotion, INITIAL_WATCH_PROMOTION } from './watchItemPromotion'
 
+/** An inline action for one stable watch card, with separate recovery for saving and refreshing the report. */
 export function ReportWatchItemPromotion({ reportId, item, onRefresh }: {
   reportId: number
   item: ReportWatchItem

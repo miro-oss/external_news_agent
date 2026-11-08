@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../src/api/client.ts'
-import { reportPreviewOptions, reportShareOptions } from '../src/api/reportShare.ts'
+import { reportPreviewOptions, reportPreviewRevision, reportShareOptions } from '../src/api/reportShare.ts'
 import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareInsightGuidance, reportShareRequestKey } from '../src/features/notifications/reportShareFeedback.ts'
 
 test('all-failed responses expose the existing batch for failure lookup', () => {
@@ -214,6 +214,79 @@ test('clearing preview when selection changes prevents a late old perspective re
   await oldRequest
   assert.equal(preview.getCurrentResult().data.chunks[0].body, '요약만')
   assert.deepEqual(requests, [{ channelId: 1, insightAudience: 'CHIP_MAKER' }, { channelId: 1 }])
+})
+
+const watchReport = {
+  id: 17, title: '관찰 보고서', markdownBody: '저장 본문', findings: [{ id: 501, articleId: 11 }],
+  structuredContent: { executiveSummary: [], importantEvents: [],
+    watchItems: [{ topic: '공급 일정', reason: '공식 발표 확인', sourceFindingIds: [501] }], sourceNotes: [] },
+}
+const promotedReport = { ...watchReport, structuredContent: { ...watchReport.structuredContent,
+  importantEvents: [{ title: '공급 일정', summaryKo: '공식 발표 확인', significance: null, sourceFindingIds: [501] }], watchItems: [] } }
+
+test('preview revision changes when a watch item moves to important events without changing finding IDs', () => {
+  assert.equal(reportPreviewRevision(watchReport), reportPreviewRevision(structuredClone(watchReport)))
+  assert.notEqual(reportPreviewRevision(watchReport), reportPreviewRevision(promotedReport))
+  assert.notEqual(reportPreviewRevision(watchReport), reportPreviewRevision({ ...watchReport, id: 18 }))
+})
+
+test('a promotion drops the completed preview while preserving delivery targets, key and result', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const calls = []
+  let content = '승격 전 내용'
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) })
+    const result = url.endsWith('/send') ? { deliveryBatchId: 'sent-batch', sentCount: 1, failedCount: 0, skippedCount: 0 }
+      : { reportId: 17, channelId: 1, chunks: [{ seq: 1, body: content }] }
+    return new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.', result }))
+  })
+  const send = new MutationObserver(client, reportShareOptions(client, 17))
+  const targets = { groupIds: [2], recipientIds: [3], channelIds: [1], insightAudience: 'CHIP_MAKER' }
+  await send.mutate({ ...targets, idempotencyKey: 'existing-send-key' })
+  const previousSend = send.getCurrentResult()
+  const preview = new MutationObserver(client, reportPreviewOptions(reportPreviewRevision(watchReport)))
+  await preview.mutate({ reportId: 17, channelId: 1, insightAudience: 'CHIP_MAKER' })
+  assert.equal(preview.getCurrentResult().data.chunks[0].body, '승격 전 내용')
+  preview.setOptions(reportPreviewOptions(reportPreviewRevision(promotedReport)))
+  assert.equal(preview.getCurrentResult().data, undefined)
+  assert.equal(preview.getCurrentResult().isIdle, true)
+  assert.strictEqual(send.getCurrentResult().data, previousSend.data)
+  assert.strictEqual(send.getCurrentResult().variables, previousSend.variables)
+  assert.deepEqual(send.getCurrentResult().variables, { ...targets, idempotencyKey: 'existing-send-key' })
+  assert.equal(calls.length, 2, 'content changes do not send or preview automatically')
+  content = '승격한 중요 이벤트'
+  await preview.mutate({ reportId: 17, channelId: 1, insightAudience: 'CHIP_MAKER' })
+  assert.equal(preview.getCurrentResult().data.chunks[0].body, content)
+  assert.deepEqual(calls[2].body, { channelId: 1, insightAudience: 'CHIP_MAKER' }, 'the local revision is never sent to the API')
+})
+
+test('an old preview cannot return after promotion and an uncertain send keeps its replay key', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const old = Promise.withResolvers()
+  let previewReads = 0
+  context.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/send')) throw new TypeError('lost send response')
+    const body = ++previewReads === 1 ? await old.promise : '새 중요 이벤트'
+    return new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.',
+      result: { reportId: 17, channelId: 1, chunks: [{ seq: 1, body }] } }))
+  })
+  const send = new MutationObserver(client, reportShareOptions(client, 17))
+  const request = { groupIds: [], recipientIds: [3], channelIds: [1], idempotencyKey: 'uncertain-key' }
+  await assert.rejects(send.mutate(request), /lost send response/)
+  const sendError = send.getCurrentResult().error
+  const preview = new MutationObserver(client, reportPreviewOptions(reportPreviewRevision(watchReport)))
+  const oldRead = preview.mutate({ reportId: 17, channelId: 1 })
+  await new Promise(resolve => setImmediate(resolve))
+  preview.setOptions(reportPreviewOptions(reportPreviewRevision(promotedReport)))
+  await preview.mutate({ reportId: 17, channelId: 1 })
+  old.resolve('승격 전 내용')
+  await oldRead
+  assert.equal(preview.getCurrentResult().data.chunks[0].body, '새 중요 이벤트')
+  assert.strictEqual(send.getCurrentResult().error, sendError)
+  assert.deepEqual(send.getCurrentResult().variables, request)
+  assert.equal(reportShareRequestKey(17, request.idempotencyKey, send.getCurrentResult().data, sendError), 'uncertain-key')
 })
 
 test('insight errors guide users to saved report analysis without confusing unrelated delivery conflicts', () => {

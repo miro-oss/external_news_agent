@@ -10,11 +10,16 @@ import java.util.List;
 
 /** Render a safe view of legacy snapshots without changing their stored generation evidence. */
 public record ReportReadingContent(String markdownBody, ReportContent structuredContent) {
+    /** Builds the final read/delivery view, retaining supported saved watches before manual promotion. */
     public static ReportReadingContent from(NewsReport report, ReportFindings.Visible visible) {
-        return ReportWatchItemPromotions.apply(report, original(report, visible));
+        var reading = retainVisibleWatches(report, visible, original(report, visible));
+        return ReportWatchItemPromotions.apply(report, reading);
     }
 
-    /** Generation/evidence revision, excluding later manual display selections. */
+    /**
+     * Keeps the existing generation/evidence revision used by feedback keys. Final watch retention
+     * and manual display selections belong to {@link #from}, so they do not invalidate unchanged events.
+     */
     public static ReportReadingContent original(NewsReport report, ReportFindings.Visible visible) {
         if (!visible.filtered()) {
             return new ReportReadingContent(report.getMarkdownBody(), report.getStructuredContent());
@@ -65,5 +70,26 @@ public record ReportReadingContent(String markdownBody, ReportContent structured
             if (url != null) markdown.append("- 원문: <").append(url).append(">\n");
         }
         return new ReportReadingContent(markdown.toString(), report.getStructuredContent() == null ? null : content);
+    }
+
+    /**
+     * A rebuilt RUN/DAILY/global WEEKLY body must not discard a saved watch because an unrelated
+     * source was hidden. Retain only complete, nonempty visible evidence groups without changing
+     * the legacy feedback revision or the report's frozen content. Topic weeks already do this.
+     */
+    private static ReportReadingContent retainVisibleWatches(NewsReport report, ReportFindings.Visible visible,
+                                                              ReportReadingContent reading) {
+        var stored = report.getStructuredContent();
+        var content = reading.structuredContent();
+        if (!visible.filtered() || report.getTopicId() != null || stored == null || content == null) return reading;
+        var allowed = visible.findings().stream().map(Finding::getId).collect(java.util.stream.Collectors.toSet());
+        var watches = stored.watchItems().stream().filter(item -> !item.sourceFindingIds().isEmpty()
+                && allowed.containsAll(item.sourceFindingIds())).toList();
+        if (watches.isEmpty()) return reading;
+        var retained = new ReportContent(content.executiveSummary(), content.importantEvents(), watches, content.sourceNotes());
+        var markdown = new StringBuilder(reading.markdownBody()).append("\n## 관찰 항목\n\n");
+        watches.forEach(item -> markdown.append("- ").append(ReportMarkdown.text(item.topic())).append(": ")
+                .append(ReportMarkdown.text(item.reason())).append('\n'));
+        return new ReportReadingContent(markdown.toString(), retained);
     }
 }

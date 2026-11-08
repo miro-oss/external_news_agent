@@ -12,6 +12,7 @@ public final class ReportWatchItemKey {
     private static final ObjectMapper JSON = new ObjectMapper();
     private ReportWatchItemKey() { }
 
+    /** Hashes the complete saved wording and ordered evidence so replacement content cannot inherit a selection. */
     public static String of(ReportContent.WatchItem item) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")

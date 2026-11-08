@@ -31,6 +31,7 @@ import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { prefersReducedMotion } from '../../lib/motion'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { ReportSharePanel } from '../notifications/ReportSharePanel'
+import { reportPreviewRevision } from '../../api/reportShare'
 import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { refreshReportReading } from './reportRefresh'
@@ -382,6 +383,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [feedbackSync, setFeedbackSync] = useState<'busy' | 'failed' | null>(null)
+  const previewRevision = useMemo(() => reportPreviewRevision(report), [report])
   async function refreshAfterFeedback() {
     setFeedbackSync('busy')
     try { await onRefreshReport(); setFeedbackSync(null) }
@@ -518,7 +520,8 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </section>
 
       <div className="report-sharing-section">
-        <ReportSharePanel reportId={report.id} reportScope={report.reportScope} topicId={report.topicId} />
+        <ReportSharePanel reportId={report.id} reportScope={report.reportScope} topicId={report.topicId}
+          contentRevision={previewRevision} />
       </div>
       <ReportDisclaimer report={report} audience={audience} />
     </article></ReportDartProvider>

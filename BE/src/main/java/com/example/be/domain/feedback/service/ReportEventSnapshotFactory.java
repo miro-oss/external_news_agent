@@ -25,6 +25,7 @@ public class ReportEventSnapshotFactory {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
 
+    /** Captures complete event evidence while binding unchanged event keys to the original report revision. */
     public List<Item> capture(NewsReport report,ReportFindings.Visible visible) {
         var reading=ReportReadingContent.from(report,visible);
         if(reading.structuredContent()==null)return List.of();

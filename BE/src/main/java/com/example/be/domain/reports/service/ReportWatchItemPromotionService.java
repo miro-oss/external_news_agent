@@ -28,6 +28,10 @@ public class ReportWatchItemPromotionService {
     private final TopicRelevancePolicy relevance;
     private final ReportEventFeedbackProjection projection;
 
+    /**
+     * Serializes an exact, still-visible watch selection with feedback and other promotions.
+     * Repeated selections succeed only while the promoted event remains eligible for public display.
+     */
     @Transactional
     public ReportWatchItemPromotionResult promote(long reportId, ReportWatchItemPromotionRequest request) {
         if (reportId < 1 || request == null || request.topic() == null || request.topic().isBlank()

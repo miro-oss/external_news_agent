@@ -149,6 +149,7 @@ public class ReportEventFeedbackProjection {
                 .flatMap(event -> event.sourceFindingIds().stream()).collect(Collectors.toSet());
     }
 
+    /** Rebuilds Markdown from the final structured view, retaining conditions and source notes with escaped text. */
     static String markdown(ReportContent content) {
         StringBuilder body = new StringBuilder("## 핵심 요약\n\n");
         content.executiveSummary().forEach(summary -> body.append("- ").append(ReportMarkdown.text(summary)).append('\n'));

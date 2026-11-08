@@ -102,7 +102,29 @@ test('stale or missing targets require a report refresh instead of another submi
     assert.equal(submissions, 1)
     await action.refresh()
     assert.equal(refreshes, 1)
+    assert.equal(states.at(-1).needsRefresh, false)
+    assert.equal(states.at(-1).accepted, false)
+    await action.promote()
+    assert.equal(submissions, 2, 'a refreshed surviving card can be submitted again')
   }
+})
+
+test('failed refresh keeps the conflict lock until a successful reload and does not accept the mutation', async t => {
+  const states = []
+  let submissions = 0, refreshes = 0
+  t.mock.method(globalThis, 'fetch', async () => { submissions++; return failure(409) })
+  const action = createWatchItemPromotion(17, item, { onChange: state => states.push(state),
+    async onRefresh() { if (++refreshes === 1) throw new TypeError('offline') } })
+  await action.promote()
+  await action.refresh()
+  assert.equal(states.at(-1).needsRefresh, true)
+  assert.equal(states.at(-1).accepted, false)
+  await action.promote()
+  assert.equal(submissions, 1)
+  await action.refresh()
+  assert.equal(states.at(-1).needsRefresh, false)
+  assert.equal(states.at(-1).accepted, false)
+  assert.equal(states.at(-1).error, '')
 })
 
 test('switching reports aborts the old request and ignores a late success', async t => {

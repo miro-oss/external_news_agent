@@ -12,6 +12,7 @@ import java.util.Objects;
 final class ReportWatchItemPromotions {
     private ReportWatchItemPromotions() { }
 
+    /** Move exact selected watches from the visible reading into events, preserving selection order and source text. */
     static ReportReadingContent apply(NewsReport report, ReportReadingContent reading) {
         var stored = report.getStructuredContent();
         var content = reading.structuredContent();
@@ -33,6 +34,7 @@ final class ReportWatchItemPromotions {
         return new ReportContent.ImportantEvent(watch.topic(), watch.reason(), null, watch.sourceFindingIds());
     }
 
+    /** Match the complete saved claim and ordered evidence; significance is not part of a watch item. */
     static boolean matches(ReportContent.ImportantEvent event, ReportContent.WatchItem watch) {
         return Objects.equals(event.title(), watch.topic()) && Objects.equals(event.summaryKo(), watch.reason())
                 && event.sourceFindingIds().equals(watch.sourceFindingIds());

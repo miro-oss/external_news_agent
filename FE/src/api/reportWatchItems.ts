@@ -3,6 +3,7 @@ import type { ApiEnvelope, ReportContent } from './types'
 
 export type ReportWatchItem = ReportContent['watchItems'][number]
 
+/** Promote one exact saved watch item; preserve its wording and complete evidence list for server matching. */
 export async function promoteReportWatchItem(reportId: number, item: ReportWatchItem, signal?: AbortSignal) {
   const response = await fetch(`/api/news/reports/${reportId}/watch-items/promote`, {
     method: 'POST', cache: 'no-store', signal,

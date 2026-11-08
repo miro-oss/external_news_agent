@@ -12,6 +12,7 @@ import { ReportKeywordStats } from './ReportKeywordStats'
 import { ReportIssueCompanies } from './ReportIssueCompanies'
 import { hasWeeklyAnalysisChronology, reportEventElementId } from './reportBriefingDisplay'
 
+/** Render the saved report with evidence-bound actions only for structured items; legacy prose stays read-only. */
 export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, watchItemActions, feedbackNotice, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
@@ -94,6 +95,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
   </div>
 }
 
+/** Preserve surviving card state after promotion while separating duplicate content and different reports. */
 function watchItemKeys(reportId: number, items: ReportContent['watchItems']) {
   const occurrences = new Map<string, number>()
   return items.map(item => {

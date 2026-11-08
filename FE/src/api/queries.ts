@@ -482,8 +482,9 @@ export function useReplaceNotificationGroupMembers() {
   })
 }
 
-export function usePreviewNotification() {
-  return useMutation(reportPreviewOptions())
+/** Keep previews explicit and discard their old results when the report's visible content changes. */
+export function usePreviewNotification(contentRevision?: string) {
+  return useMutation(reportPreviewOptions(contentRevision))
 }
 
 export function useSendNotification() {

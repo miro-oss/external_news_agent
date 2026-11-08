@@ -21,10 +21,12 @@ export function createWatchItemPromotion(reportId: number, item: ReportWatchItem
   let request: AbortController | null = null
   let active = true
   let refreshReport = callbacks.onRefresh
+  /** Retain accepted state independently of network recovery and avoid notifying an unmounted card. */
   function update(values: Partial<WatchItemPromotionState>) {
     state = { ...state, ...values }
     if (active) callbacks.onChange(state)
   }
+  /** Serialize writes and reloads; an accepted write can only reload, while a recovered conflict can retry. */
   async function run(refreshOnly: boolean) {
     if (!active || request || (!refreshOnly && (state.accepted || state.needsRefresh))) return
     const current = new AbortController()
@@ -37,6 +39,7 @@ export function createWatchItemPromotion(reportId: number, item: ReportWatchItem
         update({ accepted: true })
       }
       await refreshReport()
+      if (!current.signal.aborted) update({ needsRefresh: false })
     } catch (failure) {
       if (current.signal.aborted) return
       update({
@@ -53,6 +56,7 @@ export function createWatchItemPromotion(reportId: number, item: ReportWatchItem
     refresh: () => run(true),
     setRefresh(callback: () => Promise<unknown>) { refreshReport = callback },
     activate() { active = true },
+    /** Abandon this card's request without allowing its late response to refresh a different report. */
     dispose() { active = false; request?.abort(); request = null },
   }
 }
