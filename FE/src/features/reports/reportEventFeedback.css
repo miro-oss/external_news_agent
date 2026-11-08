@@ -1,6 +1,9 @@
 .report-feedback-notice { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: 0 0 1rem !important; font-size: .78rem !important; }
 .report-feedback-notice .text-button { padding: 0; font-size: .78rem; }
 .report-event-feedback { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .85rem; }
+.report-item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.report-item-actions .text-button { padding: .2rem 0; font-size: .8rem; text-align: left; white-space: normal; }
+.report-watch-promote { font-weight: 600; }
 .report-feedback-disclosure > summary { width: fit-content; color: var(--primary-strong); cursor: pointer; font-size: .8rem; font-weight: 600; list-style: none; }
 .report-feedback-disclosure > summary::-webkit-details-marker { display: none; }
 .report-feedback-disclosure > summary span { display: inline-block; margin-left: .25rem; }

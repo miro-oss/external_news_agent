@@ -12,11 +12,13 @@ import { ReportKeywordStats } from './ReportKeywordStats'
 import { ReportIssueCompanies } from './ReportIssueCompanies'
 import { hasWeeklyAnalysisChronology, reportEventElementId } from './reportBriefingDisplay'
 
-export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice, afterBriefing }: {
+/** Render the saved report with evidence-bound actions only for structured items; legacy prose stays read-only. */
+export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, watchItemActions, feedbackNotice, afterBriefing }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   beforeOtherAnalysis?: ReactNode
   eventFeedback?: (event: ReportContent['importantEvents'][number], index: number) => ReactNode
+  watchItemActions?: (item: ReportContent['watchItems'][number], index: number) => ReactNode
   feedbackNotice?: ReactNode
   afterBriefing?: ReactNode
 }) {
@@ -25,6 +27,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
   const weekly = report.reportScope === 'WEEKLY'
   if (!content) return <><LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />{afterBriefing}<ReportKeywordStats stats={report.keywordStats} /></>
   const eventKeys = importantEventKeys(report.id, content.importantEvents)
+  const watchKeys = watchItemKeys(report.id, content.watchItems)
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
   const other = (report.findings ?? []).filter(finding => !referenced.has(finding.id) && finding.keyPoints.length > 0)
@@ -67,8 +70,9 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       </section>
       {content.watchItems.length > 0 && <section className="card report-watch-items">
         <h3>관찰 항목</h3>
-        {content.watchItems.map((item, index) => <article className="report-event-card" key={index}>
+        {content.watchItems.map((item, index) => <article className="report-event-card" key={watchKeys[index]}>
           <h4><ReportKeywordText text={item.topic} terms={terms} /></h4><p><ReportKeywordText text={item.reason} terms={terms} /></p>{references(item.sourceFindingIds)}
+          {watchItemActions?.(item, index)}
         </article>)}
       </section>}
       {beforeOtherAnalysis}
@@ -89,6 +93,17 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
     <ReportKeywordStats stats={report.keywordStats} />
     <details className="report-reading-details"><summary>이슈와 근거 자세히 보기</summary>{reading}</details>
   </div>
+}
+
+/** Preserve surviving card state after promotion while separating duplicate content and different reports. */
+function watchItemKeys(reportId: number, items: ReportContent['watchItems']) {
+  const occurrences = new Map<string, number>()
+  return items.map(item => {
+    const identity = JSON.stringify([reportId, item.topic, item.reason, item.sourceFindingIds])
+    const occurrence = occurrences.get(identity) ?? 0
+    occurrences.set(identity, occurrence + 1)
+    return `${identity}:${occurrence}`
+  })
 }
 
 function importantEventKeys(reportId: number, events: ReportContent['importantEvents']) {

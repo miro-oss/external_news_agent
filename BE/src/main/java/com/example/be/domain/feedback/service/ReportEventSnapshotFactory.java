@@ -25,6 +25,7 @@ public class ReportEventSnapshotFactory {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
 
+    /** Captures complete event evidence while binding unchanged event keys to the original report revision. */
     public List<Item> capture(NewsReport report,ReportFindings.Visible visible) {
         var reading=ReportReadingContent.from(report,visible);
         if(reading.structuredContent()==null)return List.of();
@@ -35,7 +36,8 @@ public class ReportEventSnapshotFactory {
         var revision=new LinkedHashMap<String,Object>();
         revision.put("reportId",report.getId());revision.put("title",report.getTitle());
         revision.put("generatedAt",report.getGeneratedAt());revision.put("promptVersion",report.getPromptVersion());
-        revision.put("model",report.getModelName());revision.put("reading",reading);
+        // Appending a manually promoted watch must not invalidate feedback on unchanged events.
+        revision.put("model",report.getModelName());revision.put("reading",ReportReadingContent.original(report,visible));
         revision.put("sources",List.copyOf(sources.values()));revision.put("collectionContexts",report.getCollectionContexts());
         String reportHash=FeedbackTokens.hash(json.writeValueAsString(revision));
         List<Item> result=new ArrayList<>();

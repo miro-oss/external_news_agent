@@ -12,12 +12,16 @@ import { EmailMessagePreview } from './EmailMessagePreview'
 import './notifications-refinement.css'
 
 const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '전달 중', SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외', UNKNOWN: '수신 확인 필요' }
-export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId: number; reportScope?: ReportScope; topicId?: number | null }) {
+/** Preserve delivery choices and replay state while letting content revisions invalidate only the preview. */
+export function ReportSharePanel({ reportId, reportScope, topicId, contentRevision }: {
+  reportId: number; reportScope?: ReportScope; topicId?: number | null; contentRevision?: string
+}) {
   const [targets, setTargets] = useState<DeliveryTargets>({ groupIds: [], recipientIds: [], channelIds: [] })
   const [insightAudience, setInsightAudience] = useState<Audience | ''>('')
   const [requestKey, setRequestKey] = useState(() => `r${reportId}-${crypto.randomUUID()}`)
   const send = useShareReport(reportId)
-  const preview = usePreviewNotification()
+  // A changed revision resets only the preview observer; uncertain sends retain their key and result.
+  const preview = usePreviewNotification(contentRevision)
   const deliveries = useAutoDeliveries(reportId)
   const retry = useRetryAutoDeliveries(reportId)
   const availability = useDeliveryTargetAvailability(targets)

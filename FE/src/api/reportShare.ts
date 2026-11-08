@@ -1,12 +1,20 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { notificationPost } from './client.ts'
 import type { DeliveryTargets } from './notificationConnections'
-import type { Audience, NotificationPreview, NotificationSendBatch } from './types'
+import type { Audience, NotificationPreview, NotificationSendBatch, ReportDetail } from './types'
 
 export type ReportShareInsight = { insightAudience?: Audience | null }
 
-export function reportPreviewOptions() {
+/** Invalidate only a displayed preview when the report's visible content changes. */
+export function reportPreviewRevision(report: ReportDetail) {
+  return JSON.stringify([report.id, report.title, report.markdownBody, report.structuredContent,
+    report.briefing, report.coverage, report.keywordStats, report.dartCompanies, report.findings])
+}
+
+/** Changing the mutation key drops stale preview results, including responses still in flight. */
+export function reportPreviewOptions(contentRevision = '') {
   return {
+    mutationKey: ['report-preview', contentRevision],
     mutationFn: ({ reportId, ...body }: { reportId: number; channelId: number } & ReportShareInsight) =>
       notificationPost<NotificationPreview>(`/reports/${reportId}/preview`, body),
     retry: false,

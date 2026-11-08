@@ -15,6 +15,7 @@ import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.keyword.ReportKeywordDTO;
 import com.example.be.domain.reports.keyword.ReportKeywordService;
 import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.entity.ReportWatchItemKey;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
@@ -29,12 +30,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 /** 저장된 보고서의 근거를 채널별 브리핑으로 렌더링한다. 기사 전문은 포함하지 않는다. */
 @Component
 public class NotificationRenderer {
 
-    private static final int EMAIL_MAX_ISSUES = 2;
+    private static final int EMAIL_DEFAULT_ISSUES = 2;
     private static final int TELEGRAM_MAX_ISSUES = 3;
 
     // Inline styles and presentation tables keep the site's palette readable in mail clients.
@@ -220,7 +223,7 @@ public class NotificationRenderer {
         NotificationBriefingSection.emailInsight(html, insight, view);
         NotificationChangesSection.email(html, changes);
         NotificationKeywordSection.email(html, keywords);
-        List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
+        List<NewsCard> cards = emailCards(report, content, findings);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
             html.append(EMAIL_TABLE).append("<tr><td height=\"20\" style=\"height:20px;font-size:0;line-height:0\"></td></tr>"
@@ -355,14 +358,40 @@ public class NotificationRenderer {
     }
 
     private List<NewsCard> cards(ReportReadingContent content, List<Finding> findings, int maxCards) {
+        return cards(content, findings, events -> events.stream().limit(maxCards).toList());
+    }
+
+    /** Keep the short default digest and every explicit selection that survived final delivery exclusions. */
+    private List<NewsCard> emailCards(NewsReport report, ReportReadingContent content, List<Finding> findings) {
+        return cards(content, findings, events -> {
+            var selected = new ArrayList<>(events.stream().limit(EMAIL_DEFAULT_ISSUES).toList());
+            if (report.getStructuredContent() == null || report.getPromotedWatchItemKeys().isEmpty()) return selected;
+            var savedWatches = report.getStructuredContent().watchItems().stream()
+                    .map(ReportWatchItemKey::of).collect(Collectors.toSet());
+            // Match original, unnormalized title/reason/all sources; titles or source IDs alone are ambiguous.
+            Map<String, ReportContent.ImportantEvent> visibleEvents = new LinkedHashMap<>();
+            events.forEach(event -> visibleEvents.putIfAbsent(ReportWatchItemKey.of(new ReportContent.WatchItem(
+                    event.title(), event.summaryKo(), event.sourceFindingIds())), event));
+            for (String key : report.getPromotedWatchItemKeys()) {
+                if (!savedWatches.contains(key)) continue;
+                var event = visibleEvents.get(key);
+                if (event != null && !selected.contains(event)) selected.add(event);
+            }
+            return selected;
+        });
+    }
+
+    private List<NewsCard> cards(ReportReadingContent content, List<Finding> findings,
+                                 UnaryOperator<List<ReportContent.ImportantEvent>> selection) {
         if (content.structuredContent() == null) return List.of();
         Map<Long, Finding> visible = new LinkedHashMap<>();
         findings.forEach(finding -> visible.put(finding.getId(), finding));
         ReportContent structured = content.structuredContent();
-        return structured.importantEvents().stream()
+        var eligible = structured.importantEvents().stream()
                 .filter(event -> StringUtils.hasText(event.title()) && StringUtils.hasText(event.summaryKo()))
                 .filter(event -> supported(event.sourceFindingIds(), visible))
-                .limit(maxCards)
+                .toList();
+        return selection.apply(eligible).stream()
                 .map(event -> new NewsCard(prose(event.title()), prose(event.summaryKo()),
                         structured.watchItems().stream()
                                 .filter(watch -> supported(watch.sourceFindingIds(), visible))
