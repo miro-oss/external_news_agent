@@ -13,6 +13,7 @@ import com.example.be.domain.reports.converter.LocalDateListConverter;
 import com.example.be.domain.reports.converter.WeeklyReportInputConverter;
 import com.example.be.domain.reports.converter.ReportCollectionContextConverter;
 import com.example.be.global.converter.LongListJsonConverter;
+import com.example.be.global.converter.StringListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -155,6 +156,24 @@ public class NewsReport {
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "structured_content")
     private ReportContent structuredContent;
+
+    /** Exact saved watch identities, in selection order; replacements cannot rebind a selection to new text. */
+    @Builder.Default
+    @Convert(converter = StringListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "promoted_watch_item_keys")
+    private List<String> promotedWatchItemKeys = List.of();
+
+    public void promoteWatchItem(int index) {
+        if (structuredContent == null || index < 0 || index >= structuredContent.watchItems().size()) {
+            throw new IllegalArgumentException("저장된 관찰 항목을 찾을 수 없습니다.");
+        }
+        String key = ReportWatchItemKey.of(structuredContent.watchItems().get(index));
+        if (promotedWatchItemKeys.contains(key)) return;
+        var keys = new java.util.ArrayList<>(promotedWatchItemKeys);
+        keys.add(key);
+        promotedWatchItemKeys = List.copyOf(keys);
+    }
 
     @Convert(converter = ReportCoverageSnapshotConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)

@@ -63,6 +63,7 @@ const report = { id: 17, markdownBody: '', collectionContexts: [], findings: [50
 })), structuredContent: { executiveSummary: ['핵심 요약'], importantEvents: [event], watchItems: [], sourceNotes: [] } }
 const actions = { onFeedback() {}, async onRefreshReport() {} }
 const saved = { id: 1, eventKey: target.eventKey, category: 'WRONG_CLUSTER', comment: '각각 다른 계약이에요.', status: 'PENDING', diagnosis: null, verdict: null, createdAt: '2026-09-29T12:00:00+09:00' }
+const watch = { topic: '양산 일정 확인', reason: '후속 계약 발표를 확인합니다.', sourceFindingIds: [503, 501] }
 function card(props = {}) { return createElement(Card, { reportId: 17, target, ...actions, ...props }) }
 
 function eventCardKeys(events, reportId = report.id) {
@@ -97,6 +98,47 @@ test('identical event content has distinct card identities that survive removing
   const before = eventCardKeys([earlier, event, { ...event, sourceFindingIds: [...event.sourceFindingIds] }])
   assert.equal(new Set(before).size, 3)
   assert.deepEqual(eventCardKeys([event, event]), before.slice(1))
+})
+
+test('watch cards offer promotion below their source links, even when the report has no important events', () => {
+  const markup = renderToStaticMarkup(createElement(ReadingWithFeedback, {
+    report: { ...report, structuredContent: { ...report.structuredContent, importantEvents: [], watchItems: [watch] } },
+    onEvidenceSelect() {}, ...actions,
+  }))
+  assert.match(markup, /report-watch-items[\s\S]*양산 일정 확인[\s\S]*report-event-sources[\s\S]*report-watch-promote/)
+  assert.match(markup, /aria-label="양산 일정 확인 중요 이벤트로 올리기"/)
+  assert.doesNotMatch(markup, /의견 보내기|<form|disabled=""/)
+})
+
+test('watch promotion refreshes report caches and feedback context without using the opinion exclusion callback', async () => {
+  const calls = []
+  setFeedbackFixture({ refresh() { calls.push('context') } })
+  renderToStaticMarkup(createElement(ReadingWithFeedback, {
+    report: { ...report, structuredContent: { ...report.structuredContent, watchItems: [watch] } }, onEvidenceSelect() {},
+    async onRefreshReport() { calls.push('report') }, async onFeedbackSubmitted() { calls.push('opinion') },
+  }))
+  await getReadingProps().watchItemActions(watch, 0).props.onRefresh()
+  assert.deepEqual(calls, ['report', 'context'])
+})
+
+test('promoting an earlier watch item preserves other cards and changes identity when switching reports', () => {
+  function keys(items, id = report.id) {
+    const tree = Reading({ report: { ...report, id, structuredContent: { ...report.structuredContent, importantEvents: [], watchItems: items } }, onEvidenceSelect() {} })
+    const result = []
+    function visit(node) {
+      if (Array.isArray(node)) { node.forEach(visit); return }
+      if (!node || typeof node !== 'object') return
+      if (node.type === 'article' && node.props.className === 'report-event-card') result.push(node.key)
+      visit(node.props?.children)
+    }
+    visit(tree)
+    return result
+  }
+  const earlier = { ...watch, topic: '앞 관찰 항목' }
+  assert.deepEqual(keys([earlier, watch]).slice(1), keys([watch]))
+  assert.notEqual(keys([watch], 18)[0], keys([watch])[0])
+  assert.notEqual(keys([{ ...watch, reason: '새 이유' }])[0], keys([watch])[0])
+  assert.equal(new Set(keys([watch, watch])).size, 2)
 })
 
 test('the important event itself owns the inline composer, with automatic multi-source binding and no article/recipient picker', () => {
@@ -225,6 +267,6 @@ test('loading feedback does not hide the report or submit anything; legacy markd
     report: { ...report, structuredContent: null, markdownBody: '## 중요 이벤트\n### 옛 이벤트\n옛 내용' }, onEvidenceSelect() {}, ...actions,
   }))
   assert.match(legacy, /옛 이벤트/)
-  assert.doesNotMatch(legacy, /의견 남기기|의견 작성 기능|<form/)
+  assert.doesNotMatch(legacy, /의견 남기기|의견 작성 기능|중요 이벤트로 올리기|<form/)
   assert.deepEqual(calls, [])
 })

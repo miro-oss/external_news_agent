@@ -149,7 +149,7 @@ public class ReportEventFeedbackProjection {
                 .flatMap(event -> event.sourceFindingIds().stream()).collect(Collectors.toSet());
     }
 
-    private static String markdown(ReportContent content) {
+    static String markdown(ReportContent content) {
         StringBuilder body = new StringBuilder("## 핵심 요약\n\n");
         content.executiveSummary().forEach(summary -> body.append("- ").append(ReportMarkdown.text(summary)).append('\n'));
         body.append("\n## 중요 이벤트\n");
@@ -164,6 +164,10 @@ public class ReportEventFeedbackProjection {
             body.append("\n## 관찰 항목\n\n");
             content.watchItems().forEach(item -> body.append("- ").append(ReportMarkdown.text(item.topic())).append(": ")
                     .append(ReportMarkdown.text(item.reason())).append('\n'));
+        }
+        if (!content.sourceNotes().isEmpty()) {
+            body.append("\n## 수집 및 출처 참고\n\n");
+            content.sourceNotes().forEach(note -> body.append("- ").append(ReportMarkdown.text(note)).append('\n'));
         }
         return body.toString();
     }

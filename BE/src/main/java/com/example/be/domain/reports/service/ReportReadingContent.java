@@ -11,6 +11,11 @@ import java.util.List;
 /** Render a safe view of legacy snapshots without changing their stored generation evidence. */
 public record ReportReadingContent(String markdownBody, ReportContent structuredContent) {
     public static ReportReadingContent from(NewsReport report, ReportFindings.Visible visible) {
+        return ReportWatchItemPromotions.apply(report, original(report, visible));
+    }
+
+    /** Generation/evidence revision, excluding later manual display selections. */
+    public static ReportReadingContent original(NewsReport report, ReportFindings.Visible visible) {
         if (!visible.filtered()) {
             return new ReportReadingContent(report.getMarkdownBody(), report.getStructuredContent());
         }

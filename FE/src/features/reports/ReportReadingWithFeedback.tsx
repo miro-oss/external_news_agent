@@ -10,6 +10,7 @@ import { CompanyInterestProgress } from '../interests/CompanyInterestProgress'
 import { companyInterestHash } from '../interests/companyInterestState'
 import { useCompanyInterests } from '../interests/useCompanyInterests'
 import { ReportReadingContent } from './ReportReadingContent'
+import { ReportWatchItemPromotion } from './ReportWatchItemPromotion'
 import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError, reportFeedbackHistoryHash, submittedReportEventsRemain } from './eventFeedbackState'
 import { useReportEventFeedback } from './useReportEventFeedback'
 import './reportEventFeedback.css'
@@ -92,6 +93,8 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
     <p className="report-feedback-notice"><a href={reportFeedbackHistoryHash(report.id)}>이 보고서의 의견·검토 이력 보기 →</a></p>
     <div hidden={submittedVisible}>
     <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis} afterBriefing={afterBriefing}
+    watchItemActions={item => <ReportWatchItemPromotion reportId={report.id} item={item}
+      onRefresh={async () => { await onRefreshReport(); refresh() }} />}
     feedbackNotice={notice} eventFeedback={(event, index) => {
       const target = matchReportFeedbackEvent(report.id, event, index, data)
       return <ReportEventFeedbackSlot key={report.id} reportId={report.id} target={target} feedback={data?.feedback ?? []}
