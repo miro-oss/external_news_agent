@@ -1,6 +1,6 @@
-.saved-topic-edit { display: grid; gap: .3rem; }
-.saved-topic-edit > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
-.saved-topic-edit > .field-error { color: var(--danger-strong); }
+.saved-topic-edit, .saved-topic-sources { display: grid; gap: .3rem; }
+.saved-topic-edit > small, .saved-topic-sources > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.saved-topic-edit > .field-error, .saved-topic-sources > .field-error { color: var(--danger-strong); }
 .recipient-selection-dialog.topic-edit-dialog { width: min(38rem, calc(100vw - 2rem)); height: min(48rem, calc(100dvh - 2rem)); }
 .topic-edit-dialog[open] { grid-template-rows: auto minmax(0, 1fr); }
 .topic-edit-dialog .recipient-selection-heading > div { min-width: 0; }
