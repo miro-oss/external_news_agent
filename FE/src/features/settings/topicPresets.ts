@@ -48,11 +48,6 @@ export function recommendedTechnicalSourceIds(sources: Source[]): number[] {
   }).map(source => source.id)
 }
 
-export function selectedActiveSourceIds(sources: Source[], selected: number[] | null): number[] {
-  return sources.filter(source => source.active && (selected === null || selected.includes(source.id)))
-    .map(source => source.id)
-}
-
 export function recommendedTopicSourceIds(sources: Source[], retainedSelection: number[] = []): number[] {
   return [...recommendedTechnicalSourceIds(sources), ...sources
     .filter(source => !source.active && retainedSelection.includes(source.id)).map(source => source.id)]

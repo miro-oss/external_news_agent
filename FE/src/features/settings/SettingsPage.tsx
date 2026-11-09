@@ -39,7 +39,7 @@ export function SettingsPage() {
         <section id="topic" className="topic-registration-card" aria-labelledby="topic-registration-title" tabIndex={-1}>
           <header className="topic-registration-heading">
             <h2 id="topic-registration-title">수집 주제 등록</h2>
-            <p className="muted">관심 주제와 기사를 모을 소스를 함께 선택합니다.</p>
+            <p className="muted">수집할 주제와 검색 조건을 등록합니다.</p>
           </header>
           <TopicForm />
         </section>

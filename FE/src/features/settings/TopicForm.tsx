@@ -6,9 +6,6 @@ import { TopicSourcesSkeleton } from './SettingsSkeletons'
 import { COLLECTION_INTERVALS } from './collectionIntervals'
 import type { DartCompany } from '../../api/dart'
 import { DartCompanyPicker } from './DartCompanyPicker'
-import { TopicPresetPicker } from './TopicPresetPicker'
-import { TopicSourceSelector } from './TopicSourceSelector'
-import { recommendedTechnicalSourceIds, selectedActiveSourceIds, topicPresetFields, type TopicPreset } from './topicPresets'
 
 const EMPTY = {
   name: '',
@@ -26,17 +23,14 @@ export function TopicForm() {
   const [conditionsOpen, setConditionsOpen] = useState(false)
   const [validation, setValidation] = useState<string | null>(null)
   const [dartCompany, setDartCompany] = useState<DartCompany | null>(null)
-  const [selectedSources, setSelectedSources] = useState<number[] | null>(null)
-  const [sourcesOpen, setSourcesOpen] = useState(false)
-  const [presetNotice, setPresetNotice] = useState<string | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
   const activeSources = (sources.data?.content ?? []).filter(source => source.active)
-  const sourceIds = selectedActiveSourceIds(activeSources, selectedSources)
+  const sourceIds = activeSources.map(source => source.id)
   const baseKeywords = baseTopicKeywords(form.queryText)
   const keywordInput = buildTopicKeywordInput(form)
-  const hasFeedSource = activeSources.some((source) => sourceIds.includes(source.id) && source.sourceKind === 'FEED')
+  const hasFeedSource = activeSources.some((source) => source.sourceKind === 'FEED')
   /**
    * 필수라는 사실을 라벨에 길게 적어 두는 대신 한 번 만졌다가 비운 순간에만 말한다. 아직
    * 손대지 않은 칸에 빨간 글씨를 띄우면 잘못한 것이 없는데 혼나는 것처럼 읽힌다.
@@ -50,21 +44,6 @@ export function TopicForm() {
     setValidation(null)
   }
 
-  function applyPreset(preset: TopicPreset) {
-    const recommended = recommendedTechnicalSourceIds(activeSources)
-    setForm(current => ({ ...current, ...topicPresetFields(preset) }))
-    setSelectedSources(recommended)
-    setConditionsOpen(true)
-    setSourcesOpen(true)
-    setQueryTouched(false)
-    setDone(null)
-    setValidation(null)
-    setPresetNotice(recommended.length > 0
-      ? `${preset.name} 초안을 채웠습니다. 기술 소스 ${recommended.length}개를 선택했으며 아래에서 수정할 수 있습니다.`
-      : `${preset.name} 초안을 채웠습니다. 등록된 추천 기술 소스가 없어 수집할 소스를 직접 선택해 주세요.`)
-    reset()
-  }
-
   function submit(event: React.FormEvent) {
     event.preventDefault()
     const intervalMinutes = Number(form.intervalMinutes)
@@ -73,8 +52,7 @@ export function TopicForm() {
       return
     }
     if (sourceIds.length === 0) {
-      setValidation('수집할 소스를 하나 이상 선택해 주세요.')
-      setSourcesOpen(true)
+      setValidation('활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.')
       return
     }
     if (hasFeedSource && keywordInput.requiredKeywords.length === 0 && keywordInput.optionalKeywords.length === 0) {
@@ -98,9 +76,6 @@ export function TopicForm() {
           setQueryTouched(false)
           setConditionsOpen(false)
           setValidation(null)
-          setSelectedSources(null)
-          setSourcesOpen(false)
-          setPresetNotice(null)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -109,8 +84,6 @@ export function TopicForm() {
 
   return (
     <form onSubmit={submit}>
-      <TopicPresetPicker disabled={isPending || sources.isPending || sources.isError} onSelect={applyPreset} />
-      {presetNotice && <p className="topic-preset-notice" role="status">{presetNotice}</p>}
       <div className="field">
         <label htmlFor="topic-name">주제명</label>
         <input
@@ -176,10 +149,6 @@ export function TopicForm() {
           </div>
         )}
       </div>
-
-      {!sources.isPending && !sources.isError && activeSources.length > 0 && <TopicSourceSelector
-        sources={activeSources} selected={sourceIds} disabled={isPending} open={sourcesOpen} onToggle={setSourcesOpen}
-        onChange={ids => { setSelectedSources(ids); setValidation(null); setDone(null); reset() }} />}
 
       <div className="topic-form-footer">
         <div className="field">

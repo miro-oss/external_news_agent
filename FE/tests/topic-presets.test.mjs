@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { AI_TECHNOLOGY_PRESET, recommendedTechnicalSourceIds, selectedActiveSourceIds, topicPresetFields } from '../src/features/settings/topicPresets.ts'
+import { AI_TECHNOLOGY_PRESET, recommendedTechnicalSourceIds, topicPresetFields } from '../src/features/settings/topicPresets.ts'
 import { buildTopicKeywordInput } from '../src/features/settings/topicKeywordInput.ts'
 import { buildTopicEditRequest, topicEditDraft } from '../src/features/settings/topicEditDraft.ts'
 
@@ -60,13 +60,4 @@ test('missing technical feeds never falls back to all general-news sources', () 
   const sources = [source(1, 'https://news.example.com/feed.xml'), source(2, 'NAVER', { sourceKind: 'SEARCH' })]
   const recommended = recommendedTechnicalSourceIds(sources)
   assert.deepEqual(recommended, [])
-  assert.deepEqual(selectedActiveSourceIds(sources, recommended), [])
-})
-
-test('manual registration retains all-source defaults while explicit selection excludes inactive and unknown sources', () => {
-  const sources = [source(1, 'https://openai.com/news/rss.xml'), source(2, 'https://news.example.com/feed.xml'),
-    source(3, 'https://old.example.com/feed.xml', { active: false })]
-  assert.deepEqual(selectedActiveSourceIds(sources, null), [1, 2])
-  assert.deepEqual(selectedActiveSourceIds(sources, [1, 3, 99]), [1])
-  assert.deepEqual(selectedActiveSourceIds(sources, []), [])
 })
