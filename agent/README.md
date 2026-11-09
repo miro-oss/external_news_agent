@@ -417,17 +417,19 @@ uv run pytest
 `claims.ko.v1.json`은 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
 각 3쌍씩 담으며, 같은 근거에 invalid claim과 패러프레이즈한 valid positive control을 함께 둡니다.
 규칙 대조군은 분석 데이터셋과 분리되어 live checkpoint의 기사 fixture 지문에 영향을 주지 않습니다.
-`report.ko.v1.4.json`은 finding과 독립된 버전 보고서 fixture이며 원래 ungrounded였던 보고서 주장이
+`report.ko.v1.8.json`은 finding과 독립된 버전 보고서 fixture이며 원래 ungrounded였던 보고서 주장이
 최종 재검증에서 근거 문장으로 대체되는 것까지 확인합니다.
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v6.baseline.json
+  --compare app/eval/golden/analyze.ko.v7.baseline.json
 ```
 
 replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
 `expectedAudiences` 라벨의 일관성을 확인하는 가드입니다. 실제 provider의 관점 태깅 품질은 live
 프로필 결과에서 판단합니다.
+v7 replay baseline도 v6에서 저장한 기사 분석 출력을 재사용합니다. 새 주제별 편집 지침의
+실제 모델 품질을 측정한 결과가 아니라 현재 검증 경로의 회귀 기준입니다.
 
 replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·보고서 claim scorer를 실행하는
 **계약/규칙 회귀 하네스**입니다. 저장된 출력을 재생하므로 프롬프트 생성 품질을 측정하지는 않습니다.

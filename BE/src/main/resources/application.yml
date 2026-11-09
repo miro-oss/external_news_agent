@@ -70,8 +70,10 @@ news:
   collection:
     # 조합별 선착순 상한 대신 주제 전체 후보를 IDF topicFit으로 정렬해 고른다.
     topic-article-limit: 300
-    # 본문 HTTP 요청은 run 전체에서 IDF topicFit 상위 기사만 수행한다.
+    # 본문 요청은 주제 적합도를 우선하며, 명시적인 AI 기술 주제는 출처별로 균형 있게 선별한다.
     fulltext-limit-per-run: 300
+    # 명시적인 AI 기술 주제의 첫 피드 연결에서 오래된 전체 아카이브가 후보를 채우지 않게 한다.
+    technology-lookback-days: 30
   analysis:
     # 기사 수가 아니라 이번 실행에서 변화가 생긴 이슈 대표 수를 제한한다.
     issue-limit-per-run: 30
@@ -124,8 +126,8 @@ news:
     default-plan: FREE
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.
-    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2}
-    free-analysis-prompt-version: ${AGENT_FREE_ANALYSIS_PROMPT_VERSION:analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2}
+    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2}
+    free-analysis-prompt-version: ${AGENT_FREE_ANALYSIS_PROMPT_VERSION:analyze.ko.v12+perspective.ko.v1+sensitivity.ko.v2}
     insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v2+perspective.ko.v1}
     free-model: ${OPENAI_MODEL:gpt-4.1-nano}
     relevance-free-model: ${TOPIC_RELEVANCE_OPENAI_MODEL:gpt-4.1-nano}

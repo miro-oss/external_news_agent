@@ -18,7 +18,7 @@ class FakeProvider:
         self, *, system_instruction: str, prompt: str, response_schema: dict
     ) -> ProviderResponse:
         assert "prompt injection" not in system_instruction.lower()
-        assert "반도체와 관련된 제조 산업" in system_instruction
+        assert "사용자가 지정한 주제의 자료" in system_instruction
         assert "회사 민감도 판정 기준" in system_instruction
         assert "summaryKo는 공백 포함 10자 이상 120자 이하" in system_instruction
         assert (
@@ -152,7 +152,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == ("analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2")
+    assert response.meta.prompt_version == ("analyze.ko.v12+perspective.ko.v1+sensitivity.ko.v2")
     assert len(provider.prompts) == 1
 
 

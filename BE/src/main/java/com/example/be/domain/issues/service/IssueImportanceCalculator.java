@@ -5,6 +5,7 @@ import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.topics.entity.TopicEditorialFocus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +22,8 @@ public class IssueImportanceCalculator {
 
     static final int VOLUME_SATURATION_ARTICLES = 10;
     static final double RECENCY_HALF_LIFE_HOURS = 24.0d;
+    private static final Weights INDUSTRY_WEIGHTS = new Weights(0.40d, 0.20d, 0.15d, 0.15d, 0.10d);
+    private static final Weights TECHNOLOGY_WEIGHTS = new Weights(0.10d, 0.05d, 0.05d, 0.35d, 0.45d);
 
     private final TopicFitScorer topicFitScorer;
 
@@ -42,7 +45,8 @@ public class IssueImportanceCalculator {
                 issue.getLastSeenAt(),
                 topicFit,
                 issue.getStatus(),
-                now);
+                now,
+                TopicEditorialFocus.isAiTechnology(issue.getTopic()) ? TECHNOLOGY_WEIGHTS : INDUSTRY_WEIGHTS);
     }
 
     BigDecimal score(BigDecimal sensitivity,
@@ -53,6 +57,13 @@ public class IssueImportanceCalculator {
                      double topicFit,
                      IssueStatus status,
                      OffsetDateTime now) {
+        return score(sensitivity, articleCount, publisherCount, independentContentCount,
+                lastSeenAt, topicFit, status, now, INDUSTRY_WEIGHTS);
+    }
+
+    private BigDecimal score(BigDecimal sensitivity, int articleCount, int publisherCount,
+                             int independentContentCount, OffsetDateTime lastSeenAt, double topicFit,
+                             IssueStatus status, OffsetDateTime now, Weights weights) {
         double sensitivityScore = clamp(sensitivity == null ? 0.0d : sensitivity.doubleValue());
         double volume = articleCount <= 0
                 ? 0.0d
@@ -70,11 +81,12 @@ public class IssueImportanceCalculator {
         double recency = Double.isFinite(ageHours)
                 ? 100.0d * Math.pow(0.5d, ageHours / RECENCY_HALF_LIFE_HOURS)
                 : 0.0d;
-        double weighted = 0.40d * sensitivityScore
-                + 0.20d * volume
-                + 0.15d * diversity
-                + 0.15d * recency
-                + 0.10d * clamp(topicFit * 100.0d)
+        // Technical releases can have one original source and no customer/deal sensitivity.
+        double weighted = weights.sensitivity() * sensitivityScore
+                + weights.volume() * volume
+                + weights.diversity() * diversity
+                + weights.recency() * recency
+                + weights.topicFit() * clamp(topicFit * 100.0d)
                 - statusPenalty(status);
         return BigDecimal.valueOf(clamp(weighted)).setScale(2, RoundingMode.HALF_UP);
     }
@@ -105,4 +117,6 @@ public class IssueImportanceCalculator {
         }
         return Math.max(0.0d, Math.min(100.0d, value));
     }
+
+    private record Weights(double sensitivity, double volume, double diversity, double recency, double topicFit) { }
 }

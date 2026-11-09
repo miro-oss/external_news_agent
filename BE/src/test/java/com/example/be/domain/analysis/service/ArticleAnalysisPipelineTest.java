@@ -27,6 +27,8 @@ import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -606,6 +608,92 @@ class ArticleAnalysisPipelineTest {
                 new TopicRelevanceGate.Candidate(representative, topic),
                 new TopicRelevanceGate.Candidate(relatedMember, topic),
                 new TopicRelevanceGate.Candidate(unrelatedMember, topic)));
+    }
+
+    @Test
+    void balancesAcceptedTechnicalTopicsAndObservedSourcesWithoutMovingIndustrySlotsOrDuplicatingArticles() {
+        Topic models = selectionScope(7L, "AI 모델");
+        Topic agents = selectionScope(9L, "AI Agent");
+        Topic industry = selectionScope(11L, "AI 산업");
+        Source prolific = Source.builder().id(8L).build();
+        Source specialist = Source.builder().id(10L).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                capturedItem(models, prolific), capturedItem(models, specialist),
+                capturedItem(agents, prolific), capturedItem(industry, prolific)));
+        models.update("AI 산업", "AI 산업", List.of(), List.of(), List.of(), 100, 1440, true);
+        CollectionRunArticle first = selectionObservation(1L, models, prolific);
+        CollectionRunArticle specialistArticle = CollectionRunArticle.builder()
+                .article(selectionObservation(7L, models, prolific).getArticle())
+                .topic(models).source(specialist).changeType(ChangeType.NEW).build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                first, selectionObservation(2L, industry, prolific), selectionObservation(3L, models, prolific),
+                selectionObservation(4L, models, prolific), selectionObservation(5L, agents, prolific),
+                selectionObservation(6L, models, specialist), specialistArticle,
+                selectionObservation(8L, agents, prolific),
+                CollectionRunArticle.builder().article(first.getArticle()).topic(models).source(specialist)
+                        .changeType(ChangeType.UPDATED).build()));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList())).thenAnswer(invocation -> {
+            List<TopicRelevanceGate.Candidate> candidates = invocation.getArgument(2);
+            return candidates.stream().filter(candidate -> candidate.article().getId() != 6L)
+                    .map(candidate -> new TopicRelevanceGate.Key(candidate.article().getId(), candidate.topic().getId()))
+                    .collect(Collectors.toSet());
+        });
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+        selectionProperties.setIssueLimitPerRun(4);
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> contexts = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator, times(4)).analyze(contexts.capture());
+        assertEquals(List.of(1L, 2L, 5L, 7L), contexts.getAllValues().stream()
+                .map(context -> context.article().getId()).toList());
+        assertEquals("AI 모델", contexts.getAllValues().getFirst().topic().getQueryText());
+        verify(findingWriter).recordTargetCount(42L, 4);
+        verify(findingWriter).write(eq(42L), eq(1L), eq(ChangeType.UPDATED), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void keepsOriginalAnalysisOrderWithoutACapturedTechnicalScope(boolean hasIndustrySnapshot) {
+        Topic topic = selectionScope(7L, hasIndustrySnapshot ? "AI 산업" : "AI 모델");
+        Source prolific = Source.builder().id(8L).build();
+        Source specialist = Source.builder().id(10L).build();
+        if (hasIndustrySnapshot) {
+            when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                    capturedItem(topic, prolific), capturedItem(topic, specialist)));
+            topic.update("AI 모델", "AI 모델", List.of(), List.of(), List.of(), 100, 1440, true);
+        }
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                selectionObservation(1L, topic, prolific), selectionObservation(2L, topic, prolific),
+                selectionObservation(3L, topic, specialist)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+        selectionProperties.setIssueLimitPerRun(2);
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> contexts = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator, times(2)).analyze(contexts.capture());
+        assertEquals(List.of(1L, 2L), contexts.getAllValues().stream()
+                .map(context -> context.article().getId()).toList());
+    }
+
+    private Topic selectionScope(Long id, String scope) {
+        return Topic.builder().id(id).name(scope).queryText(scope).requiredKeywords(List.of())
+                .optionalKeywords(List.of()).excludedKeywords(List.of()).build();
+    }
+
+    private CollectionRunItem capturedItem(Topic topic, Source source) {
+        CollectionRunItem item = CollectionRunItem.builder().topic(topic).source(source).build();
+        item.captureTopicSnapshot();
+        return item;
+    }
+
+    private CollectionRunArticle selectionObservation(Long id, Topic topic, Source source) {
+        Article article = Article.builder().id(id).canonicalUrl("https://example.com/article/" + id)
+                .title("AI 기술 소식").topic(topic).source(source).body("확보한 전문")
+                .fetchStatus(FetchStatus.FULLTEXT).build();
+        return CollectionRunArticle.builder().article(article).topic(topic).source(source)
+                .changeType(ChangeType.NEW).build();
     }
 
     private Article fullTextArticle(Long id, String title, Topic topic) {

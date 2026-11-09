@@ -326,7 +326,7 @@ class TopicRelevanceGateTest {
     })
     void v22ReassessesCachedEarlierDecisionForUnchangedInput(
             String legacyVersion, TopicRelevanceStatus cachedStatus) {
-        assertEquals("topic-relevance.ko.v22", TopicRelevanceGate.PROMPT_VERSION);
+        assertEquals("topic-relevance.ko.v23", TopicRelevanceGate.PROMPT_VERSION);
         reserve();
         var input = candidate(1L, 7L);
         var topic = new AgentTopicRelevanceRequest.TopicInput(7L, "제조장비", "반도체 장비 공정",
@@ -340,7 +340,7 @@ class TopicRelevanceGateTest {
                 + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
         String legacyHash = TopicRelevanceGate.hash(legacyInput);
         String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v22\nFREE\ngpt-4.1-nano\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+                + "\ntopic-relevance.ko.v23\nFREE\ngpt-4.1-nano\n기사 1\nnull\n반도체 제조 장비 공정 본문");
         assertNotEquals(legacyHash, upgradedHash);
         when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
                 42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,
@@ -357,7 +357,7 @@ class TopicRelevanceGateTest {
         verify(client).topicRelevance(any());
         verify(finalizer).success(eq(42L), any(), any(), argThat(rows -> rows.size() == 1
                         && rows.getFirst().status() == newStatus
-                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v22")
+                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v23")
                         && rows.getFirst().inputHash().equals(upgradedHash)),
                 anyString(), any(), any());
     }

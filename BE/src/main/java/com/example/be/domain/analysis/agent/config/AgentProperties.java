@@ -29,9 +29,9 @@ public class AgentProperties implements InitializingBean {
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
-            "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2";
+            "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2";
     private String freeAnalysisPromptVersion =
-            "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2";
+            "analyze.ko.v12+perspective.ko.v1+sensitivity.ko.v2";
     private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
     private String relevanceFreeModel = "gpt-4.1-nano";

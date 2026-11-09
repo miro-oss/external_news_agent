@@ -24,7 +24,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v22"
+PROMPT_VERSION = "topic-relevance.ko.v23"
 _SOURCE_ASSESSMENTS = (
     "E", "D", "L", "G", "N",
 )

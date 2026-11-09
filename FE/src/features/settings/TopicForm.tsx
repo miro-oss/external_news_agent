@@ -6,6 +6,9 @@ import { TopicSourcesSkeleton } from './SettingsSkeletons'
 import { COLLECTION_INTERVALS } from './collectionIntervals'
 import type { DartCompany } from '../../api/dart'
 import { DartCompanyPicker } from './DartCompanyPicker'
+import { TopicPresetPicker } from './TopicPresetPicker'
+import { TopicSourceSelector } from './TopicSourceSelector'
+import { recommendedTechnicalSourceIds, selectedActiveSourceIds, topicPresetFields, type TopicPreset } from './topicPresets'
 
 const EMPTY = {
   name: '',
@@ -23,13 +26,17 @@ export function TopicForm() {
   const [conditionsOpen, setConditionsOpen] = useState(false)
   const [validation, setValidation] = useState<string | null>(null)
   const [dartCompany, setDartCompany] = useState<DartCompany | null>(null)
+  const [selectedSources, setSelectedSources] = useState<number[] | null>(null)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [presetNotice, setPresetNotice] = useState<string | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
-  const activeSources = sources.data?.content ?? []
+  const activeSources = (sources.data?.content ?? []).filter(source => source.active)
+  const sourceIds = selectedActiveSourceIds(activeSources, selectedSources)
   const baseKeywords = baseTopicKeywords(form.queryText)
   const keywordInput = buildTopicKeywordInput(form)
-  const hasFeedSource = activeSources.some((source) => source.sourceKind === 'FEED')
+  const hasFeedSource = activeSources.some((source) => sourceIds.includes(source.id) && source.sourceKind === 'FEED')
   /**
    * 필수라는 사실을 라벨에 길게 적어 두는 대신 한 번 만졌다가 비운 순간에만 말한다. 아직
    * 손대지 않은 칸에 빨간 글씨를 띄우면 잘못한 것이 없는데 혼나는 것처럼 읽힌다.
@@ -43,11 +50,31 @@ export function TopicForm() {
     setValidation(null)
   }
 
+  function applyPreset(preset: TopicPreset) {
+    const recommended = recommendedTechnicalSourceIds(activeSources)
+    setForm(current => ({ ...current, ...topicPresetFields(preset) }))
+    setSelectedSources(recommended)
+    setConditionsOpen(true)
+    setSourcesOpen(true)
+    setQueryTouched(false)
+    setDone(null)
+    setValidation(null)
+    setPresetNotice(recommended.length > 0
+      ? `${preset.name} 초안을 채웠습니다. 기술 소스 ${recommended.length}개를 선택했으며 아래에서 수정할 수 있습니다.`
+      : `${preset.name} 초안을 채웠습니다. 등록된 추천 기술 소스가 없어 수집할 소스를 직접 선택해 주세요.`)
+    reset()
+  }
+
   function submit(event: React.FormEvent) {
     event.preventDefault()
     const intervalMinutes = Number(form.intervalMinutes)
     if (baseKeywords.length === 0) {
       setQueryTouched(true)
+      return
+    }
+    if (sourceIds.length === 0) {
+      setValidation('수집할 소스를 하나 이상 선택해 주세요.')
+      setSourcesOpen(true)
       return
     }
     if (hasFeedSource && keywordInput.requiredKeywords.length === 0 && keywordInput.optionalKeywords.length === 0) {
@@ -61,7 +88,7 @@ export function TopicForm() {
         name: form.name.trim(),
         ...keywordInput,
         intervalMinutes,
-        sourceIds: activeSources.map((source) => source.id),
+        sourceIds,
         ...(dartCompany ? { dartCorpCode: dartCompany.corpCode } : {}),
       },
       {
@@ -71,6 +98,9 @@ export function TopicForm() {
           setQueryTouched(false)
           setConditionsOpen(false)
           setValidation(null)
+          setSelectedSources(null)
+          setSourcesOpen(false)
+          setPresetNotice(null)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -79,6 +109,8 @@ export function TopicForm() {
 
   return (
     <form onSubmit={submit}>
+      <TopicPresetPicker disabled={isPending || sources.isPending || sources.isError} onSelect={applyPreset} />
+      {presetNotice && <p className="topic-preset-notice" role="status">{presetNotice}</p>}
       <div className="field">
         <label htmlFor="topic-name">주제명</label>
         <input
@@ -122,18 +154,19 @@ export function TopicForm() {
               <label htmlFor="topic-required">모두 포함</label>
               <input id="topic-required" value={form.requiredKeywords ?? baseKeywords.join(', ')}
                 onChange={(event) => update('requiredKeywords', event.target.value)} placeholder="HBM, 반도체" />
-              <p className="hint">기본값은 검색 키워드입니다. 다른 조건이 필요하면 수정하거나 비울 수 있습니다.</p>
+              <p className="hint">모든 단어가 함께 있어야 합니다. 기본값은 검색 키워드이며, 비우면 이 조건을 사용하지 않습니다.</p>
             </div>
             <div className="field">
               <label htmlFor="topic-optional">하나 이상 포함</label>
               <input id="topic-optional" value={form.optionalKeywords}
                 onChange={(event) => update('optionalKeywords', event.target.value)} placeholder="SK하이닉스, 삼성전자, 마이크론" />
+              <p className="hint">동의어나 영문 표기는 여기에 넣습니다. 하나만 있어도 통과합니다.</p>
             </div>
             <div className="field">
               <label htmlFor="topic-excluded">제외</label>
               <input id="topic-excluded" value={form.excludedKeywords}
                 onChange={(event) => update('excludedKeywords', event.target.value)} placeholder="광고, 채용" />
-              <p className="hint">각 조건은 쉼표로 구분합니다. 제외 키워드가 들어간 기사는 모으지 않습니다.</p>
+              <p className="hint">각 조건은 쉼표로 구분합니다. 제외 단어가 하나라도 있으면 모으지 않으므로, 기술 글에도 나오는 ‘데이터센터’ 같은 단어는 일괄 제외하지 않는 것이 좋습니다.</p>
             </div>
             <DartCompanyPicker value={dartCompany} disabled={isPending} onChange={company => {
               setDartCompany(company)
@@ -143,6 +176,10 @@ export function TopicForm() {
           </div>
         )}
       </div>
+
+      {!sources.isPending && !sources.isError && activeSources.length > 0 && <TopicSourceSelector
+        sources={activeSources} selected={sourceIds} disabled={isPending} open={sourcesOpen} onToggle={setSourcesOpen}
+        onChange={ids => { setSelectedSources(ids); setValidation(null); setDone(null); reset() }} />}
 
       <div className="topic-form-footer">
         <div className="field">
@@ -175,7 +212,7 @@ export function TopicForm() {
           </p>
         )}
 
-        <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
+        <button type="submit" disabled={isPending || sources.isPending || sources.isError || sourceIds.length === 0}>
           {isPending ? '등록 중…' : '주제 등록'}
         </button>
         {validation && <p className="error" role="alert">{validation}</p>}

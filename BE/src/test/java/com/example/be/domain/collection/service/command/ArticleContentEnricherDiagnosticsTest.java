@@ -12,6 +12,7 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.sources.entity.CrawlPolicy;
@@ -43,7 +44,8 @@ class ArticleContentEnricherDiagnosticsTest {
     private final Source source = Source.builder().id(8L)
             .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, true)).build();
     private final Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("금리")).build();
-    private final ArticleContentEnricher enricher = new ArticleContentEnricher(repository, client,
+    private final ArticleContentEnricher enricher = new ArticleContentEnricher(repository,
+            mock(CollectionRunItemRepository.class), client,
             robots, writer, new CollectionPipelineProperties(),
             new TopicFitScorer((language, keywords) -> Map.of()));
     private final Logger logger = (Logger) LoggerFactory.getLogger(ArticleContentEnricher.class);

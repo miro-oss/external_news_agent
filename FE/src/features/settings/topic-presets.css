@@ -1,0 +1,29 @@
+.topic-preset-picker { min-width: 0; margin: 0 0 1.3rem; padding: 0; border: 0; }
+.topic-preset-picker legend { padding: 0; font-size: .86rem; font-weight: 700; }
+.topic-preset-picker > .hint { margin: .35rem 0 .65rem; }
+.topic-preset-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.topic-preset-options .secondary-button { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; min-width: 0; padding: .7rem; text-align: left; white-space: normal; }
+.topic-preset-options strong { font-size: .82rem; line-height: 1.5; }
+.topic-preset-options span { color: var(--fg-3); font-size: .73rem; line-height: 1.5; font-weight: 400; }
+.topic-preset-notice { margin: -.4rem 0 1rem; color: var(--fg-3); font-size: .82rem; line-height: 1.6; }
+.topic-source-selector { margin: 1.2rem 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.topic-source-selector summary { padding: .8rem; cursor: pointer; font-size: .9rem; font-weight: 600; }
+.topic-source-selector summary span { margin-left: .45rem; color: var(--fg-3); font-size: .8rem; font-weight: 400; }
+.topic-source-selector-body { padding: 0 .8rem .8rem; }
+.topic-source-selector-body > .hint { margin: 0 0 .6rem; }
+.topic-source-actions { display: flex; flex-wrap: wrap; gap: .35rem 1rem; margin-bottom: .65rem; }
+.topic-source-actions .text-button { font-size: .8rem; }
+.topic-source-search-label { display: block; margin-bottom: .3rem; font-size: .8rem; font-weight: 600; }
+.topic-source-selector input[type="search"] { width: 100%; }
+.topic-source-choices { max-height: 12rem; overflow-y: auto; overscroll-behavior: contain; margin-top: .55rem; }
+.topic-source-choices > label { display: flex; align-items: center; gap: .55rem; padding: .6rem .2rem; border-bottom: 1px solid var(--line); cursor: pointer; font-size: .85rem; }
+.topic-source-choices input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; flex: 0 0 auto; accent-color: var(--primary); }
+.topic-source-choices > label > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.topic-source-choices small { color: var(--fg-3); font-size: .72rem; }
+.topic-source-selector .error { margin-bottom: 0; }
+.topic-source-dialog .topic-source-choices { max-height: 19rem; }
+.topic-source-retained-hint { margin-bottom: 0; }
+@media (max-width: 480px) {
+  .topic-preset-options { grid-template-columns: 1fr; }
+  .topic-preset-options .secondary-button { gap: .15rem; }
+}

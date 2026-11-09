@@ -104,7 +104,7 @@ public class AgentReportOrchestrator {
         if (!properties.isEnabled()) {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
-        List<Finding> eligible = eligibleFindings(representativeFindings, context.daily());
+        List<Finding> eligible = eligibleFindings(representativeFindings, context.daily(), context.run());
         if (eligible.isEmpty()) {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
@@ -356,13 +356,13 @@ public class AgentReportOrchestrator {
         return new AgentReportRequest.SensitivityAxisPayload(axis.score(), axis.evidenceSentenceIds());
     }
 
-    private List<Finding> eligibleFindings(List<Finding> findings, boolean preserveOrder) {
+    private List<Finding> eligibleFindings(List<Finding> findings, boolean preserveOrder, CollectionRun run) {
         List<Finding> eligible = findings.stream()
                 .filter(ReportFindings::hasFullText)
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(FindingEvidencePolicy::hasSupportedEvidence)
                 .toList();
-        return (preserveOrder ? eligible : ReportFindingOrder.sort(eligible)).stream()
+        return (preserveOrder ? eligible : ReportFindingOrder.sortForGeneration(eligible, run)).stream()
                 .limit(MAX_REPORT_FINDINGS)
                 .toList();
     }

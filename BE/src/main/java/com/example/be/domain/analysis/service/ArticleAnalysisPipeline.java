@@ -13,9 +13,11 @@ import com.example.be.domain.collection.repository.CollectionRunArticleRepositor
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
+import com.example.be.domain.collection.scoring.TechnicalSourceBalancer;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.database.OracleInClause;
 import com.example.be.global.config.ApiTimeZone;
@@ -42,6 +44,11 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class ArticleAnalysisPipeline {
+
+    private static final Comparator<Target> PRIORITY = Comparator.comparingDouble(Target::topicFit).reversed()
+            .thenComparing(target -> target.article().getPublishedAt(),
+                    Comparator.nullsLast(Comparator.reverseOrder()))
+            .thenComparing(target -> target.article().getId());
 
     private final CollectionRunArticleRepository runArticleRepository;
     private final CollectionRunRepository runRepository;
@@ -354,7 +361,9 @@ public class ArticleAnalysisPipeline {
             Topic effectiveTopic = snapshot == null ? topic : snapshot;
             targets.merge(
                     new TopicRelevanceGate.Key(article.getId(), topicId(effectiveTopic)),
-                    new Target(article, ChangeType.UPDATED, topicFit(effectiveTopic, article), effectiveTopic),
+                    new Target(article, ChangeType.UPDATED, topicFit(effectiveTopic, article), effectiveTopic,
+                            TechnicalSourceBalancer.group(snapshot,
+                                    article.getSource() == null ? null : article.getSource().getId())),
                     this::preserveObservedChangeType);
         });
     }
@@ -383,9 +392,12 @@ public class ArticleAnalysisPipeline {
         Topic observedTopic = observation.getTopic() == null ? observation.getArticle().getTopic() : observation.getTopic();
         Topic snapshot = topicSnapshot(snapshotTopics, observedTopic);
         Topic effectiveTopic = snapshot == null ? observedTopic : snapshot;
+        Source observedSource = observation.getSource() == null
+                ? observation.getArticle().getSource() : observation.getSource();
         Target candidate = new Target(
                 observation.getArticle(), changeType,
-                topicFit(effectiveTopic, observation.getArticle()), effectiveTopic);
+                topicFit(effectiveTopic, observation.getArticle()), effectiveTopic,
+                TechnicalSourceBalancer.group(snapshot, observedSource == null ? null : observedSource.getId()));
         byArticleTopic.merge(new TopicRelevanceGate.Key(observation.getArticle().getId(), topicId(effectiveTopic)),
                 candidate, this::preferUpdated);
     }
@@ -419,15 +431,12 @@ public class ArticleAnalysisPipeline {
     private List<Target> prioritized(Collection<Target> targets) {
         List<Target> ordered = targets.stream()
                 .filter(this::isReady)
-                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
-                        .thenComparing(
-                                target -> target.article().getPublishedAt(),
-                                Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(target -> target.article().getId()))
+                .sorted(PRIORITY)
                 .toList();
         int limit = selectionProperties.getIssueLimitPerRun();
         if (ordered.size() > limit) {
             log.info("분석 상한으로 이슈 대표를 선별한다. candidates={} selected={}", ordered.size(), limit);
+            ordered = TechnicalSourceBalancer.balance(ordered, Target::technicalGroup, PRIORITY);
         }
         return ordered.stream().limit(limit).toList();
     }
@@ -452,7 +461,8 @@ public class ArticleAnalysisPipeline {
                 ? ChangeType.UPDATED
                 : right.changeType();
         Target stronger = left.topicFit() >= right.topicFit() ? left : right;
-        return new Target(left.article(), changeType, stronger.topicFit(), stronger.topicOverride());
+        return new Target(left.article(), changeType, stronger.topicFit(), stronger.topicOverride(),
+                stronger.technicalGroup());
     }
 
     /** 이슈 대표 보충은 topicFit만 보강하며, 이번 run에서 직접 관측한 NEW/UPDATED 판정은 바꾸지 않는다. */
@@ -461,13 +471,15 @@ public class ArticleAnalysisPipeline {
                 existing.article(),
                 existing.changeType(),
                 Math.max(existing.topicFit(), representative.topicFit()),
-                existing.topicOverride() == null ? representative.topicOverride() : existing.topicOverride());
+                existing.topicOverride() == null ? representative.topicOverride() : existing.topicOverride(),
+                existing.technicalGroup() == null ? representative.technicalGroup() : existing.technicalGroup());
     }
 
     private String messageOf(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private record Target(Article article, ChangeType changeType, double topicFit, Topic topicOverride) {
+    private record Target(Article article, ChangeType changeType, double topicFit, Topic topicOverride,
+                          TechnicalSourceBalancer.Group technicalGroup) {
     }
 }

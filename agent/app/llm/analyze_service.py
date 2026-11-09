@@ -26,7 +26,7 @@ from app.schemas.analyze import (
     Section,
 )
 
-_ANALYZE_PROMPT_VERSION = "analyze.ko.v6"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v7"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
 _SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v2"
 PROMPT_VERSION = (

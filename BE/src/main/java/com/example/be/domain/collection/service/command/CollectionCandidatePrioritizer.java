@@ -4,6 +4,8 @@ import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
+import com.example.be.domain.topics.entity.TopicEditorialFocus;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -31,12 +33,16 @@ public class CollectionCandidatePrioritizer {
     private final TopicFitScorer topicFitScorer;
 
     public Map<Long, List<CollectedArticle>> prioritize(List<CollectionBatch> batches) {
+        return prioritize(batches, OffsetDateTime.now(ApiTimeZone.ZONE));
+    }
+
+    Map<Long, List<CollectedArticle>> prioritize(List<CollectionBatch> batches, OffsetDateTime now) {
         Map<Long, List<CollectedArticle>> selectedByItem = new LinkedHashMap<>();
         batches.forEach(batch -> selectedByItem.put(batch.itemId(), new ArrayList<>()));
 
         Map<Long, List<Candidate>> byTopic = new LinkedHashMap<>();
         for (CollectionBatch batch : batches) {
-            candidates(batch).forEach(candidate ->
+            candidates(batch, now).forEach(candidate ->
                     byTopic.computeIfAbsent(batch.topic().getId(), ignored -> new ArrayList<>())
                             .add(candidate));
         }
@@ -46,9 +52,7 @@ public class CollectionCandidatePrioritizer {
             topicCandidates.forEach(candidate -> bestByUrl.merge(
                     candidate.normalizedUrl(), candidate,
                     (left, right) -> PRIORITY.compare(left, right) <= 0 ? left : right));
-            Set<String> selectedUrls = bestByUrl.values().stream()
-                    .sorted(PRIORITY)
-                    .limit(properties.getTopicArticleLimit())
+            Set<String> selectedUrls = select(bestByUrl.values().stream().sorted(PRIORITY).toList()).stream()
                     .map(Candidate::normalizedUrl)
                     .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
             topicCandidates.stream()
@@ -63,7 +67,27 @@ public class CollectionCandidatePrioritizer {
         return Map.copyOf(immutable);
     }
 
-    private List<Candidate> candidates(CollectionBatch batch) {
+    private List<Candidate> select(List<Candidate> ordered) {
+        int limit = properties.getTopicArticleLimit();
+        if (ordered.size() <= limit || !TopicEditorialFocus.isAiTechnology(ordered.getFirst().batch().topic())) {
+            return ordered.stream().limit(limit).toList();
+        }
+        // Each connected source gets its best match before a prolific source consumes another slot.
+        Map<Long, List<Candidate>> bySource = new LinkedHashMap<>();
+        ordered.forEach(candidate -> bySource.computeIfAbsent(candidate.batch().source().getId(),
+                ignored -> new ArrayList<>()).add(candidate));
+        List<Candidate> selected = new ArrayList<>();
+        for (int round = 0; selected.size() < limit; round++) {
+            int index = round;
+            List<Candidate> next = bySource.values().stream().filter(values -> values.size() > index)
+                    .map(values -> values.get(index)).sorted(PRIORITY).toList();
+            if (next.isEmpty()) break;
+            next.stream().limit(limit - selected.size()).forEach(selected::add);
+        }
+        return selected;
+    }
+
+    private List<Candidate> candidates(CollectionBatch batch, OffsetDateTime now) {
         if (batch.failed()
                 || !batch.outcome().robots().allowed()
                 || batch.outcome().notModified()
@@ -73,6 +97,11 @@ public class CollectionCandidatePrioritizer {
 
         Map<String, Candidate> byUrl = new LinkedHashMap<>();
         for (CollectedArticle article : batch.outcome().fetch().articles()) {
+            // Some technical RSS feeds contain their whole archive. Unknown dates remain unknown.
+            if (TopicEditorialFocus.isAiTechnology(batch.topic()) && article.publishedAt() != null
+                    && article.publishedAt().isBefore(now.minusDays(properties.getTechnologyLookbackDays()))) {
+                continue;
+            }
             var match = topicFitScorer.evaluate(batch.topic(), batch.source(), article);
             if (!match.matches()) {
                 continue;
