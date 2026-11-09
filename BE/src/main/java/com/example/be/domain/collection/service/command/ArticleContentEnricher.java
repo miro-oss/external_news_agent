@@ -8,11 +8,14 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.robots.RobotsLookup;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
+import com.example.be.domain.collection.scoring.TechnicalSourceBalancer;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.topics.entity.Topic;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -42,7 +45,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ArticleContentEnricher {
 
+    private static final Comparator<Target> PRIORITY = Comparator.comparingDouble(Target::topicFit).reversed()
+            .thenComparing(target -> target.article().getPublishedAt(),
+                    Comparator.nullsLast(Comparator.reverseOrder()))
+            .thenComparing(target -> target.article().getId());
+
     private final CollectionRunArticleRepository runArticleRepository;
+    private final CollectionRunItemRepository runItemRepository;
     private final ArticleContentClient contentClient;
     private final RobotsTxtClient robotsTxtClient;
     private final CollectionResultWriter resultWriter;
@@ -116,6 +125,12 @@ public class ArticleContentEnricher {
     }
 
     private List<Article> prioritizedTargets(Long runId) {
+        Map<Long, Topic> snapshotTopics = new LinkedHashMap<>();
+        runItemRepository.findExecutionItemsByRunId(runId).forEach(item -> {
+            if (item.getTopicSnapshot() != null) {
+                snapshotTopics.putIfAbsent(item.getTopicSnapshot().topicId(), item.collectionTopic());
+            }
+        });
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         for (CollectionRunArticle observation : runArticleRepository.findClusterTargetsByRunId(runId)) {
             Article article = observation.getArticle();
@@ -123,25 +138,31 @@ public class ArticleContentEnricher {
                     && article.getFetchStatus() != FetchStatus.FETCH_FAILED) {
                 continue;
             }
+            Topic observedTopic = observation.getTopic();
+            Topic snapshot = observedTopic == null ? null : snapshotTopics.get(observedTopic.getId());
             double topicFit = topicFitScorer.score(
-                    observation.getTopic(),
+                    snapshot == null ? observedTopic : snapshot,
                     article.getTitle(),
                     article.getSummary(),
                     article.getLanguage(),
                     article.getSource().getLanguage());
             byArticleId.merge(
                     article.getId(),
-                    new Target(article, topicFit),
+                    new Target(article, topicFit, TechnicalSourceBalancer.group(snapshot,
+                            observation.getSource() == null ? article.getSource().getId()
+                                    : observation.getSource().getId())),
                     (left, right) -> left.topicFit() >= right.topicFit() ? left : right);
         }
-        return byArticleId.values().stream()
-                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
-                        .thenComparing(
-                                target -> target.article().getPublishedAt(),
-                                Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(target -> target.article().getId()))
+        List<Target> ordered = byArticleId.values().stream()
+                .filter(target -> allowsFullText(target.article().getSource()))
+                .sorted(PRIORITY).toList();
+        int limit = properties.getFulltextLimitPerRun();
+        if (ordered.size() > limit) {
+            ordered = TechnicalSourceBalancer.balance(ordered, Target::technicalGroup, PRIORITY);
+        }
+        return ordered.stream()
                 .map(Target::article)
-                .limit(properties.getFulltextLimitPerRun())
+                .limit(limit)
                 .toList();
     }
 
@@ -208,6 +229,6 @@ public class ArticleContentEnricher {
                 runId, attempted, fullText, failureCounts);
     }
 
-    private record Target(Article article, double topicFit) {
+    private record Target(Article article, double topicFit, TechnicalSourceBalancer.Group technicalGroup) {
     }
 }

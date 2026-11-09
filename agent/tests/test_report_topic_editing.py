@@ -99,7 +99,7 @@ def test_weekly_preserves_editorial_priority_and_exact_saved_claims_for_non_semi
     assert response.important_events[1].summary_ko.endswith("전망했다.")
     assert response.title.startswith(data["topicName"])
     assert len(provider.calls) == 1
-    assert response.meta.prompt_version == "weekly-report.ko.v3"
+    assert response.meta.prompt_version == "weekly-report.ko.v4"
 
 
 def test_empty_topic_mock_does_not_assume_a_semiconductor_report():

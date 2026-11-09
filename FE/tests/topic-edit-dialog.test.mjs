@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 
-let server, emptyEnvDir, Dialog, topicEditDraft, buildTopicEditRequest
+let server, emptyEnvDir, Dialog, SourceDialog, topicEditDraft, buildTopicEditRequest
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'topic-edit-dialog-test-'))
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
@@ -17,6 +17,7 @@ before(async () => {
     optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null, ws: false }, logLevel: 'error' })
   Dialog = (await server.ssrLoadModule('/src/features/settings/TopicEditSettings.tsx')).TopicEditDialog
+  SourceDialog = (await server.ssrLoadModule('/src/features/settings/TopicSourceSettings.tsx')).TopicSourceDialog
   ;({ topicEditDraft, buildTopicEditRequest } = await server.ssrLoadModule('/src/features/settings/topicEditDraft.ts'))
 })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 3 }) })
@@ -89,6 +90,40 @@ test('in-flight saves lock all fields and dismissal controls and expose pending 
   assert.ok(controls.length >= 8)
   assert.ok(controls.every(control => control.includes('disabled=""')))
   assert.match(html, />저장 중…<\/button>/)
+})
+
+test('a single AI technology fill action replaces category choices without preselecting or saving on opening', () => {
+  const html = render()
+  assert.equal((html.match(/>AI 기술 동향 조건 채우기<\/button>/g) ?? []).length, 1)
+  assert.match(html, /모델·Agent·학습·검색·온톨로지를 한 주제로 함께 수집합니다/)
+  assert.doesNotMatch(html, /AI 기술 주제 예시|AI 모델 업데이트|AI Agent 구현|AI 학습·검색·추론 기술/)
+  assert.match(html, /value="반도체 공급망"/)
+  assert.match(html, /<button[^>]*type="submit"[^>]*disabled=""[^>]*>저장<\/button>/)
+  assert.deepEqual(request(), {})
+})
+
+test('source editing starts with existing links selected, a disabled save, and a non-submit cancel control', () => {
+  const source = { id: 1, name: '기존 뉴스', sourceKind: 'FEED', active: false, urlTemplate: '' }
+  const html = renderToStaticMarkup(createElement(SourceDialog, {
+    id: 'source-edit-test', initial: { topic: { ...topic, sources: [source] }, sources: [source] },
+    onDismiss() {}, onSave() {},
+  }))
+  assert.match(html, /type="checkbox"[^>]*checked=""/)
+  assert.match(html, /현재 1개 → 저장 후 1개 연결/)
+  assert.match(html, /<button[^>]*type="submit"[^>]*disabled=""[^>]*>소스 저장<\/button>/)
+  assert.match(html, /<button[^>]*type="button"[^>]*>취소<\/button>/)
+  assert.match(html, /중지된 소스 연결도 유지합니다/)
+})
+
+test('source save failures remain visible and pending saves disable recommendation, selection, and dismissal', () => {
+  const html = renderToStaticMarkup(createElement(SourceDialog, {
+    id: 'source-edit-test', initial: { topic: { ...topic, sources: [] }, sources: [] },
+    pending: true, error: '수집 소스를 찾을 수 없습니다.', onDismiss() {}, onSave() {},
+  }))
+  const controls = html.match(/<(?:input|button)\b[^>]*>/g) ?? []
+  assert.ok(controls.length >= 6 && controls.every(control => control.includes('disabled=""')))
+  assert.match(html, /role="alert">수집 소스를 찾을 수 없습니다\./)
+  assert.match(html, /저장하면 모든 소스 연결이 해제됩니다/)
 })
 
 test('save failures remain visible in the editor with the loaded conditions available to correct', () => {

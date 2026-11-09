@@ -31,6 +31,7 @@ public class TopicWeeklyReportSelector {
     private final TopicRelevancePolicy relevance;
     private final DailyReportFeedbackExclusions feedbackExclusions;
     private final CompanyInterestSelection companyInterests;
+    private final ReportRecencyPolicy recency;
     @org.springframework.beans.factory.annotation.Value("${news.reports.daily.max-issues:10}")
     private int maxIssues = 10;
 
@@ -72,6 +73,7 @@ public class TopicWeeklyReportSelector {
                                 && (!"OPINION".equals(point.claimType())
                                     || point.attributedTo() != null && !point.attributedTo().isBlank())))
                 .filter(TopicWeeklyReportSelector::hasSavedSentences).toList();
+        if (savedRunIds == null) eligible = recency.filterForTopic(eligible, topicId);
         // Exclude reviewed issues after choosing their latest observations, then fill the ranking with valid issues.
         var excluded = feedbackExclusions.forSelection(date, ReportComparisonSnapshot.captureByFinding(eligible, byFinding));
         eligible = eligible.stream().filter(finding -> !excluded.contains(finding.getId())).toList();

@@ -45,7 +45,38 @@ class ReportCreationServiceTest {
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final CompanyInterestSelection interests = CompanyInterestSelectionTestSupport.passThrough();
     private final ReportCreationService service = new ReportCreationService(
-            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, interests);
+            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, interests, ReportRecencyTestSupport.policy());
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void newRunReportInputsAreFilteredButExistingRecoveryKeepsSavedSelection(boolean recovery) {
+        var run = CollectionRun.builder().id(42L).build();
+        var old = fullTextFinding(1);
+        var recent = fullTextFinding(2);
+        var all = List.of(old, recent);
+        var recency = mock(ReportRecencyPolicy.class);
+        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator,
+                persistenceService, reportRepository, interests, recency);
+        when(persistenceService.reserve(eq(42L), any())).thenReturn(new ReportPersistenceService.Reservation(17L, true));
+        when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(all);
+        when(recency.filter(all)).thenReturn(List.of(recent));
+        var document = new ReportDocument("보고서", "본문", "model");
+        when(reportOrchestrator.generate(eq(run), any(), any())).thenReturn(document);
+
+        if (recovery) creation.recover(42L); else creation.generate(42L);
+
+        verify(recency).filter(all);
+        verify(reportOrchestrator).generate(eq(run), eq(List.of(recent)), any());
+        org.mockito.Mockito.clearInvocations(recency, reportOrchestrator);
+        var existing = NewsReport.builder().id(17L).run(run).reportStatus(ReportStatus.GENERATED).build();
+        when(reportRepository.findByRunId(42L)).thenReturn(Optional.of(existing));
+
+        creation.recover(42L);
+
+        verifyNoInteractions(recency);
+        verify(reportOrchestrator).generate(eq(run), eq(all), any());
+    }
 
     @Test
     void reanalysisDuringCompanySelectionCannotReplaceTheOriginalGenerationCompanyEvidence() {
@@ -67,7 +98,7 @@ class ReportCreationServiceTest {
                 mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class),
                 mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
         persistence.setIssueCompanies(new com.example.be.domain.reports.dart.ReportIssueCompanyCapture(catalog));
-        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
+        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests, ReportRecencyTestSupport.policy());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
@@ -101,7 +132,7 @@ class ReportCreationServiceTest {
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
         var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests, mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
-        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
+        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests, ReportRecencyTestSupport.policy());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
@@ -245,7 +276,7 @@ class ReportCreationServiceTest {
         var persistence = new ReportPersistenceService(
                 runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class), mock(com.example.be.domain.reports.keyword.ReportKeywordCapture.class), mock(com.example.be.domain.reports.comparison.ReportComparisonCapture.class));
         var creation = new ReportCreationService(
-                runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
+                runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, CompanyInterestSelectionTestSupport.passThrough(), ReportRecencyTestSupport.policy());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);

@@ -24,6 +24,7 @@ public class ReportCreationService {
     private final ReportPersistenceService persistenceService;
     private final NewsReportRepository reportRepository;
     private final CompanyInterestSelection companyInterests;
+    private final ReportRecencyPolicy recency;
 
     /** Agent HTTP 호출 동안 DB 잠금을 잡지 않는다. 신규 기사가 없으면 보고서 없이 null을 반환한다. */
     public Long generate(Long runId) {
@@ -35,7 +36,7 @@ public class ReportCreationService {
 
         CollectionRun run = runRepository.findReportContextById(runId)
                 .orElseThrow(() -> new IllegalStateException("보고서를 만들 수집 실행이 없습니다. runId=" + runId));
-        List<Finding> findings = findingRepository.findForReportByRunId(runId);
+        List<Finding> findings = recency.filter(findingRepository.findForReportByRunId(runId));
         var candidates = reportOrchestrator.companySelectionCandidates(findings);
         var selection = companyInterests.select(candidates, null);
         var retained = selection.findings().stream().map(Finding::getId).collect(java.util.stream.Collectors.toSet());
@@ -66,6 +67,7 @@ public class ReportCreationService {
                 .orElseThrow(() -> new IllegalStateException("보고서를 만들 수집 실행이 없습니다. runId=" + runId));
         List<Finding> findings = existing != null && existing.isCompanySelectionRecorded()
                 ? ReportFindings.load(existing, findingRepository) : findingRepository.findForReportByRunId(runId);
+        if (existing == null) findings = recency.filter(findings);
         ReportDocument document = reportOrchestrator.generate(run, findings, generatedAt);
         return persistenceService.replace(reportId, document, generatedAt);
     }

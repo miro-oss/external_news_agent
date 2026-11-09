@@ -5,8 +5,10 @@ import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
+import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
 import com.example.be.domain.collection.robots.RobotsLookup;
 import com.example.be.domain.collection.robots.RobotsRules;
@@ -33,6 +35,8 @@ import static org.mockito.Mockito.when;
 
 class ArticleContentEnricherTest {
 
+    private final CollectionRunItemRepository runItemRepository = mock(CollectionRunItemRepository.class);
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void passesTheArticleTitleWithOrWithoutRobotsChecks(boolean respectRobots) {
@@ -40,7 +44,7 @@ class ArticleContentEnricherTest {
         ArticleContentClient contentClient = mock(ArticleContentClient.class);
         RobotsTxtClient robotsClient = mock(RobotsTxtClient.class);
         CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
-        ArticleContentEnricher enricher = new ArticleContentEnricher(repository, contentClient, robotsClient,
+        ArticleContentEnricher enricher = new ArticleContentEnricher(repository, runItemRepository, contentClient, robotsClient,
                 resultWriter, new CollectionPipelineProperties(), equalWeightScorer());
         Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("금리")).build();
         Source source = Source.builder().id(8L)
@@ -83,6 +87,7 @@ class ArticleContentEnricherTest {
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
         ArticleContentEnricher enricher = new ArticleContentEnricher(
                 repository,
+                runItemRepository,
                 contentClient,
                 mock(RobotsTxtClient.class),
                 resultWriter,
@@ -116,6 +121,7 @@ class ArticleContentEnricherTest {
         properties.setFulltextLimitPerRun(1);
         ArticleContentEnricher enricher = new ArticleContentEnricher(
                 repository,
+                runItemRepository,
                 contentClient,
                 mock(RobotsTxtClient.class),
                 mock(CollectionResultWriter.class),
@@ -151,6 +157,7 @@ class ArticleContentEnricherTest {
                 Map.of("반도체", 1.0d, "ai", 1.0d, "hbm4", 4.0d));
         ArticleContentEnricher enricher = new ArticleContentEnricher(
                 repository,
+                runItemRepository,
                 contentClient,
                 mock(RobotsTxtClient.class),
                 mock(CollectionResultWriter.class),
@@ -178,6 +185,157 @@ class ArticleContentEnricherTest {
         enricher.enrich(42L);
 
         assertEquals(List.of("https://example.com/rare"), fetchedUrls);
+    }
+
+    @Test
+    void balancesObservedSourcesAndTechnicalTopicsBeforeSmallFulltextLimit() {
+        Topic models = scope(7L, "AI 모델");
+        Topic agents = scope(9L, "AI Agent");
+        Source prolific = source(8L);
+        Source specialist = source(10L);
+        List<CollectionRunArticle> observations = List.of(
+                observed(1L, models, prolific), observed(2L, models, prolific),
+                observed(3L, models, prolific),
+                // Globally shared article keeps its original publisher; balance its observed source.
+                CollectionRunArticle.builder().article(candidate(4L, models, prolific))
+                        .topic(models).source(specialist).build(),
+                observed(5L, agents, prolific), observed(6L, agents, prolific));
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, prolific), captured(models, specialist), captured(agents, prolific)));
+
+        assertEquals(List.of(url(1), url(4), url(5)), fetchUrls(observations, 3));
+    }
+
+    @Test
+    void preservesEveryNontechnicalSlotWhenBalancingTechnicalSources() {
+        Topic models = scope(7L, "AI 모델");
+        Topic industry = scope(9L, "AI 산업");
+        Source prolific = source(8L);
+        Source specialist = source(10L);
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, prolific), captured(models, specialist), captured(industry, prolific)));
+
+        assertEquals(List.of(url(1), url(2), url(6), url(4)), fetchUrls(List.of(
+                observed(1L, models, prolific), observed(2L, industry, prolific),
+                observed(3L, models, prolific), observed(4L, industry, prolific),
+                observed(5L, models, prolific), observed(6L, models, specialist)), 4));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void usesCapturedScopeInsteadOfAnEditedLiveTopic(boolean capturedTechnical) {
+        Topic topic = scope(7L, capturedTechnical ? "AI 모델" : "AI 산업");
+        Source prolific = source(8L);
+        Source specialist = source(10L);
+        List<CollectionRunItem> items = List.of(captured(topic, prolific), captured(topic, specialist));
+        String editedScope = capturedTechnical ? "AI 산업" : "AI 모델";
+        topic.update(editedScope, editedScope, List.of(), List.of(), List.of(), 100, 1440, true);
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(items);
+
+        assertEquals(List.of(url(1), url(capturedTechnical ? 3 : 2)), fetchUrls(List.of(
+                observed(1L, topic, prolific), observed(2L, topic, prolific),
+                observed(3L, topic, specialist)), 2));
+    }
+
+    @Test
+    void keepsLegacyTechnicalRunsWithoutCapturedScopeInTheirExistingOrder() {
+        Topic topic = scope(7L, "AI 모델");
+        Source prolific = source(8L);
+        assertEquals(List.of(url(1), url(2)), fetchUrls(List.of(
+                observed(1L, topic, prolific), observed(2L, topic, prolific),
+                observed(3L, topic, source(10L))), 2));
+    }
+
+    @Test
+    void cachedFulltextAndRepeatedObservationsDoNotConsumeHttpSlots() {
+        Topic models = scope(7L, "AI 모델");
+        Source prolific = source(8L);
+        Source specialist = source(10L);
+        Article cached = Article.builder().id(0L).canonicalUrl(url(0)).title("AI 기술 소식")
+                .topic(models).source(specialist).fetchStatus(FetchStatus.FULLTEXT).body("저장한 전문").build();
+        CollectionRunArticle first = observed(1L, models, prolific);
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, prolific), captured(models, specialist)));
+
+        assertEquals(List.of(url(1), url(3)), fetchUrls(List.of(
+                observation(cached, models), first, first,
+                CollectionRunArticle.builder().article(first.getArticle()).topic(models).source(specialist).build(),
+                observed(2L, models, prolific), observed(3L, models, specialist)), 2));
+    }
+
+    @Test
+    void prohibitedArticleSourcesDoNotConsumeBalancedFulltextSlots() {
+        Topic models = scope(7L, "AI 모델");
+        Source allowed = source(8L);
+        Source prohibited = Source.builder().id(10L)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, false)).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, allowed), captured(models, prohibited)));
+
+        assertEquals(List.of(url(1), url(2)), fetchUrls(List.of(
+                observed(1L, models, allowed), observed(2L, models, allowed),
+                observed(3L, models, prohibited)), 2));
+    }
+
+    @Test
+    void usesOriginalArticlePermissionRatherThanObservedSourcePermission() {
+        Topic models = scope(7L, "AI 모델");
+        Source allowed = source(8L);
+        Source prohibited = Source.builder().id(10L)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, false)).build();
+        CollectionRunArticle blockedArticle = CollectionRunArticle.builder()
+                .article(candidate(1L, models, prohibited)).topic(models).source(allowed).build();
+        CollectionRunArticle allowedArticle = CollectionRunArticle.builder()
+                .article(candidate(2L, models, allowed)).topic(models).source(prohibited).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, allowed), captured(models, prohibited)));
+
+        assertEquals(List.of(url(2)), fetchUrls(List.of(blockedArticle, allowedArticle), 1));
+    }
+
+    private List<String> fetchUrls(List<CollectionRunArticle> observations, int limit) {
+        CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
+        ArticleContentClient client = mock(ArticleContentClient.class);
+        CollectionPipelineProperties properties = new CollectionPipelineProperties();
+        properties.setFulltextLimitPerRun(limit);
+        ArticleContentEnricher enricher = new ArticleContentEnricher(repository, runItemRepository, client,
+                mock(RobotsTxtClient.class), mock(CollectionResultWriter.class), properties, equalWeightScorer());
+        when(repository.findClusterTargetsByRunId(42L)).thenReturn(observations);
+        List<String> fetched = new ArrayList<>();
+        when(client.fetch(any(), any(), any(), eq(false))).thenAnswer(invocation -> {
+            fetched.add(invocation.getArgument(0));
+            return ArticleContentResult.fullText("확보한 전문");
+        });
+        enricher.enrich(42L);
+        return fetched;
+    }
+
+    private Topic scope(Long id, String scope) {
+        return Topic.builder().id(id).name(scope).queryText(scope).requiredKeywords(List.of())
+                .optionalKeywords(List.of()).excludedKeywords(List.of()).build();
+    }
+
+    private Source source(Long id) {
+        return Source.builder().id(id)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, true)).build();
+    }
+
+    private CollectionRunItem captured(Topic topic, Source source) {
+        CollectionRunItem item = CollectionRunItem.builder().topic(topic).source(source).build();
+        item.captureTopicSnapshot();
+        return item;
+    }
+
+    private CollectionRunArticle observed(Long id, Topic topic, Source source) {
+        return CollectionRunArticle.builder().article(candidate(id, topic, source)).topic(topic).source(source).build();
+    }
+
+    private Article candidate(Long id, Topic topic, Source source) {
+        return article(id, url(id), "AI 기술 소식", source, topic);
+    }
+
+    private String url(long id) {
+        return "https://example.com/article/" + id;
     }
 
     private Article article(Long id, String url, String title, Source source, Topic topic) {

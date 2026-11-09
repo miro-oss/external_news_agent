@@ -91,6 +91,48 @@ class AgentReportOrchestratorTest {
                 .thenReturn(reservation);
     }
 
+    @ParameterizedTest
+    @CsvSource({"true,true", "false,true", "true,false", "false,false"})
+    void fallbackUsesCapturedRunScopeForSummaryAndEventSelection(boolean disabled, boolean technical) {
+        properties.setEnabled(!disabled);
+        var run = run();
+        var item = run.getItems().getFirst();
+        org.springframework.test.util.ReflectionTestUtils.setField(item, "source",
+                com.example.be.domain.sources.entity.Source.builder().id(7L).build());
+        org.springframework.test.util.ReflectionTestUtils.setField(item.getTopic(), "queryText",
+                technical ? "AI 모델" : "AI 산업");
+        item.captureTopicSnapshot();
+        org.springframework.test.util.ReflectionTestUtils.setField(item.getTopic(), "queryText",
+                technical ? "AI 산업" : "AI 모델");
+
+        var release = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "새 모델 출시");
+        org.springframework.test.util.ReflectionTestUtils.setField(release, "sensitivity",
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.LOW));
+        var findings = new java.util.ArrayList<Finding>();
+        findings.add(release);
+        LongStream.rangeClosed(502, 506).forEach(id -> {
+            var reference = finding(id, AnalysisSource.LLM, FetchStatus.FULLTEXT, "참고 요약 " + id);
+            org.springframework.test.util.ReflectionTestUtils.setField(reference, "relevance", Relevance.REFERENCE);
+            findings.add(reference);
+        });
+        if (!disabled) when(client.report(any())).thenThrow(new IllegalStateException("test provider unavailable"));
+        var actualFallback = new ReportGenerator(
+                com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
+        var subject = new AgentReportOrchestrator(properties, client, recorder, actualFallback,
+                observationRepository, quotaService, planService, resultWriter, issueArticleRepository,
+                com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy,
+                feedbackLearning, runItems);
+
+        var document = subject.generate(run, findings, LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        assertEquals(ReportStatus.FALLBACK, document.status());
+        assertEquals(technical ? 501L : 502L, document.reflectedFindingIds().getFirst());
+        assertEquals(technical, document.structuredContent().executiveSummary().contains("새 모델 출시"));
+        assertEquals(technical, document.structuredContent().importantEvents().stream()
+                .anyMatch(event -> event.sourceFindingIds().contains(501L)));
+        if (disabled) verifyNoInteractions(client); else verify(client).report(any());
+    }
+
     @Test
     void loadsOnlySelectedFrozenTopicExamplesAndTransmitsSharedTopicIds() {
         var run = run();
@@ -141,7 +183,7 @@ class AgentReportOrchestratorTest {
             verify(fallback).generateDaily(List.of(finding), date, stats);
         } else {
             orchestrator.generate(run, List.of(finding), generatedAt);
-            verify(fallback).generate(eq(List.of(finding)), eq(generatedAt), any());
+            verify(fallback).generateForRun(eq(List.of(finding)), eq(generatedAt), any(), eq(run));
         }
 
         verifyNoInteractions(quotaService, planService, client, recorder);
@@ -217,7 +259,7 @@ class AgentReportOrchestratorTest {
                 request.sourceNotes());
         verify(recorder).recordReportSuccess(
                 eq(42L), eq(request), any(), any(LocalDateTime.class));
-        verify(fallback, never()).generate(anyList(), any(), any());
+        verify(fallback, never()).generateForRun(anyList(), any(), any(), any());
     }
 
     @Test
@@ -279,13 +321,13 @@ class AgentReportOrchestratorTest {
                 IssueArticle.builder().issue(issue).article(member.getArticle())
                         .role(IssueArticleRole.MEMBER).build()));
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
-        when(fallback.generate(eq(List.of(representative)), any(), any())).thenReturn(fallbackDocument);
+        when(fallback.generateForRun(eq(List.of(representative)), any(), any(), any())).thenReturn(fallbackDocument);
 
         ReportDocument document = disabledOrchestrator.generate(
                 run(), List.of(representative, member), LocalDateTime.now());
 
         assertEquals(fallbackDocument, document);
-        verify(fallback).generate(eq(List.of(representative)), any(), any());
+        verify(fallback).generateForRun(eq(List.of(representative)), any(), any(), any());
         verify(client, never()).report(any());
     }
 
@@ -295,7 +337,7 @@ class AgentReportOrchestratorTest {
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(client.report(any())).thenReturn(response(List.of(999L)));
-        when(fallback.generate(eq(List.of(llm)), any(), any())).thenReturn(fallbackDocument);
+        when(fallback.generateForRun(eq(List.of(llm)), any(), any(), any())).thenReturn(fallbackDocument);
 
         ReportDocument document = orchestrator.generate(
                 run,
@@ -318,7 +360,7 @@ class AgentReportOrchestratorTest {
                         com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy, feedbackLearning, runItems);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
-        when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
+        when(fallback.generateForRun(eq(List.of(stub)), any(), any(), any())).thenReturn(fallbackDocument);
 
         ReportDocument document = disabledOrchestrator.generate(
                 run(),
@@ -335,7 +377,7 @@ class AgentReportOrchestratorTest {
     void skipsQuotaReservationWhenNoLlmFindingIsEligible() {
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
-        when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
+        when(fallback.generateForRun(eq(List.of(stub)), any(), any(), any())).thenReturn(fallbackDocument);
 
         ReportDocument document = orchestrator.generate(
                 run(), List.of(stub), LocalDateTime.of(2026, 8, 21, 9, 3));

@@ -58,7 +58,7 @@ class DailyReportPersistenceCoverageTest {
             return links.stream().filter(link -> ids.contains(link.getArticle().getId())).toList();
         });
         var interests = mock(CompanyInterestSelection.class);
-        var selector = new DailyReportSelector(findingRepository, memberships, TopicRelevanceTestSupport.legacyPolicy(), interests);
+        var selector = new DailyReportSelector(findingRepository, memberships, TopicRelevanceTestSupport.legacyPolicy(), interests, ReportRecencyTestSupport.policy());
         var reports = mock(NewsReportRepository.class);
         when(reports.saveAndFlush(any(NewsReport.class))).thenAnswer(call -> {
             NewsReport report = call.getArgument(0);

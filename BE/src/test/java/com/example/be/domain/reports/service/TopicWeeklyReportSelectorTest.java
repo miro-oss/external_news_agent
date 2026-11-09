@@ -28,7 +28,7 @@ class TopicWeeklyReportSelectorTest {
     private final TopicRelevanceStore store = mock(TopicRelevanceStore.class);
     private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
     private final TopicWeeklyReportSelector selector = new TopicWeeklyReportSelector(
-            findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, CompanyInterestSelectionTestSupport.passThrough());
+            findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, CompanyInterestSelectionTestSupport.passThrough(), ReportRecencyTestSupport.policy());
     private final LocalDate date = LocalDate.of(2026, 9, 21);
 
     @Test
@@ -42,9 +42,23 @@ class TopicWeeklyReportSelectorTest {
     }
 
     @Test
+    void newWeeklyInputsApplyRecencyButSavedReportRecoveryDoesNotReselectThem() {
+        Finding saved = finding(1, 1L, 1);
+        inputs(List.of(saved), List.of(link(saved, 10, 1L, 100)));
+        var recency = mock(ReportRecencyPolicy.class);
+        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store),
+                feedbackExclusions, CompanyInterestSelectionTestSupport.passThrough(), recency);
+        when(recency.filterForTopic(List.of(saved), 1L)).thenReturn(List.of());
+
+        assertTrue(selecting.prepare(1L, "AI 기술", date).candidates().isEmpty());
+        assertEquals(List.of(saved), selecting.prepare(1L, "AI 기술", date, Set.of(1L)).candidates());
+        verify(recency, times(1)).filterForTopic(List.of(saved), 1L);
+    }
+
+    @Test
     void companySelectionRefillsTopicTopNAndFreezesOneEvaluationForTheWholeWeek() {
         var interests = mock(CompanyInterestSelection.class);
-        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests);
+        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests, ReportRecencyTestSupport.policy());
         ReflectionTestUtils.setField(selecting, "maxIssues", 1);
         Finding high = finding(1, 1L, 1);
         Finding replacement = finding(2, 1L, 1);
@@ -65,7 +79,7 @@ class TopicWeeklyReportSelectorTest {
     @Test
     void retainsExplicitSuppressionWhenAnotherDayKeepsTheSameFrozenIssue() {
         var interests = mock(CompanyInterestSelection.class);
-        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests);
+        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests, ReportRecencyTestSupport.policy());
         Finding first = finding(1, 1L, 1);
         Finding second = finding(2, 1L, 2);
         var sharedIssue = link(first, 10, 1L, 100).getIssue();

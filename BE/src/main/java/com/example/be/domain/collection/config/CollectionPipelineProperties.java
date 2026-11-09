@@ -8,6 +8,7 @@ public class CollectionPipelineProperties implements InitializingBean {
 
     private int topicArticleLimit = 300;
     private int fulltextLimitPerRun = 300;
+    private int technologyLookbackDays = 30;
 
     @Override
     public void afterPropertiesSet() {
@@ -16,6 +17,9 @@ public class CollectionPipelineProperties implements InitializingBean {
         }
         if (fulltextLimitPerRun <= 0) {
             throw new IllegalStateException("news.collection.fulltext-limit-per-run은 1 이상이어야 합니다.");
+        }
+        if (technologyLookbackDays <= 0) {
+            throw new IllegalStateException("news.collection.technology-lookback-days는 1 이상이어야 합니다.");
         }
     }
 
@@ -33,5 +37,11 @@ public class CollectionPipelineProperties implements InitializingBean {
 
     public void setFulltextLimitPerRun(int fulltextLimitPerRun) {
         this.fulltextLimitPerRun = fulltextLimitPerRun;
+    }
+
+    public int getTechnologyLookbackDays() { return technologyLookbackDays; }
+
+    public void setTechnologyLookbackDays(int technologyLookbackDays) {
+        this.technologyLookbackDays = technologyLookbackDays;
     }
 }

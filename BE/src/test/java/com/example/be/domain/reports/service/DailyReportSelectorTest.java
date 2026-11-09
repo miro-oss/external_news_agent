@@ -25,7 +25,7 @@ class DailyReportSelectorTest {
     private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final FindingRepository findings = mock(FindingRepository.class);
     private final IssueArticleRepository memberships = mock(IssueArticleRepository.class);
-    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships, relevancePolicy, CompanyInterestSelectionTestSupport.passThrough());
+    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships, relevancePolicy, CompanyInterestSelectionTestSupport.passThrough(), ReportRecencyTestSupport.policy());
     private final Topic topic = Topic.builder().id(1L).build();
 
     @Test
@@ -42,9 +42,28 @@ class DailyReportSelectorTest {
     }
 
     @Test
+    void newDailySelectionRejectsStaleLatestObservationButHistoricalRecoveryKeepsIt() {
+        Finding earlier = finding(1, 1, "grounded");
+        Finding latest = finding(2, 2, "grounded");
+        LocalDate date = LocalDate.of(2026, 9, 3);
+        var recency = mock(ReportRecencyPolicy.class);
+        var selecting = new DailyReportSelector(findings, memberships, relevancePolicy,
+                CompanyInterestSelectionTestSupport.passThrough(), recency);
+        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay()))
+                .thenReturn(List.of(earlier, latest));
+        var issue = issue(10, 90);
+        when(memberships.findByArticleIds(anyList())).thenReturn(List.of(link(earlier, issue), link(latest, issue)));
+        when(recency.filter(eq(List.of(latest)), anyMap())).thenReturn(List.of());
+
+        assertTrue(selecting.prepare(date, 10).candidates().isEmpty());
+        assertEquals(List.of(latest), selecting.prepare(date, 10, java.util.Set.of(1L, 2L)).candidates());
+        verify(recency, times(1)).filter(eq(List.of(latest)), anyMap());
+    }
+
+    @Test
     void companyExclusionPrecedesTopNAndUnownedPreparationNeverCallsIt() {
         var interests = mock(CompanyInterestSelection.class);
-        var selecting = new DailyReportSelector(findings, memberships, relevancePolicy, interests);
+        var selecting = new DailyReportSelector(findings, memberships, relevancePolicy, interests, ReportRecencyTestSupport.policy());
         Finding high = finding(1, 1, "grounded");
         Finding replacement = finding(2, 1, "grounded");
         Finding belowLimit = finding(3, 1, "grounded");

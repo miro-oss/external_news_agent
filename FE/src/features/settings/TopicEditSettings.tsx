@@ -8,6 +8,8 @@ import { saveTopicEditOptions, topicEditOptions, type TopicEditRequest } from '.
 import { baseTopicKeywords } from './topicKeywordInput'
 import { buildTopicEditRequest, topicEditDraft, type TopicEditDraft } from './topicEditDraft'
 import { DartCompanyPicker } from './DartCompanyPicker'
+import { TopicPresetPicker } from './TopicPresetPicker'
+import { topicPresetFields } from './topicPresets'
 import '../notifications/notifications-refinement.css'
 import './topic-edit.css'
 
@@ -69,6 +71,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
   const [draft, setDraft] = useState(() => topicEditDraft(initial))
   const [nameTouched, setNameTouched] = useState(false)
   const [queryTouched, setQueryTouched] = useState(false)
+  const [presetNotice, setPresetNotice] = useState<string | null>(null)
   const requiresQuery = initial.sources.some(source => source.sourceKind === 'SEARCH')
   const nameMissing = draft.name.trim().length === 0
   const queryMissing = requiresQuery && baseTopicKeywords(draft.queryText).length === 0
@@ -117,6 +120,14 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
     </header>
     <form className="topic-edit-form" onSubmit={event => { event.preventDefault(); if (canSave) onSave(changes) }}>
       <div className="topic-edit-body">
+        <TopicPresetPicker disabled={pending} onSelect={preset => {
+          setDraft(current => ({ ...current, ...topicPresetFields(preset) }))
+          setPresetNotice(`${preset.name} 초안을 채웠습니다. 저장하면 기사 조건이 바뀝니다. 수집할 소스는 주제 목록의 ‘소스 편집’에서 따로 선택해 주세요.`)
+          setNameTouched(false)
+          setQueryTouched(false)
+          onDraftChange?.()
+        }} />
+        {presetNotice && <p className="topic-preset-notice" role="status">{presetNotice}</p>}
         <div className="field">
           <label htmlFor={`${id}-name`}>주제명</label>
           <input ref={nameInput} id={`${id}-name`} value={draft.name} maxLength={200} required disabled={pending}
@@ -131,7 +142,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
             onChange={event => update('queryText', event.target.value)} onBlur={() => setQueryTouched(true)}
             aria-invalid={queryTouched && queryMissing || undefined}
             aria-describedby={`${id}-query-hint${queryTouched && queryMissing ? ` ${id}-query-error` : ''}`} />
-          <p id={`${id}-query-hint`} className="hint">공백이나 쉼표로 구분합니다. 기사 조건은 아래에서 따로 수정할 수 있습니다.</p>
+          <p id={`${id}-query-hint`} className="hint">검색 소스에 보낼 검색어입니다. 여러 표현의 포함 조건은 상세 기사 조건에서 설정합니다.</p>
           {queryTouched && queryMissing && <p id={`${id}-query-error`} className="error">검색 키워드를 입력해 주세요.</p>}
         </div>
         <fieldset className="topic-edit-conditions" disabled={pending} aria-describedby={`${id}-conditions-hint`}>
@@ -141,6 +152,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
             <label htmlFor={`${id}-required`}>모두 포함</label>
             <textarea id={`${id}-required`} value={draft.requiredKeywords} rows={3} disabled={pending}
               placeholder="HBM, 반도체" onChange={event => update('requiredKeywords', event.target.value)} />
+            <p className="hint">모든 단어가 함께 있어야 합니다. 동의어나 영문 표기는 ‘하나 이상 포함’에 넣어 주세요.</p>
           </div>
           <div className="field">
             <label htmlFor={`${id}-optional`}>하나 이상 포함</label>
@@ -152,7 +164,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
             <textarea id={`${id}-excluded`} value={draft.excludedKeywords} rows={3} disabled={pending}
               placeholder="광고, 채용" onChange={event => update('excludedKeywords', event.target.value)}
               aria-describedby={`${id}-excluded-hint`} />
-            <p id={`${id}-excluded-hint`} className="hint">제외 키워드가 들어간 기사는 모으지 않습니다.</p>
+            <p id={`${id}-excluded-hint`} className="hint">제외 단어가 하나라도 있으면 모으지 않습니다. 기술 글에도 나오는 ‘데이터센터’ 같은 단어는 일괄 제외하지 않는 것이 좋습니다.</p>
           </div>
           <DartCompanyPicker value={draft.dartCompany} disabled={pending} onChange={company => update('dartCompany', company)} />
         </fieldset>

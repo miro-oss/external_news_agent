@@ -24,7 +24,7 @@ from app.schemas.report import (
 )
 from app.schemas.weekly_report import WeeklyReportRequest
 
-PROMPT_VERSION = "weekly-report.ko.v3"
+PROMPT_VERSION = "weekly-report.ko.v4"
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
     .read_text(encoding="utf-8")

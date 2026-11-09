@@ -26,7 +26,8 @@ export function TopicForm() {
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
-  const activeSources = sources.data?.content ?? []
+  const activeSources = (sources.data?.content ?? []).filter(source => source.active)
+  const sourceIds = activeSources.map(source => source.id)
   const baseKeywords = baseTopicKeywords(form.queryText)
   const keywordInput = buildTopicKeywordInput(form)
   const hasFeedSource = activeSources.some((source) => source.sourceKind === 'FEED')
@@ -50,6 +51,10 @@ export function TopicForm() {
       setQueryTouched(true)
       return
     }
+    if (sourceIds.length === 0) {
+      setValidation('활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.')
+      return
+    }
     if (hasFeedSource && keywordInput.requiredKeywords.length === 0 && keywordInput.optionalKeywords.length === 0) {
       setValidation('RSS 기사도 주제에 맞게 모을 수 있도록 모두 포함 또는 하나 이상 포함 조건을 입력해 주세요.')
       setConditionsOpen(true)
@@ -61,7 +66,7 @@ export function TopicForm() {
         name: form.name.trim(),
         ...keywordInput,
         intervalMinutes,
-        sourceIds: activeSources.map((source) => source.id),
+        sourceIds,
         ...(dartCompany ? { dartCorpCode: dartCompany.corpCode } : {}),
       },
       {
@@ -106,7 +111,7 @@ export function TopicForm() {
           aria-invalid={queryMissing || undefined}
           aria-describedby={queryMissing ? 'topic-query-hint topic-query-error' : 'topic-query-hint'}
         />
-        <p id="topic-query-hint" className="topic-query-hint">공백이나 쉼표로 구분합니다.</p>
+        <p id="topic-query-hint" className="topic-query-hint">검색 소스에 보낼 검색어입니다. 여러 표현의 포함 조건은 상세 기사 조건에서 설정합니다.</p>
         {queryMissing && <p className="error" id="topic-query-error">검색 키워드를 입력해 주세요.</p>}
       </div>
 
@@ -122,18 +127,19 @@ export function TopicForm() {
               <label htmlFor="topic-required">모두 포함</label>
               <input id="topic-required" value={form.requiredKeywords ?? baseKeywords.join(', ')}
                 onChange={(event) => update('requiredKeywords', event.target.value)} placeholder="HBM, 반도체" />
-              <p className="hint">기본값은 검색 키워드입니다. 다른 조건이 필요하면 수정하거나 비울 수 있습니다.</p>
+              <p className="hint">모든 단어가 함께 있어야 합니다. 기본값은 검색 키워드이며, 비우면 이 조건을 사용하지 않습니다.</p>
             </div>
             <div className="field">
               <label htmlFor="topic-optional">하나 이상 포함</label>
               <input id="topic-optional" value={form.optionalKeywords}
                 onChange={(event) => update('optionalKeywords', event.target.value)} placeholder="SK하이닉스, 삼성전자, 마이크론" />
+              <p className="hint">동의어나 영문 표기는 여기에 넣습니다. 하나만 있어도 통과합니다.</p>
             </div>
             <div className="field">
               <label htmlFor="topic-excluded">제외</label>
               <input id="topic-excluded" value={form.excludedKeywords}
                 onChange={(event) => update('excludedKeywords', event.target.value)} placeholder="광고, 채용" />
-              <p className="hint">각 조건은 쉼표로 구분합니다. 제외 키워드가 들어간 기사는 모으지 않습니다.</p>
+              <p className="hint">각 조건은 쉼표로 구분합니다. 제외 단어가 하나라도 있으면 모으지 않으므로, 기술 글에도 나오는 ‘데이터센터’ 같은 단어는 일괄 제외하지 않는 것이 좋습니다.</p>
             </div>
             <DartCompanyPicker value={dartCompany} disabled={isPending} onChange={company => {
               setDartCompany(company)
@@ -175,7 +181,7 @@ export function TopicForm() {
           </p>
         )}
 
-        <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
+        <button type="submit" disabled={isPending || sources.isPending || sources.isError || sourceIds.length === 0}>
           {isPending ? '등록 중…' : '주제 등록'}
         </button>
         {validation && <p className="error" role="alert">{validation}</p>}

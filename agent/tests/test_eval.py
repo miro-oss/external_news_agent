@@ -35,8 +35,8 @@ from app.llm.base import ProviderResponse, ProviderUsage
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
-_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.7.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v6.baseline.json"
+_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.8.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v7.baseline.json"
 
 
 def eval_settings() -> Settings:

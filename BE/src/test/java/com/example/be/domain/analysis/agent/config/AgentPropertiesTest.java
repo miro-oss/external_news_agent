@@ -26,10 +26,10 @@ class AgentPropertiesTest {
 
         assertFalse(properties.isEnabled());
         assertEquals(
-                "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
+                "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2",
                 properties.getAnalysisPromptVersion());
         assertEquals(
-                "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2",
+                "analyze.ko.v12+perspective.ko.v1+sensitivity.ko.v2",
                 properties.getFreeAnalysisPromptVersion());
         assertEquals("insight.ko.v2+perspective.ko.v1", properties.getInsightPromptVersion());
         assertEquals("gpt-4.1-nano", properties.getRelevanceFreeModel());

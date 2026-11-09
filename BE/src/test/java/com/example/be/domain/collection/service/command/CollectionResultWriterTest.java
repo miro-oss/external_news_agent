@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.entity.ArticleBody;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
@@ -41,7 +42,7 @@ class CollectionResultWriterTest {
                 mock(CollectionRunItemRepository.class),
                 mock(TopicRepository.class),
                 mock(SourceRepository.class),
-                mock(ArticleBodyStorage.class));
+                mock(ArticleBodyStorage.class), new CollectionPipelineProperties());
 
         writer.addAgentWarning(
                 42L, CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED, "quota 소진");
@@ -103,6 +104,6 @@ class CollectionResultWriterTest {
         return new CollectionResultWriter(articleRepository, mock(ArticleVersionRepository.class),
                 mock(CollectionRunArticleRepository.class), mock(CollectionRunRepository.class),
                 mock(CollectionRunItemRepository.class), mock(TopicRepository.class),
-                mock(SourceRepository.class), bodyStorage);
+                mock(SourceRepository.class), bodyStorage, new CollectionPipelineProperties());
     }
 }

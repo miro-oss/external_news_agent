@@ -700,7 +700,7 @@ class AgentAnalysisOrchestratorTest {
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
         assertEquals(
-                "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
+                "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2",
                 result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
@@ -1007,7 +1007,7 @@ class AgentAnalysisOrchestratorTest {
                         mock ? "mock" : "gemini-2.5-flash",
                         mock
                                 ? "analyze.mock.v5"
-                                : "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
+                                : "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),

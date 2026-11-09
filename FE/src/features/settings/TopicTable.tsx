@@ -8,6 +8,7 @@ import { TopicTableSkeleton } from './SettingsSkeletons'
 import { TopicDeliverySettings } from './TopicDeliverySettings'
 import { TopicScheduleSettings } from './TopicScheduleSettings'
 import { TopicEditSettings } from './TopicEditSettings'
+import { TopicSourceSettings } from './TopicSourceSettings'
 
 function formatSignedDelta(value: number) {
   return value > 0 ? `+${value}` : `${value}`
@@ -106,6 +107,7 @@ export function TopicTable() {
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
                   </button>
                   <TopicEditSettings topic={topic} />
+                  <TopicSourceSettings topic={topic} />
                   </div></td>
                 </tr>
               ))}
