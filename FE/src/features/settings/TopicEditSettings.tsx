@@ -142,7 +142,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
             onChange={event => update('queryText', event.target.value)} onBlur={() => setQueryTouched(true)}
             aria-invalid={queryTouched && queryMissing || undefined}
             aria-describedby={`${id}-query-hint${queryTouched && queryMissing ? ` ${id}-query-error` : ''}`} />
-          <p id={`${id}-query-hint`} className="hint">공백이나 쉼표로 구분합니다. 기사 조건은 아래에서 따로 수정할 수 있습니다.</p>
+          <p id={`${id}-query-hint`} className="hint">검색 소스에 보낼 검색어입니다. 여러 표현의 포함 조건은 상세 기사 조건에서 설정합니다.</p>
           {queryTouched && queryMissing && <p id={`${id}-query-error`} className="error">검색 키워드를 입력해 주세요.</p>}
         </div>
         <fieldset className="topic-edit-conditions" disabled={pending} aria-describedby={`${id}-conditions-hint`}>

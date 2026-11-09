@@ -92,12 +92,11 @@ test('in-flight saves lock all fields and dismissal controls and expose pending 
   assert.match(html, />저장 중…<\/button>/)
 })
 
-test('technology examples are explicit draft buttons and do not preselect or save a topic on opening', () => {
+test('a single AI technology fill action replaces category choices without preselecting or saving on opening', () => {
   const html = render()
-  for (const name of ['AI 모델 업데이트', 'AI Agent 구현', 'AI 학습·검색·추론 기술']) {
-    assert.ok(html.includes(name))
-  }
-  assert.match(html, /선택하면 주제명과 기사 조건을 채웁니다/)
+  assert.equal((html.match(/>AI 기술 동향 조건 채우기<\/button>/g) ?? []).length, 1)
+  assert.match(html, /모델·Agent·학습·검색·온톨로지를 한 주제로 함께 수집합니다/)
+  assert.doesNotMatch(html, /AI 기술 주제 예시|AI 모델 업데이트|AI Agent 구현|AI 학습·검색·추론 기술/)
   assert.match(html, /value="반도체 공급망"/)
   assert.match(html, /<button[^>]*type="submit"[^>]*disabled=""[^>]*>저장<\/button>/)
   assert.deepEqual(request(), {})

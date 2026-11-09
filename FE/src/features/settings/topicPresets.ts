@@ -1,35 +1,20 @@
 import type { Source } from '../../api/types'
 
 export interface TopicPreset {
-  id: string
   name: string
-  description: string
   queryText: string
   requiredKeywords: string
   optionalKeywords: string
   excludedKeywords: string
 }
 
-export const AI_TOPIC_PRESETS: readonly TopicPreset[] = [
-  {
-    id: 'ai-models', name: 'AI 모델 업데이트', description: '모델 출시·기능·이용 조건',
-    queryText: 'AI 모델', requiredKeywords: '',
-    optionalKeywords: 'LLM, language model, foundation model, multimodal, 모델, Claude, GPT, Gemini, Llama, Qwen, DeepSeek',
-    excludedKeywords: '',
-  },
-  {
-    id: 'ai-agents', name: 'AI Agent 구현', description: '도구 사용·메모리·자동화 사례',
-    queryText: 'AI Agent', requiredKeywords: '',
-    optionalKeywords: 'agent, 에이전트, agentic, tool use, tool calling, function calling, MCP, Model Context Protocol, multi-agent, 멀티에이전트, computer use',
-    excludedKeywords: '',
-  },
-  {
-    id: 'ai-reasoning', name: 'AI 학습·검색·추론 기술', description: '학습 방법·RAG·지식 그래프',
-    queryText: 'LLM 학습 검색 추론', requiredKeywords: '',
-    optionalKeywords: 'RAG, retrieval, reasoning, 추론, ontology, 온톨로지, knowledge graph, 지식 그래프, GraphRAG, context engineering, 컨텍스트 엔지니어링, fine-tuning, LoRA, distillation, quantization, 학습, 증류, 양자화',
-    excludedKeywords: '',
-  },
-]
+export const AI_TECHNOLOGY_PRESET: TopicPreset = {
+  name: 'AI 기술 동향',
+  queryText: 'AI 기술',
+  requiredKeywords: '',
+  optionalKeywords: 'LLM, language model, 언어 모델, 언어모델, AI 모델, AI모델, foundation model, 파운데이션 모델, multimodal, 멀티모달, Claude, 클로드, GPT, Gemini, 제미나이, DeepSeek, 딥시크, Qwen, Llama, Mistral, AI agent, AI 에이전트, AI에이전트, agentic, coding agent, 코딩 에이전트, MCP, RAG, GraphRAG, retrieval-augmented generation, 검색 증강 생성, 검색증강생성, ontology, 온톨로지, knowledge graph, 지식 그래프, 지식그래프, context engineering, 컨텍스트 엔지니어링, fine-tuning, 파인튜닝, 미세조정, model distillation, 지식 증류, 모델 증류, model quantization, 모델 양자화, machine learning, 머신러닝, deep learning, 딥러닝, reinforcement learning, 강화학습, 강화 학습, diffusion model, 확산 모델, computer vision, 컴퓨터 비전, AI 알고리즘',
+  excludedKeywords: '[광고], [협찬], 체험단 모집, 리뷰어 모집, 공동구매 모집, 수강생 모집, 교육생 모집',
+}
 
 export function topicPresetFields(preset: TopicPreset) {
   return {

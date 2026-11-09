@@ -110,11 +110,11 @@ class SeedSourcesMigrationIntegrationTests {
      * 시드는 손으로 쓴 JSON을 crawl_policy에 넣는다. CrawlPolicyConverter가 읽지 못하면 소스 조회 API가 통째로 깨진다.
      */
     @Test
-    void seedsSourcesAsActiveFeedsWithReadableCrawlPolicy() {
+    void keepsSeededFeedPoliciesAndRetiresGoogleNewsAfterV83() {
         seededSources().forEach((url, source) -> {
             assertEquals(Source.KIND_FEED, source.getSourceKind(), url);
             assertEquals(Source.ROBOTS_STATUS_UNKNOWN, source.getRobotsStatus(), url);
-            assertTrue(source.isActive(), url);
+            assertEquals(!url.startsWith("https://news.google.com/"), source.isActive(), url);
 
             // 소스 신뢰도는 Tier C 보류 항목이라 시드가 값을 지어내지 않는다.
             assertNull(source.getReliabilityScore(), url);

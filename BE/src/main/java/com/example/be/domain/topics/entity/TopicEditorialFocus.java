@@ -14,8 +14,8 @@ public final class TopicEditorialFocus {
     private static final Pattern AI_CONTEXT = Pattern.compile(
             "인공\\s*지능|\\b(?:ai|llms?)\\b|언어\\s*모델|\\blarge\\s+language\\s+models?\\b", FLAGS);
     private static final Pattern TECHNICAL_SCOPE = Pattern.compile(
-            "모델|에이전트|알고리즘|학습|추론|검색|온톨로지|지식\\s*그래프|컨텍스트"
-                    + "|\\b(?:models?|agents?|agentic|algorithms?|training|inference|reasoning|retrieval|search|ontology|context)\\b",
+            "기술|모델|에이전트|알고리즘|학습|추론|검색|온톨로지|지식\\s*그래프|컨텍스트"
+                    + "|\\b(?:technolog(?:y|ies)|technical|models?|agents?|agentic|algorithms?|training|inference|reasoning|retrieval|search|ontology|context)\\b",
             FLAGS);
     private static final Pattern SPECIFIC_METHOD = Pattern.compile(
             "\\b(?:llms?|graphrag|rag)\\b|검색\\s*증강\\s*생성|온톨로지|지식\\s*그래프"
