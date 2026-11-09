@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.entity.Article;
@@ -28,6 +29,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -49,10 +52,12 @@ class CollectionResultWriterInvestigationTest {
     private final CollectionRunItemRepository itemRepository = mock(CollectionRunItemRepository.class);
     private final TopicRepository topicRepository = mock(TopicRepository.class);
     private final SourceRepository sourceRepository = mock(SourceRepository.class);
-    private final CollectionRun run = CollectionRun.builder().id(42L).build();
+    private final CollectionRun run = CollectionRun.builder().id(42L)
+            .startedAt(LocalDateTime.of(2026, 11, 9, 10, 0)).build();
     private final CollectionResultWriter writer = new CollectionResultWriter(
             articleRepository, versionRepository, observationRepository, runRepository,
-            itemRepository, topicRepository, sourceRepository, mock(ArticleBodyStorage.class));
+            itemRepository, topicRepository, sourceRepository, mock(ArticleBodyStorage.class),
+            new CollectionPipelineProperties());
 
     private Topic topic;
     private Source source;
@@ -240,6 +245,88 @@ class CollectionResultWriterInvestigationTest {
         assertEquals(updated.summary(), existingUpdated.getSummary());
         assertSame(run, existingUnchanged.getLastSeenRun());
         verify(articleRepository).save(any(Article.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {Source.KIND_SEARCH, Source.KIND_FEED})
+    void appliesRunAnchoredRecencyBeforeDeduplicationUsingTheCapturedTechnicalScope(String sourceKind) {
+        source = source(11L, sourceKind);
+        topic.update("AI 기술", "AI 기술", List.of(), List.of(), List.of(), 10, 60, true);
+        addItem(topic, source, true);
+        topic.update("AI 산업", "AI 산업", List.of(), List.of(), List.of(), 10, 60, true);
+        CollectedArticle old = dated("archive", "2021년 글", "2021-07-01T00:00:00Z");
+        CollectedArticle oldVariant = dated("same?utm_source=old", "오래된 중복", "2021-07-01T00:00:00Z");
+        CollectedArticle fresh = dated("same?fbclid=new", "최근 원문", "2026-11-08T00:00:00Z");
+        // Exactly 30 days before the run at 10:00 KST, even if investigation runs much later.
+        CollectedArticle boundary = dated("boundary", "경계시각 원문", "2026-10-10T01:00:00Z");
+        CollectedArticle unknown = article("unknown", "날짜 미상", "확인한 근거");
+
+        var result = write(old, oldVariant, fresh, boundary, unknown);
+
+        assertEquals(3, result.observedArticleCount());
+        assertEquals(3, result.changedArticleCount());
+        assertEquals(List.of(fresh.title(), boundary.title(), unknown.title()), savedArticles(3).stream()
+                .map(Article::getTitle).toList());
+        verify(articleRepository, never()).findByUrlHash(ArticleHasher.urlHash(old.canonicalUrl()));
+        verify(observationRepository, times(3)).save(any(CollectionRunArticle.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void doesNotReobserveOrMutateKnownOldArticlesWhenIncomingDatesLookRecent(boolean investigation) {
+        topic.update("AI 기술", "AI 기술", List.of(), List.of(), List.of(), 10, 60, true);
+        CollectionRunItem item = addItem(topic, source, true);
+        topic.update("AI 산업", "AI 산업", List.of(), List.of(), List.of(), 10, 60, true);
+        CollectionRun priorRun = CollectionRun.builder().id(41L).build();
+        OffsetDateTime oldDate = OffsetDateTime.parse("2021-07-01T00:00:00Z");
+        CollectedArticle changed = dated("changed", "변경된 제목", "2026-11-08T00:00:00Z");
+        CollectedArticle unchanged = dated("unchanged", "기존 제목", "2026-11-08T00:00:00Z");
+        Article existingChanged = Article.builder().id(101L).title("기존 옛 제목").summary("기존 요약")
+                .contentHash("older-hash").publishedAt(oldDate).lastSeenRun(priorRun).build();
+        Article existingUnchanged = Article.builder().id(102L).title(unchanged.title())
+                .contentHash(ArticleHasher.contentHash(unchanged.title(), unchanged.summary(), null))
+                .publishedAt(oldDate).lastSeenRun(priorRun).build();
+        when(articleRepository.findByUrlHash(ArticleHasher.urlHash(changed.canonicalUrl())))
+                .thenReturn(Optional.of(existingChanged));
+        when(articleRepository.findByUrlHash(ArticleHasher.urlHash(unchanged.canonicalUrl())))
+                .thenReturn(Optional.of(existingUnchanged));
+
+        if (investigation) {
+            assertEquals(CollectionResultWriter.InvestigationWriteResult.empty(), write(changed, unchanged));
+        } else {
+            when(itemRepository.findById(88L)).thenReturn(Optional.of(item));
+            List<CollectedArticle> selected = List.of(changed, unchanged);
+            writer.writeSelected(42L, 88L, 7L, 11L,
+                    CollectionOutcome.of(FetchResult.ok(selected), RobotsDecision.skipped(source)), selected);
+            assertEquals(2, item.getScannedCount());
+            assertEquals(0, item.getNewCount());
+            assertEquals(0, item.getUpdatedCount());
+        }
+
+        verifyNoInteractions(versionRepository, observationRepository);
+        verify(articleRepository, never()).save(any(Article.class));
+        assertSame(priorRun, existingChanged.getLastSeenRun());
+        assertSame(priorRun, existingUnchanged.getLastSeenRun());
+        assertEquals(oldDate, existingChanged.getPublishedAt());
+        assertEquals(oldDate, existingUnchanged.getPublishedAt());
+        assertEquals("기존 옛 제목", existingChanged.getTitle());
+        assertEquals("기존 요약", existingChanged.getSummary());
+    }
+
+    @Test
+    void retainsOldIndustryEvidenceEvenIfTheLiveTopicWasLaterChangedToTechnical() {
+        topic.update("AI 산업", "AI 산업", List.of(), List.of(), List.of(), 10, 60, true);
+        addItem(topic, source, true);
+        topic.update("AI 기술", "AI 기술", List.of(), List.of(), List.of(), 10, 60, true);
+        CollectedArticle old = dated("industry-history", "과거 투자 발표", "2021-07-01T00:00:00Z");
+
+        assertEquals(1, write(old).observedArticleCount());
+        assertEquals(old.publishedAt(), savedArticles(1).getFirst().getPublishedAt());
+    }
+
+    private CollectedArticle dated(String path, String title, String publishedAt) {
+        return new CollectedArticle(title, "https://example.com/" + path, "요약",
+                OffsetDateTime.parse(publishedAt), "example.com", "ko");
     }
 
     private CollectionResultWriter.InvestigationWriteResult write(CollectedArticle... articles) {

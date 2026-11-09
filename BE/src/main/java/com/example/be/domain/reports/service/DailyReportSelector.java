@@ -34,6 +34,7 @@ public class DailyReportSelector {
     private final IssueArticleRepository membershipRepository;
     private final TopicRelevancePolicy relevancePolicy;
     private final CompanyInterestSelection companyInterests;
+    private final ReportRecencyPolicy recency;
 
     public List<Finding> select(LocalDate date, int limit) {
         return selectWithStats(date, limit).findings();
@@ -58,7 +59,7 @@ public class DailyReportSelector {
         List<Long> articleIds = candidates.stream().map(f -> f.getArticle().getId()).distinct().toList();
         List<IssueArticle> memberships = OracleInClause.batches(articleIds).stream()
                 .flatMap(ids -> membershipRepository.findByArticleIds(ids).stream()).toList();
-        return prepare(candidates, memberships, limit, date);
+        return prepare(candidates, memberships, limit, date, savedRunIds == null);
     }
 
     List<Finding> select(List<Finding> candidates, List<IssueArticle> memberships, int limit) {
@@ -66,11 +67,11 @@ public class DailyReportSelector {
     }
 
     Selection selectWithStats(List<Finding> candidates, List<IssueArticle> memberships, int limit) {
-        return selectPrepared(prepare(candidates, memberships, limit, null));
+        return selectPrepared(prepare(candidates, memberships, limit, null, true));
     }
 
     private Prepared prepare(List<Finding> candidates, List<IssueArticle> memberships, int limit,
-                                      LocalDate date) {
+                                      LocalDate date, boolean applyRecency) {
         if (limit < 1 || limit > 50) {
             throw new IllegalArgumentException("일일 보고서 이슈 상한은 1~50이어야 합니다.");
         }
@@ -104,6 +105,11 @@ public class DailyReportSelector {
         List<Finding> latest = List.copyOf(latestByIssue.values());
         List<Finding> relevant = date == null ? relevancePolicy.filterFindings(latest)
                 : relevancePolicy.filterDailyFindings(date, latest);
+        if (applyRecency) {
+            Map<Long, Set<Long>> selectedTopics = relevant.stream().collect(Collectors.toMap(
+                    Finding::getId, finding -> Set.of(issueByFinding.get(finding.getId()).getTopic().getId())));
+            relevant = recency.filter(relevant, selectedTopics);
+        }
         int stubExcluded = (int) relevant.stream()
                 .filter(f -> f.getAnalysisSource() == AnalysisSource.STUB).count();
         int evidenceExcluded = (int) relevant.stream()

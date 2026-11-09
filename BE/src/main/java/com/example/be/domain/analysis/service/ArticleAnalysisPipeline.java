@@ -14,6 +14,8 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.collection.scoring.TechnicalSourceBalancer;
+import com.example.be.domain.collection.scoring.ArticleRecencyPolicy;
+import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
@@ -28,6 +30,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -61,6 +64,7 @@ public class ArticleAnalysisPipeline {
     private final TopicFitScorer topicFitScorer;
     private final TopicRelevanceGate relevanceGate;
     private final FeedbackLearningService feedbackLearning;
+    private final CollectionPipelineProperties collectionProperties;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -302,7 +306,7 @@ public class ArticleAnalysisPipeline {
         Map<TopicRelevanceGate.Key, Target> byArticleTopic = new LinkedHashMap<>();
         if (!clustered) {
             addUnclusteredTargets(byArticleTopic, runId, refreshedArticleIds, snapshotTopics);
-            return relevantTargets(runId, plan, byArticleTopic.values());
+            return relevantTargets(runId, plan, byArticleTopic.values(), snapshotTopics);
         }
         for (CollectionRunArticle observation :
                 runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
@@ -325,7 +329,7 @@ public class ArticleAnalysisPipeline {
                                 runId, articleIds), snapshotTopics);
             }
         }
-        return relevantTargets(runId, plan, byArticleTopic.values());
+        return relevantTargets(runId, plan, byArticleTopic.values(), snapshotTopics);
     }
 
     private List<Target> investigationTargets(Long runId,
@@ -343,7 +347,7 @@ public class ArticleAnalysisPipeline {
                     issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
                             runId, articleIds), snapshotTopics);
         }
-        return relevantTargets(runId, plan, byArticleTopic.values());
+        return relevantTargets(runId, plan, byArticleTopic.values(), snapshotTopics);
     }
 
     private void addMissingRepresentatives(Map<TopicRelevanceGate.Key, Target> targets,
@@ -407,8 +411,17 @@ public class ArticleAnalysisPipeline {
     }
 
     /** 주제별 판정을 먼저 적용해야 다른 주제에서 탈락한 공유 기사가 분석을 우회하지 않는다. */
-    private List<Target> relevantTargets(Long runId, AgentPlan plan, Collection<Target> candidates) {
-        List<Target> ready = candidates.stream().filter(this::isReady).toList();
+    private List<Target> relevantTargets(Long runId, AgentPlan plan, Collection<Target> candidates,
+                                        Map<Long, Topic> snapshotTopics) {
+        OffsetDateTime referenceTime = runRepository.findById(runId)
+                .map(run -> run.getStartedAt() == null ? null
+                        : run.getStartedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime()).orElse(null);
+        // Existing issue representatives can enter without passing the current feed candidate gate.
+        List<Target> ready = candidates.stream().filter(this::isReady)
+                .filter(target -> ArticleRecencyPolicy.isEligible(
+                        topicId(target.topicOverride()) == null ? null
+                                : snapshotTopics.get(topicId(target.topicOverride())), target.article().getPublishedAt(),
+                        referenceTime, collectionProperties.getTechnologyLookbackDays())).toList();
         if (ready.isEmpty()) {
             return List.of();
         }

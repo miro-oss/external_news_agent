@@ -4,6 +4,7 @@ import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
+import com.example.be.domain.collection.scoring.ArticleRecencyPolicy;
 import com.example.be.domain.topics.entity.TopicEditorialFocus;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
@@ -98,8 +99,8 @@ public class CollectionCandidatePrioritizer {
         Map<String, Candidate> byUrl = new LinkedHashMap<>();
         for (CollectedArticle article : batch.outcome().fetch().articles()) {
             // Some technical RSS feeds contain their whole archive. Unknown dates remain unknown.
-            if (TopicEditorialFocus.isAiTechnology(batch.topic()) && article.publishedAt() != null
-                    && article.publishedAt().isBefore(now.minusDays(properties.getTechnologyLookbackDays()))) {
+            if (!ArticleRecencyPolicy.isEligible(batch.topic(), article.publishedAt(), now,
+                    properties.getTechnologyLookbackDays())) {
                 continue;
             }
             var match = topicFitScorer.evaluate(batch.topic(), batch.source(), article);

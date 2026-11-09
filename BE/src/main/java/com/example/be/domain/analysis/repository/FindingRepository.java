@@ -143,6 +143,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
+            JOIN FETCH finding.run
             WHERE finding.run.id = :runId
             ORDER BY finding.id ASC
             """)

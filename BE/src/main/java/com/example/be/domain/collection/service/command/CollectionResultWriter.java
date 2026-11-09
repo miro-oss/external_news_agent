@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
@@ -17,6 +18,7 @@ import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.collection.scoring.ArticleRecencyPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
@@ -29,10 +31,12 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -54,6 +58,7 @@ public class CollectionResultWriter {
     private final TopicRepository topicRepository;
     private final SourceRepository sourceRepository;
     private final ArticleBodyStorage articleBodyStorage;
+    private final CollectionPipelineProperties properties;
 
     /**
      * 주제 전체 후보에서 우선순위 선별을 마친 운영 경로. 소스별 선착순 상한을 다시 적용하지 않는다.
@@ -91,7 +96,8 @@ public class CollectionResultWriter {
             return;
         }
 
-        writeArticles(run, item, topic, source, outcome.fetch().articles().size(), dedupeByUrl(selected));
+        writeArticles(run, item, topic, source, outcome.fetch().articles().size(),
+                eligibleArticles(item.collectionTopic(), run, selected));
     }
 
     /** 접수 당시 키워드 조건을 통과한 Agent 추가 수집 결과만 붙인다. 원래 수집 item 통계는 바꾸지 않는다. */
@@ -132,9 +138,11 @@ public class CollectionResultWriter {
         int changed = 0;
         Set<Long> observedIds = new LinkedHashSet<>();
         Set<Long> changedIds = new LinkedHashSet<>();
-        for (CollectedArticle article : dedupeByUrl(
+        for (CollectedArticle article : eligibleArticles(collectionTopic, run,
                 TopicKeywordFilter.filter(collectionTopic, outcome.fetch().articles()))) {
-            SavedArticle saved = save(run, topic, source, article);
+            Optional<SavedArticle> candidate = save(run, topic, source, collectionTopic, article);
+            if (candidate.isEmpty()) continue;
+            SavedArticle saved = candidate.orElseThrow();
             ChangeType changeType = saved.changeType();
             observed++;
             observedIds.add(saved.articleId());
@@ -155,8 +163,11 @@ public class CollectionResultWriter {
 
         int newCount = 0;
         int updatedCount = 0;
+        Topic collectionTopic = item.collectionTopic();
         for (CollectedArticle article : articles) {
-            ChangeType changeType = save(run, topic, source, article).changeType();
+            Optional<SavedArticle> saved = save(run, topic, source, collectionTopic, article);
+            if (saved.isEmpty()) continue;
+            ChangeType changeType = saved.orElseThrow().changeType();
             if (changeType == ChangeType.NEW) {
                 newCount++;
             } else if (changeType == ChangeType.UPDATED) {
@@ -312,17 +323,33 @@ public class CollectionResultWriter {
         return List.copyOf(byUrlHash.values());
     }
 
-    /**
-     * url_hash로 이미 있는 기사인지 보고 NEW / UPDATED / UNCHANGED를 정한다. 판정과 무관하게
-     * 관측은 매번 남긴다 — 그래야 "이 실행에서 본 기사"를 나중에 복원할 수 있다.
-     */
-    private SavedArticle save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
+    private List<CollectedArticle> eligibleArticles(Topic topic, CollectionRun run, List<CollectedArticle> articles) {
+        OffsetDateTime referenceTime = referenceTime(run);
+        // Filter before URL deduplication: an old variant must not hide a current result for the same URL.
+        return dedupeByUrl(articles.stream().filter(article -> ArticleRecencyPolicy.isEligible(
+                topic, article.publishedAt(), referenceTime, properties.getTechnologyLookbackDays())).toList());
+    }
+
+    private OffsetDateTime referenceTime(CollectionRun run) {
+        return run.getStartedAt() == null ? OffsetDateTime.now(ApiTimeZone.ZONE)
+                : run.getStartedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+    }
+
+    /** 날짜 기준을 통과한 기사의 NEW / UPDATED / UNCHANGED 판정과 이번 실행의 관측을 함께 저장한다. */
+    private Optional<SavedArticle> save(CollectionRun run, Topic topic, Source source,
+                                       Topic collectionTopic, CollectedArticle collected) {
         String canonicalUrl = ArticleHasher.normalizeUrl(collected.canonicalUrl());
         String urlHash = ArticleHasher.urlHash(canonicalUrl);
         String contentHash = ArticleHasher.contentHash(collected.title(), collected.summary(), null);
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
 
         Article article = articleRepository.findByUrlHash(urlHash).orElse(null);
+        // A feed can replace publication with a recent modification date. Preserve the stored date
+        // and history, but do not re-observe an already known old article as current technical news.
+        if (article != null && !ArticleRecencyPolicy.isEligible(collectionTopic, article.getPublishedAt(),
+                referenceTime(run), properties.getTechnologyLookbackDays())) {
+            return Optional.empty();
+        }
         ChangeType changeType;
 
         if (article == null) {
@@ -343,7 +370,7 @@ public class CollectionResultWriter {
         }
 
         runArticleRepository.save(CollectionRunArticle.observe(run, article, topic, source, changeType, now));
-        return new SavedArticle(article.getId(), changeType);
+        return Optional.of(new SavedArticle(article.getId(), changeType));
     }
 
     private Article newArticle(CollectionRun run,

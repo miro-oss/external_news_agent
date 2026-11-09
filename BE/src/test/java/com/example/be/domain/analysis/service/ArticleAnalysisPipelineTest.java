@@ -69,7 +69,7 @@ class ArticleAnalysisPipelineTest {
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, runItemRepository, issueArticleRepository,
                     orchestrator, reuseCache, findingWriter, selectionProperties,
-                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning);
+                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning, new com.example.be.domain.collection.config.CollectionPipelineProperties());
 
     @BeforeEach
     void loadRunPlan() {
@@ -275,6 +275,31 @@ class ArticleAnalysisPipelineTest {
         pipeline.analyze(42L);
 
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(representative), result);
+    }
+
+    @Test
+    void oldTechnicalRepresentativeCannotBypassFeedWindowDuringAnalysisOrInvestigation() {
+        var started = java.time.LocalDateTime.of(2026, 11, 9, 9, 0);
+        Topic topic = selectionScope(7L, "AI 기술");
+        Source source = Source.builder().id(8L).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(capturedItem(topic, source)));
+        topic.update("AI 산업", "AI 산업", List.of(), List.of(), List.of(), 100, 1440, true);
+        Article old = Article.builder().id(10L).title("2021년 모델 발표").topic(topic).source(source)
+                .body("확보한 과거 기사 전문").fetchStatus(FetchStatus.FULLTEXT)
+                .publishedAt(java.time.OffsetDateTime.parse("2021-11-01T00:00:00Z")).build();
+        var membership = IssueArticle.builder().article(old).issue(NewsIssue.builder().topic(topic).build())
+                .role(IssueArticleRole.REPRESENTATIVE).build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(CollectionRun.builder().id(42L)
+                .startedAt(started).llmPlan(AgentPlan.FREE).build()));
+        when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(membership));
+        when(issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(42L, List.of(19L)))
+                .thenReturn(List.of(membership));
+
+        pipeline.analyze(42L);
+        pipeline.analyzeInvestigation(42L, Set.of(19L));
+
+        verifyNoInteractions(relevanceGate, reuseCache, orchestrator);
+        verify(findingWriter).recordTargetCount(42L, 0);
     }
 
     @Test
