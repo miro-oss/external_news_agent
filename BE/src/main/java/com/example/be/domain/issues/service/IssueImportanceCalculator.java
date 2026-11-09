@@ -5,6 +5,7 @@ import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.entity.TopicEditorialFocus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 
 /** P2-3 중요도 공식. 모든 입력은 0~100으로 맞춘 뒤 상태 penalty를 마지막에 뺀다. */
 @Component
@@ -30,23 +32,38 @@ public class IssueImportanceCalculator {
     public BigDecimal calculate(NewsIssue issue,
                                 List<IssueArticle> memberships,
                                 OffsetDateTime now) {
+        return calculate(issue, memberships, now, issue.getTopic());
+    }
+
+    /** Run selection can use its captured topic without rewriting the current issue projection. */
+    public BigDecimal calculate(NewsIssue issue,
+                                List<IssueArticle> memberships,
+                                OffsetDateTime now,
+                                Topic topic) {
         double topicFit = memberships == null || memberships.isEmpty()
                 ? 0.0d
                 : memberships.stream()
                 .map(IssueArticle::getArticle)
-                .mapToDouble(article -> topicFit(issue, article))
+                .mapToDouble(article -> topicFit(topic, article))
                 .average()
                 .orElse(0.0d);
+        // lastSeenAt can be collection time for undated articles; only readable publication dates count.
+        OffsetDateTime latestPublishedAt = memberships == null ? null : memberships.stream()
+                .map(IssueArticle::getArticle)
+                .map(Article::getPublishedAt)
+                .filter(Objects::nonNull)
+                .max(OffsetDateTime::compareTo)
+                .orElse(null);
         return score(
                 issue.getSensitivityScore(),
                 issue.getArticleCount(),
                 issue.getPublisherCount(),
                 issue.getIndependentContentCount(),
-                issue.getLastSeenAt(),
+                latestPublishedAt,
                 topicFit,
                 issue.getStatus(),
                 now,
-                TopicEditorialFocus.isAiTechnology(issue.getTopic()) ? TECHNOLOGY_WEIGHTS : INDUSTRY_WEIGHTS);
+                TopicEditorialFocus.isAiTechnology(topic) ? TECHNOLOGY_WEIGHTS : INDUSTRY_WEIGHTS);
     }
 
     BigDecimal score(BigDecimal sensitivity,
@@ -91,10 +108,10 @@ public class IssueImportanceCalculator {
         return BigDecimal.valueOf(clamp(weighted)).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private double topicFit(NewsIssue issue, Article article) {
+    private double topicFit(Topic topic, Article article) {
         String sourceLanguage = article.getSource() == null ? null : article.getSource().getLanguage();
         return topicFitScorer.score(
-                issue.getTopic(),
+                topic,
                 article.getTitle(),
                 article.getSummary(),
                 article.getLanguage(),

@@ -37,5 +37,8 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM news_sources existing
     WHERE existing.source_kind = seed.source_kind
-      AND existing.url_template = seed.url_template
+      -- URL scheme/host are case-insensitive; the feed path must retain its case.
+      AND REGEXP_REPLACE(existing.url_template, '^https?://[^/]+',
+              LOWER(REGEXP_SUBSTR(existing.url_template, '^https?://[^/]+', 1, 1, 'i')),
+              1, 1, 'i') = seed.url_template
 );

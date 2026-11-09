@@ -153,7 +153,9 @@ public class ArticleContentEnricher {
                                     : observation.getSource().getId())),
                     (left, right) -> left.topicFit() >= right.topicFit() ? left : right);
         }
-        List<Target> ordered = byArticleId.values().stream().sorted(PRIORITY).toList();
+        List<Target> ordered = byArticleId.values().stream()
+                .filter(target -> allowsFullText(target.article().getSource()))
+                .sorted(PRIORITY).toList();
         int limit = properties.getFulltextLimitPerRun();
         if (ordered.size() > limit) {
             ordered = TechnicalSourceBalancer.balance(ordered, Target::technicalGroup, PRIORITY);

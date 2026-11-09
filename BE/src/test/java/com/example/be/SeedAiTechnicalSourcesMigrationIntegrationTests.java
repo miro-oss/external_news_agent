@@ -100,6 +100,46 @@ class SeedAiTechnicalSourcesMigrationIntegrationTests {
                 "SELECT robots_status FROM news_sources WHERE source_kind = 'FEED' AND url_template = ?", String.class, url));
     }
 
+    @Test
+    void existingMixedCaseHostKeepsOperatorSettingsWithoutCreatingAnotherSource() throws Exception {
+        String canonical = "https://openai.com/news/rss.xml";
+        String mixedCase = "HTTPS://OpenAI.COM/news/rss.xml";
+        jdbcTemplate.update("""
+                UPDATE news_sources SET url_template = ?, name = 'Operator feed', active_yn = 'N'
+                WHERE source_kind = 'FEED' AND url_template = ?
+                """, mixedCase, canonical);
+        long before = sourceRepository.count();
+
+        assertEquals(0, jdbcTemplate.update(readSeedScript()));
+
+        assertEquals(before, sourceRepository.count());
+        assertEquals("Operator feed", jdbcTemplate.queryForObject(
+                "SELECT name FROM news_sources WHERE url_template = ?", String.class, mixedCase));
+        assertEquals("N", jdbcTemplate.queryForObject(
+                "SELECT active_yn FROM news_sources WHERE url_template = ?", String.class, mixedCase));
+    }
+
+    @Test
+    void differentPathCaseOrSourceKindDoesNotSuppressTheFeedSeed() throws Exception {
+        jdbcTemplate.update("""
+                UPDATE news_sources SET url_template = 'https://OpenAI.COM/NEWS/rss.xml'
+                WHERE source_kind = 'FEED' AND url_template = 'https://openai.com/news/rss.xml'
+                """);
+        jdbcTemplate.update("""
+                UPDATE news_sources SET source_kind = 'SEARCH'
+                WHERE source_kind = 'FEED' AND url_template = 'https://huggingface.co/blog/feed.xml'
+                """);
+
+        assertEquals(2, jdbcTemplate.update(readSeedScript()));
+        assertEquals(0, jdbcTemplate.update(readSeedScript()));
+
+        for (String url : SOURCES.keySet()) {
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM news_sources WHERE source_kind = 'FEED' AND url_template = ?",
+                    Integer.class, url));
+        }
+    }
+
     private String readSeedScript() throws Exception {
         try (var reader = new InputStreamReader(
                 new ClassPathResource(SEED_SCRIPT).getInputStream(), StandardCharsets.UTF_8)) {

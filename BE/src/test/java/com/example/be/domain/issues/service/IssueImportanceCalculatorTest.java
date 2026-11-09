@@ -67,12 +67,40 @@ class IssueImportanceCalculatorTest {
     void industryTopicKeepsItsExistingWeightsAndTechnologyKeepsRetractionPenalty() {
         var actual = new IssueImportanceCalculator(new TopicFitScorer((language, keywords) -> Map.of()));
         Topic industry = Topic.builder().queryText("AI 산업").optionalKeywords(List.of("LLM")).build();
-        NewsIssue industrial = issue(industry, 10, 3, 10, new BigDecimal("100"), IssueStatus.EMERGING);
-        assertEquals(new BigDecimal("100.00"), actual.calculate(industrial, members(industry, "LLM"), now));
+        NewsIssue industrial = issue(industry, 10, 3, 10, BigDecimal.ZERO, IssueStatus.EMERGING);
+        assertEquals(new BigDecimal("60.00"), actual.calculate(industrial, members(industry, "LLM"), now));
 
         Topic technology = Topic.builder().queryText("AI 모델").optionalKeywords(List.of("LLM")).build();
         NewsIssue retracted = issue(technology, 10, 3, 10, new BigDecimal("100"), IssueStatus.RETRACTED);
         assertEquals(new BigDecimal("50.00"), actual.calculate(retracted, members(technology, "LLM"), now));
+    }
+
+    @Test
+    void unknownPublicationDatesNeverReceiveRecencyFromCollectionTime() {
+        var actual = new IssueImportanceCalculator(new TopicFitScorer((language, keywords) -> Map.of()));
+        Topic topic = Topic.builder().queryText("AI 모델").optionalKeywords(List.of("LLM")).build();
+        NewsIssue issue = issue(topic, 1, 1, 1, BigDecimal.ZERO, IssueStatus.EMERGING);
+        BigDecimal undated = actual.calculate(issue, members(topic, "LLM", null), now);
+        BigDecimal publishedNow = actual.calculate(issue, members(topic, "LLM", now), now);
+
+        assertEquals(new BigDecimal("35.00"), publishedNow.subtract(undated));
+        // A new undated observation must not refresh an existing dated issue's recency either.
+        var mixed = new java.util.ArrayList<>(members(topic, "LLM", now.minusHours(24)));
+        mixed.addAll(members(topic, "LLM", null));
+        assertEquals(new BigDecimal("17.50"), actual.calculate(issue, mixed, now).subtract(undated));
+    }
+
+    @Test
+    void capturedTopicControlsBothFitAndWeightsWithoutChangingGlobalIssue() {
+        var actual = new IssueImportanceCalculator(new TopicFitScorer((language, keywords) -> Map.of()));
+        Topic captured = Topic.builder().queryText("AI 모델").optionalKeywords(List.of("LLM")).build();
+        Topic current = Topic.builder().queryText("AI 산업").optionalKeywords(List.of("DRAM")).build();
+        NewsIssue issue = issue(current, 10, 3, 10, BigDecimal.ZERO, IssueStatus.EMERGING);
+        var memberships = members(current, "LLM");
+
+        assertEquals(new BigDecimal("90.00"), actual.calculate(issue, memberships, now, captured));
+        assertEquals(new BigDecimal("50.00"), actual.calculate(issue, memberships, now));
+        assertEquals(current, issue.getTopic());
     }
 
     private NewsIssue issue(Topic topic, int articles, int publishers, int independent, BigDecimal sensitivity,
@@ -83,7 +111,11 @@ class IssueImportanceCalculatorTest {
     }
 
     private List<IssueArticle> members(Topic topic, String title) {
+        return members(topic, title, now);
+    }
+
+    private List<IssueArticle> members(Topic topic, String title, OffsetDateTime publishedAt) {
         return List.of(IssueArticle.builder().article(Article.builder().topic(topic).title(title)
-                .summary("").language("ko").build()).build());
+                .summary("").language("ko").publishedAt(publishedAt).build()).build());
     }
 }

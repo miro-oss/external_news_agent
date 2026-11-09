@@ -24,6 +24,8 @@ import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.IssueStatus;
+import com.example.be.domain.issues.service.IssueImportanceCalculator;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,7 +71,9 @@ class ArticleAnalysisPipelineTest {
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, runItemRepository, issueArticleRepository,
                     orchestrator, reuseCache, findingWriter, selectionProperties,
-                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning, new com.example.be.domain.collection.config.CollectionPipelineProperties());
+                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning,
+                    new com.example.be.domain.collection.config.CollectionPipelineProperties(),
+                    new IssueImportanceCalculator(new TopicFitScorer((language, keywords) -> topicWeights)));
 
     @BeforeEach
     void loadRunPlan() {
@@ -517,6 +521,46 @@ class ArticleAnalysisPipelineTest {
         assertEquals(10L, eligible.getFirst().article().getId());
         assertTrue(eligible.getFirst().issue().present());
         assertEquals(new BigDecimal("90.00"), eligible.getFirst().issue().importanceScore());
+    }
+
+    @Test
+    void selectsSelfCritiqueByCapturedTopicEvenAfterTheLiveTopicChanges() {
+        var started = java.time.LocalDateTime.of(2026, 10, 7, 9, 0);
+        Topic topic = Topic.builder().id(7L).name("AI 모델").queryText("AI 모델")
+                .requiredKeywords(List.of()).optionalKeywords(List.of("LLM", "추론"))
+                .excludedKeywords(List.of()).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L))
+                .thenReturn(List.of(capturedItem(topic, Source.builder().id(8L).build())));
+        when(runRepository.findById(42L)).thenReturn(Optional.of(CollectionRun.builder().id(42L)
+                .startedAt(started).llmPlan(AgentPlan.FREE).build()));
+        topic.update("AI 산업", "DRAM", List.of(), List.of("DRAM"), List.of(), 100, 1440, true);
+        List<Article> articles = java.util.stream.LongStream.rangeClosed(10, 14)
+                .mapToObj(id -> Article.builder().id(id).topic(topic)
+                        .title(id == 11 ? "LLM 추론 개선" : "일반 소식")
+                        .publishedAt(started.atZone(com.example.be.global.config.ApiTimeZone.ZONE).toOffsetDateTime())
+                        .body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build()).toList();
+        List<IssueArticle> memberships = articles.stream().map(article -> IssueArticle.builder()
+                .issue(NewsIssue.builder().id(100L + article.getId()).topic(topic)
+                        .articleCount(1).publisherCount(1).independentContentCount(1)
+                        .status(IssueStatus.EMERGING)
+                        .sensitivityScore(article.getId() == 10L ? new BigDecimal("100") : BigDecimal.ZERO)
+                        .importanceScore(article.getId() == 10L ? new BigDecimal("90.00") : new BigDecimal("20.00"))
+                        .build())
+                .article(article).role(IssueArticleRole.REPRESENTATIVE).build()).toList();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(articles.stream().map(article -> observation(article, topic, ChangeType.NEW)).toList());
+        when(issueArticleRepository.findIssueContextsByRepresentativeArticleIds(any())).thenReturn(memberships);
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        var contexts = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator, times(5)).analyze(contexts.capture());
+        var selected = contexts.getAllValues().stream().filter(AnalysisContext::selfCritiqueEligible).toList();
+        assertEquals(List.of(11L), selected.stream().map(context -> context.article().getId()).toList());
+        assertEquals("AI 모델", selected.getFirst().topic().getQueryText());
+        assertEquals(new BigDecimal("90.00"), memberships.getFirst().getIssue().getImportanceScore());
+        assertEquals("DRAM", memberships.getFirst().getIssue().getTopic().getQueryText());
     }
 
     @Test

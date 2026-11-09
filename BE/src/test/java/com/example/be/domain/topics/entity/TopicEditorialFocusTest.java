@@ -33,6 +33,20 @@ class TopicEditorialFocusTest {
         assertFalse(TopicEditorialFocus.isAiTechnology(topic(null, null)));
     }
 
+    @Test
+    void distinguishesLearningPoliciesFromPublicPolicyAndMixedIndustryScope() {
+        for (String query : List.of("AI models policy optimization", "LLM proximal policy optimization",
+                "AI model policy-gradient", "AI models policy learning", "AI 모델 정책 최적화",
+                "LLM 정책 경사 학습")) {
+            assertTrue(TopicEditorialFocus.isAiTechnology(topic("AI 기술", query)), query);
+        }
+        for (String query : List.of("AI models policy", "LLM public policy optimization",
+                "AI models government policy learning", "AI model policy optimization regulation",
+                "AI models policy gradients investment", "AI 모델 공공 정책 최적화", "LLM 정책 최적화 규제")) {
+            assertFalse(TopicEditorialFocus.isAiTechnology(topic("AI 기술", query)), query);
+        }
+    }
+
     private Topic topic(String name, String query) {
         return Topic.builder().name(name).queryText(query).build();
     }

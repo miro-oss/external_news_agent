@@ -19,6 +19,7 @@ import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.service.IssueImportanceCalculator;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.database.OracleInClause;
@@ -65,6 +66,7 @@ public class ArticleAnalysisPipeline {
     private final TopicRelevanceGate relevanceGate;
     private final FeedbackLearningService feedbackLearning;
     private final CollectionPipelineProperties collectionProperties;
+    private final IssueImportanceCalculator importanceCalculator;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -280,9 +282,18 @@ public class ArticleAnalysisPipeline {
                 .toList();
         Set<TopicRelevanceGate.Key> accepted = candidates.isEmpty()
                 ? Set.of() : relevanceGate.assess(runId, plan, candidates);
+        Map<Long, Topic> capturedTopics = snapshotTopics(runId);
+        OffsetDateTime referenceTime = runRepository.findById(runId)
+                .map(run -> run.getStartedAt() == null ? null
+                        : run.getStartedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime()).orElse(null);
         Map<Long, IssueAnalysisContext> result = new LinkedHashMap<>();
         representativeByIssue.forEach((issueId, representative) -> {
             List<IssueArticle> issueMemberships = byIssue.get(issueId);
+            var issue = issueMemberships.getFirst().getIssue();
+            Topic capturedTopic = topicSnapshot(capturedTopics, representative.topicOverride());
+            // Legacy runs keep their saved score; current topic edits cannot change a captured run's ranking.
+            BigDecimal importance = capturedTopic == null ? issue.getImportanceScore()
+                    : importanceCalculator.calculate(issue, issueMemberships, referenceTime, capturedTopic);
             List<Article> relevantArticles = issueMemberships.stream()
                     .map(IssueArticle::getArticle)
                     .filter(article -> accepted.contains(new TopicRelevanceGate.Key(
@@ -293,7 +304,7 @@ public class ArticleAnalysisPipeline {
                     representative.article().getId(),
                     relevantArticles,
                     representativeIds,
-                    issueMemberships.getFirst().getIssue().getImportanceScore()));
+                    importance));
         });
         return Map.copyOf(result);
     }

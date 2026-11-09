@@ -33,13 +33,19 @@ class ReportFindingOrderTest {
         assertEquals(List.of(industrial, technical), ReportFindingOrder.sortForGeneration(
                 List.of(technical, industrial), run("AI 산업")));
         assertEquals(List.of(industrial, technical), ReportFindingOrder.sortForGeneration(
+                List.of(technical, industrial), run("AI 모델", "AI 산업")));
+        assertEquals(List.of(industrial, technical), ReportFindingOrder.sortForGeneration(
                 List.of(technical, industrial), CollectionRun.builder().build()));
         assertEquals(List.of(), ReportFindingOrder.sort(List.of()));
     }
 
-    private CollectionRun run(String query) {
-        var snapshot = new CollectionTopicSnapshot(1L, "AI 소식", query, List.of(), List.of(), List.of(), 100, 1440);
-        return CollectionRun.builder().items(List.of(CollectionRunItem.builder().topicSnapshot(snapshot).build())).build();
+    private CollectionRun run(String... queries) {
+        var items = java.util.stream.IntStream.range(0, queries.length).mapToObj(index -> {
+            var snapshot = new CollectionTopicSnapshot((long) index + 1, "AI 소식", queries[index],
+                    List.of(), List.of(), List.of(), 100, 1440);
+            return CollectionRunItem.builder().topicSnapshot(snapshot).build();
+        }).toList();
+        return CollectionRun.builder().items(items).build();
     }
 
     private Finding finding(Long id, String query, Relevance relevance, int score) {

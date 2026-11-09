@@ -162,7 +162,7 @@ public class AgentReportOrchestrator {
     private ReportDocument fallback(GenerationContext context, List<Finding> findings,
                                     LocalDateTime generatedAt, ReportSourceStats sourceStats) {
         return context.daily() ? fallbackGenerator.generateDaily(findings, context.date(), sourceStats)
-                : fallbackGenerator.generate(findings, generatedAt, sourceStats);
+                : fallbackGenerator.generateForRun(findings, generatedAt, sourceStats, context.run());
     }
 
     private AgentReportRequest request(GenerationContext context,

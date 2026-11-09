@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
+import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -39,15 +40,21 @@ public class ReportGenerator {
     public ReportDocument generate(List<Finding> findings,
                                    LocalDateTime generatedAt,
                                    ReportSourceStats sourceStats) {
-        return generate(findings, generatedAt, sourceStats, null);
+        return generate(findings, generatedAt, sourceStats, null, null);
+    }
+
+    /** RUN fallback도 정상 Agent 입력과 같은 실행 당시 주제 우선순위로 요약을 선별한다. */
+    public ReportDocument generateForRun(List<Finding> findings, LocalDateTime generatedAt,
+                                         ReportSourceStats sourceStats, CollectionRun run) {
+        return generate(findings, generatedAt, sourceStats, null, run);
     }
 
     public ReportDocument generateDaily(List<Finding> findings, LocalDate date, ReportSourceStats sourceStats) {
-        return generate(findings, date.atStartOfDay(), sourceStats, date);
+        return generate(findings, date.atStartOfDay(), sourceStats, date, null);
     }
 
     private ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt,
-                                    ReportSourceStats sourceStats, LocalDate reportDate) {
+                                    ReportSourceStats sourceStats, LocalDate reportDate, CollectionRun run) {
         findings = relevancePolicy.filterFindings(findings);
         int actualStubCount = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
@@ -69,7 +76,7 @@ public class ReportGenerator {
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(FindingEvidencePolicy::hasSupportedEvidence)
                 .toList();
-        List<Finding> ordered = reportDate == null ? ReportFindingOrder.sort(eligible) : eligible;
+        List<Finding> ordered = reportDate == null ? ReportFindingOrder.sortForGeneration(eligible, run) : eligible;
         List<Finding> excluded = ReportFindingOrder.sort(findings.stream()
                 .filter(ReportFindings::hasFullText)
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))

@@ -11,6 +11,12 @@ public final class TopicEditorialFocus {
             "산업|시장|투자|주가|실적|규제|정책|인프라|데이터\\s*센터|공급망"
                     + "|\\b(?:industry|market|investment|stocks?|earnings|regulation|policy|infrastructure)\\b"
                     + "|\\bdata\\s*cent(?:er|re)s?\\b|\\bsupply\\s+chain\\b", FLAGS);
+    private static final Pattern PUBLIC_POLICY = Pattern.compile(
+            "(?:공공|정부|규제|산업|경제|국가|개인정보)\\s*정책"
+                    + "|\\b(?:public|government|regulatory|industrial|economic|national|privacy)\\s+polic(?:y|ies)\\b", FLAGS);
+    private static final Pattern TECHNICAL_POLICY = Pattern.compile(
+            "정책\\s*(?:최적화|경사|학습)"
+                    + "|\\bpolicy[ -]+(?:optim(?:ization|isation)|gradients?|learning)\\b", FLAGS);
     private static final Pattern AI_CONTEXT = Pattern.compile(
             "인공\\s*지능|\\b(?:ai|llms?)\\b|언어\\s*모델|\\blarge\\s+language\\s+models?\\b", FLAGS);
     private static final Pattern TECHNICAL_SCOPE = Pattern.compile(
@@ -34,7 +40,9 @@ public final class TopicEditorialFocus {
         if (value == null || value.isBlank()) value = name;
         if (value == null || value.isBlank()) return false;
         String scope = Normalizer.normalize(value, Normalizer.Form.NFKC);
-        if (INDUSTRY_SCOPE.matcher(scope).find()) return false;
+        // Learning-method policy terms do not imply public policy, but an explicit industry scope still wins.
+        if (PUBLIC_POLICY.matcher(scope).find()
+                || INDUSTRY_SCOPE.matcher(TECHNICAL_POLICY.matcher(scope).replaceAll("")).find()) return false;
         return SPECIFIC_METHOD.matcher(scope).find()
                 || (AI_CONTEXT.matcher(scope).find() && TECHNICAL_SCOPE.matcher(scope).find());
     }

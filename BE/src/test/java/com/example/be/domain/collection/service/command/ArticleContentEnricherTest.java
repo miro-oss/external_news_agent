@@ -263,6 +263,36 @@ class ArticleContentEnricherTest {
                 observed(2L, models, prolific), observed(3L, models, specialist)), 2));
     }
 
+    @Test
+    void prohibitedArticleSourcesDoNotConsumeBalancedFulltextSlots() {
+        Topic models = scope(7L, "AI 모델");
+        Source allowed = source(8L);
+        Source prohibited = Source.builder().id(10L)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, false)).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, allowed), captured(models, prohibited)));
+
+        assertEquals(List.of(url(1), url(2)), fetchUrls(List.of(
+                observed(1L, models, allowed), observed(2L, models, allowed),
+                observed(3L, models, prohibited)), 2));
+    }
+
+    @Test
+    void usesOriginalArticlePermissionRatherThanObservedSourcePermission() {
+        Topic models = scope(7L, "AI 모델");
+        Source allowed = source(8L);
+        Source prohibited = Source.builder().id(10L)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, false)).build();
+        CollectionRunArticle blockedArticle = CollectionRunArticle.builder()
+                .article(candidate(1L, models, prohibited)).topic(models).source(allowed).build();
+        CollectionRunArticle allowedArticle = CollectionRunArticle.builder()
+                .article(candidate(2L, models, allowed)).topic(models).source(prohibited).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(
+                captured(models, allowed), captured(models, prohibited)));
+
+        assertEquals(List.of(url(2)), fetchUrls(List.of(blockedArticle, allowedArticle), 1));
+    }
+
     private List<String> fetchUrls(List<CollectionRunArticle> observations, int limit) {
         CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
         ArticleContentClient client = mock(ArticleContentClient.class);
