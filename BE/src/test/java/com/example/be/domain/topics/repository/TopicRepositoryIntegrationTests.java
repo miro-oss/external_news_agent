@@ -289,6 +289,32 @@ class TopicRepositoryIntegrationTests {
     }
 
     @Test
+    void manualOnlyTopicsArePersistedAndAvailableToManualCollectionButNeverDue() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 20, 10, 0);
+        Source activeSource = sourceRepository.save(source(Source.KIND_FEED, "수동 수집 소스",
+                "https://example.com/manual-only"));
+        Topic neverCollected = Topic.builder().name("수동 전용 미수집 주제").batchSize(100)
+                .intervalMinutes(0).active(true).build();
+        neverCollected.replaceSources(List.of(activeSource));
+        Topic previouslyCollected = Topic.builder().name("수동 전용 수집 이력 주제").batchSize(100)
+                .intervalMinutes(0).active(true).build();
+        previouslyCollected.replaceSources(List.of(activeSource));
+        previouslyCollected.recordCollectionStartedAt(now.minusDays(30));
+        List<Long> ids = List.of(topicRepository.save(neverCollected).getId(),
+                topicRepository.save(previouslyCollected).getId());
+        flushAndClear();
+
+        assertTrue(topicRepository.findAllById(ids).stream().allMatch(topic -> topic.getIntervalMinutes() == 0));
+        assertTrue(topicRepository.findDueCollectionTopicIds(now).stream().noneMatch(ids::contains));
+        assertTrue(topicRepository.findActiveCollectionTargets().stream()
+                .map(target -> target.getTopic().getId()).toList().containsAll(ids));
+        assertEquals(ids, topicRepository.findActiveCollectionTargetsByTopicIds(ids).stream()
+                .map(target -> target.getTopic().getId()).toList());
+        assertNull(TopicConverter.toActivated(topicRepository.findById(ids.get(0)).orElseThrow()).getNextScheduledAt());
+        assertNull(TopicConverter.toActivated(topicRepository.findById(ids.get(1)).orElseThrow()).getNextScheduledAt());
+    }
+
+    @Test
     void databaseDefaultIntervalRemainsTwentyFourHours() {
         entityManager.createNativeQuery("INSERT INTO news_topics (name) VALUES (:name)")
                 .setParameter("name", "주기 기본값 확인 주제")

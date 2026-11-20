@@ -102,6 +102,11 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.result.content[0].name").value("HBM"))
                 .andExpect(jsonPath("$.result.content[0].linkedSourceCount").value(4))
                 .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].keyword").value("HBM4"))
+                .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].articleCount").value(4))
+                .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].previousArticleCount").value(1))
+                .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].deltaArticleCount").value(3))
+                .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].issueCount").doesNotExist())
+                .andExpect(jsonPath("$.result.content[0].relatedKeywords[0].articleCount").value(3))
                 .andExpect(jsonPath("$.result.content[0].relatedKeywords[0].sharePercent").value(60.00))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
                 .andExpect(jsonPath("$.result.hasNext").value(false));
@@ -170,6 +175,46 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.result.queryText").value("HBM4 반도체"))
                 .andExpect(jsonPath("$.result.batchSize").value(20))
                 .andExpect(jsonPath("$.result.intervalMinutes").value(720));
+    }
+
+    @Test
+    void createManualOnlyTopicPreservesZeroIntervalAndActivation() throws Exception {
+        when(topicCommandService.createTopic(any(TopicReqDTO.Create.class)))
+                .thenReturn(TopicResDTO.Created.builder().id(1L).name("수동 수집")
+                        .intervalMinutes(0).active(true).sources(List.of()).build());
+
+        mockMvc.perform(post("/api/news/topics").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"수동 수집","intervalMinutes":0,"active":true}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("COMMON201"))
+                .andExpect(jsonPath("$.result.intervalMinutes").value(0))
+                .andExpect(jsonPath("$.result.active").value(true));
+
+        var request = ArgumentCaptor.forClass(TopicReqDTO.Create.class);
+        verify(topicCommandService).createTopic(request.capture());
+        assertEquals(0, request.getValue().getIntervalMinutes());
+    }
+
+    @Test
+    void disablePeriodicCollectionOnlyPassesTheRequestedInterval() throws Exception {
+        when(topicCommandService.updateTopic(eq(1L), any(TopicReqDTO.Update.class)))
+                .thenReturn(TopicResDTO.Updated.builder().id(1L).name("HBM")
+                        .intervalMinutes(0).active(true).build());
+
+        mockMvc.perform(patch("/api/news/topics/1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intervalMinutes\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("수정되었습니다."))
+                .andExpect(jsonPath("$.result.intervalMinutes").value(0))
+                .andExpect(jsonPath("$.result.active").value(true));
+
+        var request = ArgumentCaptor.forClass(TopicReqDTO.Update.class);
+        verify(topicCommandService).updateTopic(eq(1L), request.capture());
+        assertEquals(0, request.getValue().getIntervalMinutes());
+        assertNull(request.getValue().getActive());
     }
 
     @Test
@@ -280,15 +325,15 @@ class TopicControllerTest {
                 .linkedSourceCount(4)
                 .surgeKeywords(List.of(TopicResDTO.KeywordTrend.builder()
                         .keyword("HBM4")
-                        .issueCount(4)
-                        .previousIssueCount(1)
-                        .deltaIssueCount(3)
+                        .articleCount(4)
+                        .previousArticleCount(1)
+                        .deltaArticleCount(3)
                         .zScore(new BigDecimal("2.87"))
                         .burst(true)
                         .build()))
                 .relatedKeywords(List.of(TopicResDTO.RelatedKeyword.builder()
                         .keyword("마이크론")
-                        .issueCount(3)
+                        .articleCount(3)
                         .sharePercent(new BigDecimal("60.00"))
                         .build()))
                 .build();

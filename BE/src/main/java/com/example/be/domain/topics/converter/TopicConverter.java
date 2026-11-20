@@ -195,9 +195,9 @@ public class TopicConverter {
         return trendSnapshot.surgeKeywords().stream()
                 .map(keyword -> TopicResDTO.KeywordTrend.builder()
                         .keyword(keyword.keyword())
-                        .issueCount(keyword.issueCount())
-                        .previousIssueCount(keyword.previousIssueCount())
-                        .deltaIssueCount(keyword.deltaIssueCount())
+                        .articleCount(keyword.articleCount())
+                        .previousArticleCount(keyword.previousArticleCount())
+                        .deltaArticleCount(keyword.deltaArticleCount())
                         .zScore(keyword.zScore())
                         .burst(keyword.burst())
                         .build())
@@ -212,18 +212,18 @@ public class TopicConverter {
         return trendSnapshot.relatedKeywords().stream()
                 .map(keyword -> TopicResDTO.RelatedKeyword.builder()
                         .keyword(keyword.keyword())
-                        .issueCount(keyword.issueCount())
+                        .articleCount(keyword.articleCount())
                         .sharePercent(keyword.sharePercent())
                         .build())
                 .toList();
     }
 
     /**
-     * 스케줄러(M7) 도입 전까지는 마지막 수집 시각과 주기로 다음 실행 예정 시각을 계산한다.
-     * 비활성 주제는 스케줄러가 건너뛰므로 null이다.
+     * 마지막 수집 시각과 주기로 다음 실행 예정 시각을 계산한다.
+     * 비활성 주제와 정기 수집을 끈 주제는 스케줄러가 건너뛰므로 null이다.
      */
     private static OffsetDateTime toNextScheduledAt(Topic topic) {
-        if (!topic.isActive()) {
+        if (!topic.isActive() || topic.getIntervalMinutes() == 0) {
             return null;
         }
         LocalDateTime lastCollectedAt = topic.getLastCollectedAt();

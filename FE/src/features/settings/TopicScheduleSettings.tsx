@@ -123,9 +123,13 @@ export function TopicScheduleDialog({ id, initial, pending = false, error, onDis
             </option>}
             {COLLECTION_INTERVALS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <p id={`${id}-hint`} className="hint">새 기사를 확인하는 주기입니다. 변경한 주기는 앞으로 시작하는 정기 수집에 적용됩니다.</p>
-          {!supported && <p id={`${id}-unsupported`} className="hint">일정을 변경하려면 1시간, 12시간, 24시간, 1주 중에서 선택해 주세요.</p>}
-          {!initial.active && <p className="hint">현재 수집이 중지된 주제입니다. 수집을 재개하면 저장한 주기로 수집합니다.</p>}
+          <p id={`${id}-hint`} className="hint">{interval === '0'
+            ? '자동으로 수집하지 않습니다. 필요할 때 수동으로 수집할 수 있습니다. 이미 접수된 수집은 계속 진행됩니다.'
+            : '새 기사를 확인하는 주기입니다. 변경한 주기는 앞으로 시작하는 정기 수집에 적용됩니다.'}</p>
+          {!supported && <p id={`${id}-unsupported`} className="hint">정기 수집 안 함, 1시간, 12시간, 24시간, 1주 중에서 선택해 주세요.</p>}
+          {!initial.active && <p className="hint">{interval === '0'
+            ? '현재 수집이 중지된 주제입니다. 수집을 재개해도 자동 수집 없이 수동으로만 수집합니다.'
+            : '현재 수집이 중지된 주제입니다. 수집을 재개하면 저장한 주기로 수집합니다.'}</p>}
         </div>
         {error && <p className="error" role="alert">{error}</p>}
       </div>

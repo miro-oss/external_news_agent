@@ -37,8 +37,8 @@ const page = content => ({ content, page: 0, size: 100, totalElements: content.l
 const topic = { id: 1, name: payload, queryText: payload,
   requiredKeywords: [payload], optionalKeywords: [payload], excludedKeywords: [payload],
   active: true, intervalMinutes: 60, lastCollectedAt: null,
-  surgeKeywords: [{ keyword: payload, issueCount: 1, deltaIssueCount: 1, burst: false }],
-  relatedKeywords: [{ keyword: payload, issueCount: 1, sharePercent: 100 }] }
+  surgeKeywords: [{ keyword: payload, articleCount: 1, previousArticleCount: 0, deltaArticleCount: 1, zScore: 0, burst: false }],
+  relatedKeywords: [{ keyword: payload, articleCount: 1, sharePercent: 100 }] }
 const recipient = { id: 1, name: payload, email: payload, active: true, groupNames: [payload],
   destinations: [{ channelId: 1, channelType: 'EMAIL', address: payload, use: true, onboarded: true }] }
 

@@ -156,7 +156,7 @@ class TopicCommandServiceImplTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {60, 720, 1440, 10080})
+    @ValueSource(ints = {0, 60, 720, 1440, 10080})
     void createTopicAcceptsSupportedCollectionIntervals(int intervalMinutes) {
         TopicReqDTO.Create request = new TopicReqDTO.Create();
         request.setName("주기 선택");
@@ -166,6 +166,7 @@ class TopicCommandServiceImplTest {
         TopicResDTO.Created result = topicCommandService.createTopic(request);
 
         assertEquals(intervalMinutes, result.getIntervalMinutes());
+        assertTrue(result.isActive());
     }
 
     @Test
@@ -205,7 +206,7 @@ class TopicCommandServiceImplTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {30, 10079, 10081})
+    @ValueSource(ints = {-1, 30, 10079, 10081})
     void createTopicRejectsUnsupportedCollectionInterval(int intervalMinutes) {
         TopicReqDTO.Create request = createRequest();
         request.setIntervalMinutes(intervalMinutes);
@@ -278,7 +279,7 @@ class TopicCommandServiceImplTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {60, 720, 1440, 10080})
+    @ValueSource(ints = {0, 60, 720, 1440, 10080})
     void updateTopicAcceptsSupportedCollectionIntervals(int intervalMinutes) {
         Topic topic = existingTopic();
         var snapshot = CollectionTopicSnapshot.capture(topic);
@@ -290,25 +291,27 @@ class TopicCommandServiceImplTest {
 
         assertEquals(intervalMinutes, result.getIntervalMinutes());
         assertEquals(intervalMinutes, topic.getIntervalMinutes());
+        assertTrue(topic.isActive());
         assertEquals(60, snapshot.intervalMinutes());
         verify(topicRepository).flush();
     }
 
-    @Test
-    void updateTopicKeepsWeeklyIntervalWhenScheduleIsOmitted() {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 10080})
+    void updateTopicKeepsIntervalWhenScheduleIsOmitted(int intervalMinutes) {
         Topic topic = Topic.builder().id(1L).name("주간 수집")
-                .batchSize(100).intervalMinutes(10080).active(true).build();
+                .batchSize(100).intervalMinutes(intervalMinutes).active(true).build();
         when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         TopicReqDTO.Update request = new TopicReqDTO.Update();
         request.setName("주간 수집 이름 수정");
 
         TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
 
-        assertEquals(10080, result.getIntervalMinutes());
+        assertEquals(intervalMinutes, result.getIntervalMinutes());
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {30, 10079, 10081})
+    @ValueSource(ints = {-1, 30, 10079, 10081})
     void updateTopicRejectsUnsupportedCollectionInterval(int intervalMinutes) {
         Topic topic = existingTopic();
         when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
@@ -380,6 +383,21 @@ class TopicCommandServiceImplTest {
         assertFalse(result.isActive());
         assertNull(result.getNextScheduledAt());
         assertFalse(topic.isActive());
+    }
+
+    @Test
+    void reactivatingAManualOnlyTopicKeepsAutomaticCollectionDisabled() {
+        TopicReqDTO.Activation request = new TopicReqDTO.Activation();
+        request.setActive(true);
+        Topic topic = Topic.builder().id(1L).name("수동 수집")
+                .batchSize(100).intervalMinutes(0).active(false).build();
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+
+        TopicResDTO.Activated result = topicCommandService.updateActivation(1L, request);
+
+        assertTrue(result.isActive());
+        assertNull(result.getNextScheduledAt());
+        assertEquals(0, topic.getIntervalMinutes());
     }
 
     @Test

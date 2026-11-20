@@ -113,16 +113,16 @@ export interface TopicDetail extends Topic {
 
 export interface TopicSurgeKeyword {
   keyword: string
-  issueCount: number
-  previousIssueCount: number
-  deltaIssueCount: number
+  articleCount: number
+  previousArticleCount: number
+  deltaArticleCount: number
   zScore: number | null
   burst: boolean
 }
 
 export interface TopicRelatedKeyword {
   keyword: string
-  issueCount: number
+  articleCount: number
   sharePercent: number
 }
 

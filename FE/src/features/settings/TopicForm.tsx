@@ -170,7 +170,9 @@ export function TopicForm() {
             ))}
           </select>
           <p className="hint">
-            새 기사를 확인하는 주기입니다.
+            {form.intervalMinutes === '0'
+              ? '자동으로 수집하지 않습니다. 필요할 때 수동으로 수집할 수 있습니다.'
+              : '새 기사를 확인하는 주기입니다.'}
           </p>
         </div>
         {sources.isPending && <TopicSourcesSkeleton />}

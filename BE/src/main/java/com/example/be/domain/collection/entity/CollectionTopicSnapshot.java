@@ -15,7 +15,7 @@ public record CollectionTopicSnapshot(
         @Schema(description = "접수 당시 선택 키워드. 없으면 []") List<String> optionalKeywords,
         @Schema(description = "접수 당시 제외 키워드. 원문에서 수집 키워드로 강조하지 않음. 없으면 []") List<String> excludedKeywords,
         @Schema(description = "접수 당시 주제의 회당 수집 기사 상한", example = "100") int batchSize,
-        @Schema(description = "접수 당시 수집 주기(분)", example = "1440") int intervalMinutes,
+        @Schema(description = "접수 당시 수집 주기(분). 0이면 정기 수집 안 함", example = "1440") int intervalMinutes,
         @Schema(description = "접수 당시 선택한 공시 회사. 미선택/과거 기록은 null", nullable = true) DartModels.Company dartCompany) {
     public CollectionTopicSnapshot {
         requiredKeywords = requiredKeywords == null ? List.of() : List.copyOf(requiredKeywords);

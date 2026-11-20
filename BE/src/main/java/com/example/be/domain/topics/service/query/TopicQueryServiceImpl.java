@@ -1,5 +1,6 @@
 package com.example.be.domain.topics.service.query;
 
+import com.example.be.domain.collection.cluster.DeterministicEntityExtractor;
 import com.example.be.domain.topics.converter.TopicConverter;
 import com.example.be.domain.topics.dto.res.TopicResDTO;
 import com.example.be.domain.topics.entity.Topic;
@@ -124,6 +125,10 @@ public class TopicQueryServiceImpl implements TopicQueryService {
         addConfigured(result, topic.getRequiredKeywords());
         addConfigured(result, topic.getOptionalKeywords());
         addConfigured(result, topic.getExcludedKeywords());
+        // Article extraction uses canonical organization names (for example NVIDIA -> 엔비디아).
+        // Exclude the same aliases here so a configured company does not reappear as a new keyword.
+        new DeterministicEntityExtractor().canonicalizeEntities(List.copyOf(result)).stream()
+                .map(this::normalizeKeyword).forEach(result::add);
         return result;
     }
 
