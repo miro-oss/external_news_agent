@@ -15,6 +15,8 @@ import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -206,6 +208,53 @@ class CollectionRunCreatorTest {
         assertEquals(startedAt.plusDays(7), saved.getValue().getQueuedAt());
         assertEquals(10080, saved.getValue().getItems().getFirst().getTopicSnapshot().intervalMinutes());
         assertEquals(startedAt, topic.getLastCollectedAt());
+    }
+
+    @Test
+    void manualOnlyTopicIsNeverScheduledUntilAPeriodicIntervalIsRestored() {
+        var target = target(1L);
+        Topic topic = target.getTopic();
+        topic.update(topic.getName(), topic.getQueryText(), topic.getRequiredKeywords(),
+                topic.getOptionalKeywords(), topic.getExcludedKeywords(), topic.getBatchSize(), 0, true);
+        var now = LocalDateTime.of(2026, 11, 20, 10, 0);
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+
+        assertFalse(creator.createScheduled(1L, AgentPlan.FREE, now));
+        topic.recordCollectionStartedAt(now.minusDays(30));
+        assertFalse(creator.createScheduled(1L, AgentPlan.FREE, now));
+        verify(topicRepository, never()).findActiveCollectionTargetsByTopicIds(any());
+        verify(runRepository, never()).saveAndFlush(any());
+
+        topic.update(topic.getName(), topic.getQueryText(), topic.getRequiredKeywords(),
+                topic.getOptionalKeywords(), topic.getExcludedKeywords(), topic.getBatchSize(), 60, true);
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target));
+        when(runRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        assertTrue(creator.createScheduled(1L, AgentPlan.FREE, now));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void manualOnlyTopicCanStillBeCollectedManually(boolean selectTopic) {
+        var target = target(1L);
+        Topic topic = target.getTopic();
+        topic.update(topic.getName(), topic.getQueryText(), topic.getRequiredKeywords(),
+                topic.getOptionalKeywords(), topic.getExcludedKeywords(), topic.getBatchSize(), 0, true);
+        if (selectTopic) {
+            when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target));
+        } else {
+            when(topicRepository.findActiveCollectionTargets()).thenReturn(List.of(target));
+        }
+        when(runRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+
+        var result = creator.create(request(selectTopic ? List.of(1L) : null), "manual-only", AgentPlan.FREE);
+
+        assertEquals(GeneralSuccessCode.COLLECTION_QUEUED, result.successCode());
+        assertEquals(List.of(1L), result.response().getTargetTopicIds());
+        ArgumentCaptor<CollectionRun> saved = ArgumentCaptor.forClass(CollectionRun.class);
+        verify(runRepository).saveAndFlush(saved.capture());
+        assertEquals(TriggerType.MANUAL, saved.getValue().getTriggerType());
+        assertEquals(0, saved.getValue().getItems().getFirst().getTopicSnapshot().intervalMinutes());
+        assertTrue(topic.isActive());
     }
 
     @Test

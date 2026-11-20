@@ -1,4 +1,5 @@
 export const COLLECTION_INTERVALS = [
+  { value: '0', label: '정기 수집 안 함' },
   { value: '60', label: '1시간마다' },
   { value: '720', label: '12시간마다' },
   { value: '1440', label: '24시간마다' },
@@ -11,6 +12,7 @@ export function isCollectionInterval(value: string) {
 
 /** 기존에 저장된 사용자 지정 주기도 그대로 읽을 수 있게 표시한다. */
 export function formatCollectionInterval(minutes: number) {
+  if (minutes === 0) return '정기 수집 안 함'
   if (minutes === 10080) return '1주마다'
   if (minutes === 1440) return '24시간마다'
   if (minutes % 1440 === 0) return `${minutes / 1440}일마다`

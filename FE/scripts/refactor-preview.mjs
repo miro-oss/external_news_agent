@@ -32,7 +32,7 @@ const initialTopics = [
     { id: 29, name: 'HBM 시장 동향', queryText: 'HBM 반도체', requiredKeywords: ['HBM'], optionalKeywords: ['SK하이닉스', '삼성전자'], excludedKeywords: ['광고'], active: true },
     { id: 25, name: 'AI 데이터센터 투자', queryText: 'AI 데이터센터', requiredKeywords: ['데이터센터'], optionalKeywords: [], excludedKeywords: ['광고'], active: true },
     { id: 9, name: '중지한 디스플레이 주제', queryText: '디스플레이', requiredKeywords: ['디스플레이'], optionalKeywords: [], excludedKeywords: [], active: false },
-].map((t, i) => ({ ...t, batchSize: 100, intervalMinutes: 1440, linkedSourceCount: 2, lastCollectedAt: '2026-09-08T09:20:00+09:00', surgeKeywords: [{ keyword: 'HBM4', issueCount: i === 0 ? 53 : 51, previousIssueCount: 2, deltaIssueCount: i === 0 ? 51 : 49, zScore: 3.1, burst: true }, { keyword: '첨단 패키징', issueCount: 52, previousIssueCount: 2, deltaIssueCount: 50, zScore: 1.7, burst: false }], relatedKeywords: [{ keyword: '마이크론', issueCount: 4, sharePercent: 57 }] }));
+].map((t, i) => ({ ...t, batchSize: 100, intervalMinutes: 1440, linkedSourceCount: 2, lastCollectedAt: '2026-09-08T09:20:00+09:00', surgeKeywords: [{ keyword: 'HBM4', articleCount: i === 0 ? 53 : 51, previousArticleCount: 2, deltaArticleCount: i === 0 ? 51 : 49, zScore: 3.1, burst: true }, { keyword: '첨단 패키징', articleCount: 52, previousArticleCount: 2, deltaArticleCount: 50, zScore: 1.7, burst: false }], relatedKeywords: [{ keyword: '마이크론', articleCount: 4, sharePercent: 57 }] }));
 const initialProposals = initialTopics.map((t, i) => ({ id: 100 + i, topicId: t.id, topicName: t.name, collectionRunId: 148, status: 'PENDING', summary: i === 0 ? '수출 규제와 공급망 재편에 반복 등장한 키워드를 추가하는 제안입니다.' : '최근 수집한 기사에서 반복 등장한 키워드를 추가합니다.', createdAt: '2026-09-08T09:30:00+09:00', reviewedAt: null, currentKeywords: { requiredKeywords: t.requiredKeywords, optionalKeywords: t.optionalKeywords, excludedKeywords: t.excludedKeywords }, changes: [{ bucket: 'OPTIONAL', action: 'ADD', keyword: i === 0 ? '첨단 패키징' : 'HBM4', reason: '최근 수집에서 반복 등장했으며 현재 주제와 관련성이 높습니다.' }, { bucket: 'EXCLUDED', action: 'ADD', keyword: '채용 공고', reason: '분석 대상에서 채용 안내를 제외합니다.' }] }));
 const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/refactor-report.json', import.meta.url), 'utf8'));
 const now = () => new Date().toISOString();
@@ -627,9 +627,9 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             }
                             else {
                                 if (topicScheduleSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }, 500);
-                                if ((body.intervalMinutes != null && ![60, 720, 1440].includes(body.intervalMinutes))
+                                if ((body.intervalMinutes != null && ![0, 60, 720, 1440, 10080].includes(body.intervalMinutes))
                                     || (body.batchSize != null && (!Number.isInteger(body.batchSize) || body.batchSize < 1 || body.batchSize > 300)))
-                                    return json(res, { isSuccess: false, code: 'TOPIC400', message: 'batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다.', result: {} }, 400);
+                                    return json(res, { isSuccess: false, code: 'TOPIC400', message: 'batchSize는 1 이상 300 이하, intervalMinutes는 0, 60, 720, 1440, 10080 중 하나여야 합니다.', result: {} }, 400);
                                 for (const field of Object.keys(topicFields(topic)))
                                     if (field !== 'id' && body[field] != null) topic[field] = structuredClone(body[field]);
                                 return json(res, { isSuccess: true, code: 'COMMON200', message: '수정되었습니다.', result: topicFields(topic) });

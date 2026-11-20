@@ -87,7 +87,7 @@ public class TopicSourceResDTO {
         @Schema(description = "1회 수집 건수", example = "100")
         private final int batchSize;
 
-        @Schema(description = "자동 수집 주기(분)", example = "60")
+        @Schema(description = "자동 수집 주기(분). 0이면 정기 수집 안 함", example = "60")
         private final int intervalMinutes;
 
         @Schema(description = "조합의 활성 여부. 주제와 소스가 모두 활성일 때만 true", example = "true")

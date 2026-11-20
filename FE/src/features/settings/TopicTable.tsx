@@ -16,11 +16,11 @@ function formatSignedDelta(value: number) {
 
 function surgeKeywordTitle(keyword: TopicSurgeKeyword) {
   const burstDescription = keyword.burst ? ' · 평소보다 크게 늘었어요' : ''
-  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 전주 대비 ${formatSignedDelta(keyword.deltaIssueCount)}${burstDescription}`
+  return `${keyword.keyword} · 직전 7일 ${keyword.previousArticleCount}건 → 최근 7일 ${keyword.articleCount}건 · ${formatSignedDelta(keyword.deltaArticleCount)}건${burstDescription}`
 }
 
 function relatedKeywordTitle(keyword: TopicRelatedKeyword) {
-  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 주제 내 비중 ${keyword.sharePercent.toFixed(0)}%`
+  return `${keyword.keyword} · 최근 7일 ${keyword.articleCount}건 · 수집 기사 중 ${keyword.sharePercent.toFixed(0)}%`
 }
 
 export function TopicTable() {
@@ -80,8 +80,8 @@ export function TopicTable() {
               <tr>
                 <th>주제</th>
                 <th>검색 키워드</th>
-                <th title="최근 7일에 전주보다 언급이 늘어난 키워드입니다. 숫자는 관련 주제 묶음의 증가 건수입니다.">지난주 대비 증가</th>
-                <th title="최근 7일에 함께 등장한 키워드와 비중입니다.">연관 키워드</th>
+                <th title="최근 7일과 직전 7일에 수집한 기사에서 키워드가 등장한 기사 수의 차이입니다.">지난주 대비 증가</th>
+                <th title="최근 7일 수집 기사에서 찾은 키워드와, 전체 수집 기사 중 해당 키워드가 등장한 비율입니다.">연관 키워드</th>
                 <th>수집 일정</th>
                 <th>보고서 알림</th>
                 <th>관리</th>
@@ -94,8 +94,8 @@ export function TopicTable() {
                     tabIndex={topic.name.length > 24 ? 0 : undefined}>{topic.name}</strong></td>
                   <td>{topic.queryText ?? '—'}</td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.surgeKeywords ?? []} emptyLabel="—"
-                    renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
-                    isEmphasized={(keyword) => keyword.deltaIssueCount > 50}
+                    renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaArticleCount)}건`}
+                    isEmphasized={(keyword) => keyword.deltaArticleCount > 50}
                     renderTitle={surgeKeywordTitle} /></td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.relatedKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
@@ -117,8 +117,9 @@ export function TopicTable() {
       )}
       {topics.data.content.length > 0 && (
         <div className="hint topic-signal-help">
-          <p>지난주 대비 증가: 최근 7일의 키워드별 이슈 수가 직전 7일보다 늘어난 수입니다. 같은 사건의 기사들은 하나의 이슈로 셉니다.</p>
-          <p>연관 키워드: 최근 7일 해당 주제에서 함께 등장한 키워드와, 전체 이슈 중 그 키워드가 포함된 비율입니다.</p>
+          <p>지난주 대비 증가: 최근 7일에 키워드가 등장한 기사 수에서 직전 7일의 기사 수를 뺀 값입니다. 키워드에 마우스를 올리면 두 기간의 건수를 볼 수 있습니다.</p>
+          <p>연관 키워드: 최근 7일 수집 기사에서 찾은 키워드와, 전체 수집 기사 중 그 키워드가 등장한 비율입니다.</p>
+          <p>수집 시각 기준으로 본문을 확보한 새 기사·내용이 바뀐 기사를 집계합니다. 같은 기사는 각 기간에서 한 번만 세며, 주제명과 등록한 키워드는 제외합니다.</p>
         </div>
       )}
     </>

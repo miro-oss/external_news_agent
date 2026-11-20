@@ -53,7 +53,7 @@ public class Topic {
      */
     public static final int DEFAULT_BATCH_SIZE = 100;
     public static final int DEFAULT_INTERVAL_MINUTES = 1440;
-    public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440, 10080);
+    public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(0, 60, 720, 1440, 10080);
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 300;
     public static final int MAX_NAME_LENGTH = 200;
@@ -164,9 +164,10 @@ public class Topic {
         this.sources.addAll(sources);
     }
 
-    /** 마지막 자동 수집 시작 시각을 기준으로 다음 실행 시점을 계산한다. */
+    /** 주기가 0이면 수동 수집만 허용하고, 나머지는 마지막 수집 시작 시각으로 만료 여부를 계산한다. */
     public boolean isCollectionDueAt(LocalDateTime now) {
         return active
+                && intervalMinutes > 0
                 && (lastCollectedAt == null || !lastCollectedAt.plusMinutes(intervalMinutes).isAfter(now));
     }
 

@@ -86,6 +86,7 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
             SELECT t.id
             FROM news_topics t
             WHERE t.active_yn = 'Y'
+              AND t.interval_minutes > 0
               AND EXISTS (
                   SELECT 1
                   FROM news_topic_sources ts

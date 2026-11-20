@@ -99,6 +99,23 @@ class TopicQueryServiceImplTest {
     }
 
     @Test
+    void excludesConfiguredOrganizationAliasesBeforeTheDisplayLimit() {
+        Topic configured = Topic.builder().id(1L).name("NVIDIA").requiredKeywords(List.of("MICRON"))
+                .optionalKeywords(List.of()).excludedKeywords(List.of()).active(true).build();
+        when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(configured), PageRequest.of(0, 20), 1L));
+        when(topicRepository.countLinkedSources(List.of(1L))).thenReturn(List.of());
+        when(topicTrendJdbcRepository.findSnapshots(any(), any(LocalDateTime.class)))
+                .thenReturn(Map.of(1L, new TopicTrendJdbcRepository.TopicTrendSnapshot(
+                        List.of(trendKeyword("엔비디아"), trendKeyword("마이크론"), trendKeyword("HBM4")),
+                        List.of(relatedKeyword("엔비디아"), relatedKeyword("마이크론"), relatedKeyword("HBM4")))));
+
+        var result = topicQueryService.getTopics(null, null, 0, 20).getContent().getFirst();
+        assertEquals(List.of("HBM4"), result.getSurgeKeywords().stream().map(TopicResDTO.KeywordTrend::getKeyword).toList());
+        assertEquals(List.of("HBM4"), result.getRelatedKeywords().stream().map(TopicResDTO.RelatedKeyword::getKeyword).toList());
+    }
+
+    @Test
     void getTopicsSkipsCountQueryWhenPageIsEmpty() {
         when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0L));

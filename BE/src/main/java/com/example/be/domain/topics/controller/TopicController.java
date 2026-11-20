@@ -45,8 +45,9 @@ public class TopicController {
                     새 수집 주제를 등록합니다. 설정 화면의 주제 등록 폼에 대응합니다.
                     sourceIds를 함께 보내면 등록과 동시에 소스 연결까지 끝납니다.
                     주제명은 중복할 수 없고, SEARCH 소스를 연결하려면 queryText가 필요합니다.
-                    수집 주기는 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 선택하며,
+                    수집 주기는 정기 수집 안 함(0), 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 선택하며,
                     생략하면 24시간(1440분)마다 수집합니다.
+                    0으로 저장해도 활성 주제의 수동 수집은 사용할 수 있습니다.
                     dartCorpCode로 공시 회사 한 곳을 선택할 수 있으며 생략/null은 미연결입니다.
                     """
     )
@@ -123,7 +124,8 @@ public class TopicController {
             description = """
                     등록된 수집 주제를 최근 등록순(ID 내림차순)으로 정렬한 뒤 페이지 단위로 조회합니다.
                     실제 수집은 주제에 연결된 소스와의 조합으로 실행되므로 연결된 소스 수를 함께 내려줍니다.
-                    최근 7일 기사×이슈 관측을 SQL로 집계한 급상승 키워드와 연관 키워드도 포함합니다.
+                    최근 168시간과 직전 168시간의 NEW/UPDATED 수집 기사에서 직접 추출한 증가 키워드와 연관 키워드도 포함합니다.
+                    본문 확보 기사만 포함하며 같은 기사의 반복 관측은 주제별 각 구간에서 한 번 셉니다.
                     """
     )
     @ApiResponses({
@@ -153,9 +155,9 @@ public class TopicController {
                                     "surgeKeywords": [
                                       {
                                         "keyword": "HBM4",
-                                        "issueCount": 4,
-                                        "previousIssueCount": 1,
-                                        "deltaIssueCount": 3,
+                                        "articleCount": 4,
+                                        "previousArticleCount": 1,
+                                        "deltaArticleCount": 3,
                                         "zScore": 2.87,
                                         "burst": true
                                       }
@@ -163,7 +165,7 @@ public class TopicController {
                                     "relatedKeywords": [
                                       {
                                         "keyword": "엔비디아",
-                                        "issueCount": 3,
+                                        "articleCount": 3,
                                         "sharePercent": 60.00
                                       }
                                     ]
@@ -271,8 +273,9 @@ public class TopicController {
             description = """
                     수집 주제를 부분 수정합니다. dartCorpCode 생략은 회사 유지, null은 해제, 8자리 문자열은 회사 교체입니다. 전달한 필드만 반영됩니다.
                     키워드 배열은 부분 병합이 아니라 전체 교체입니다. 빈 배열을 보내면 해당 필터가 사라집니다.
-                    intervalMinutes는 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 하나이며,
-                    바꾸면 스케줄러가 다음 실행부터 바뀐 주기를 적용합니다.
+                    intervalMinutes는 정기 수집 안 함(0), 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 하나이며,
+                    바꾸면 스케줄러가 이후 접수하는 실행부터 적용합니다. 0으로 저장해도 활성 주제의 수동 수집은 사용할 수 있습니다.
+                    이미 대기 중이거나 실행 중인 수집은 접수 당시 조건을 유지합니다.
                     """
     )
     @ApiResponses({
@@ -305,7 +308,7 @@ public class TopicController {
                             {
                               "isSuccess": false,
                               "code": "TOPIC400",
-                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440, 10080 중 하나여야 합니다.",
+                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 0, 60, 720, 1440, 10080 중 하나여야 합니다.",
                               "result": {}
                             }
                             """))),

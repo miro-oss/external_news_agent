@@ -7,7 +7,8 @@ import { topicScheduleOptions, saveTopicScheduleOptions } from '../src/api/topic
 const topic = { id: 31, name: '반도체', queryText: '반도체 공급망', requiredKeywords: ['반도체'],
   optionalKeywords: ['공급망'], excludedKeywords: ['채용'], batchSize: 100, intervalMinutes: 1440, active: false }
 const summary = { ...topic, linkedSourceCount: 2, lastCollectedAt: null,
-  surgeKeywords: [{ keyword: 'HBM4', deltaIssueCount: 3 }], relatedKeywords: [] }
+  surgeKeywords: [{ keyword: 'HBM4', articleCount: 5, previousArticleCount: 2, deltaArticleCount: 3, zScore: 1.5, burst: false }],
+  relatedKeywords: [{ keyword: '패키징', articleCount: 4, sharePercent: 40 }] }
 const page = content => ({ content, page: 0, size: 100, totalElements: content.length, totalPages: 1, hasNext: false })
 const response = result => new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '수정되었습니다.', result }))
 
@@ -50,6 +51,50 @@ test('weekly schedule save sends only intervalMinutes and updates cached rows wi
   assert.deepEqual(combinations.content.map(row => row.intervalMinutes), [10080, 10080, 1440])
   assert.equal(combinations.content[0].active, false)
   assert.equal(combinations.combinationCount, 3)
+})
+
+for (const active of [true, false]) test(`manual-only schedule survives saving and reloading, then restores a recurring interval without changing active=${active}`, async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const original = { ...summary, active }
+  const other = { ...summary, id: 29, name: 'AI', active }
+  const detail = { ...topic, active, sources: [{ id: 1, name: '검색' }], lastCollectedAt: null }
+  const combination = { topicId: topic.id, sourceId: 1, active, intervalMinutes: 1440, lastCollectedCount: 12 }
+  const otherCombination = { ...combination, topicId: other.id }
+  for (const filter of ['all', active]) client.setQueryData(['topics', filter], page([original, other]))
+  client.setQueryData(topicScheduleOptions(topic.id).queryKey, detail)
+  client.setQueryData(['topic-sources'], { ...page([combination, otherCombination]), combinationCount: 2 })
+  const requests = []
+  let stored = { ...detail }
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = init.body ? JSON.parse(init.body) : undefined
+    requests.push({ url, method: init.method, body })
+    if (init.method === 'PATCH') {
+      stored = { ...stored, intervalMinutes: body.intervalMinutes }
+      return response({ ...topic, active, intervalMinutes: stored.intervalMinutes })
+    }
+    return response(stored)
+  })
+  for (const intervalMinutes of [0, 720]) {
+    await client.getMutationCache().build(client, saveTopicScheduleOptions(client, topic.id))
+      .execute({ intervalMinutes, active: !active, requiredKeywords: [] })
+    for (const filter of ['all', active]) {
+      assert.deepEqual(client.getQueryData(['topics', filter]), page([{ ...original, intervalMinutes }, other]))
+      assert.equal(client.getQueryState(['topics', filter]).isInvalidated, true)
+    }
+    assert.deepEqual(client.getQueryData(topicScheduleOptions(topic.id).queryKey), { ...detail, intervalMinutes })
+    assert.deepEqual(client.getQueryData(['topic-sources']), {
+      ...page([{ ...combination, intervalMinutes }, otherCombination]), combinationCount: 2,
+    })
+    const reloaded = await client.fetchQuery(topicScheduleOptions(topic.id))
+    assert.deepEqual(reloaded, { ...detail, intervalMinutes })
+  }
+  assert.deepEqual(requests, [
+    { url: '/api/news/topics/31', method: 'PATCH', body: { intervalMinutes: 0 } },
+    { url: '/api/news/topics/31', method: undefined, body: undefined },
+    { url: '/api/news/topics/31', method: 'PATCH', body: { intervalMinutes: 720 } },
+    { url: '/api/news/topics/31', method: undefined, body: undefined },
+  ])
 })
 
 test('a delayed older query cannot overwrite a saved schedule', async context => {
