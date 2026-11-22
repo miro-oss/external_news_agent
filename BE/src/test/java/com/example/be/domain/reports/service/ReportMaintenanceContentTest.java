@@ -164,6 +164,83 @@ class ReportMaintenanceContentTest {
     }
 
     @Test
+    void regenerationPrefersSavedDetailWordingForMatchingEvidenceAndKeepsNewEvents() {
+        var detail = new ImportantEvent("저장된 상세 제목", "저장된 상세 본문", "저장된 상세 의미", List.of(4L, 7L));
+        var rewritten = new ImportantEvent("모델 상세 제목", "모델 상세 본문", "모델 상세 의미", List.of(7L, 4L));
+        var unrelated = event("새로 확인된 사건", 7L);
+        var original = content(List.of(first, second, tokenCost, detail, selected));
+        var generated = document(content(List.of(first, second, tokenCost, rewritten, unrelated)),
+                List.of(1L, 2L, 3L, 4L, 7L), List.of(5L, 6L));
+
+        for (String promotion : Arrays.asList(null, selected.title())) {
+            var result = ReportMaintenanceContent.retainAndPromote(generated, original, view(original), promotion, 2);
+            var events = result.structuredContent().importantEvents();
+            assertSame(detail, events.stream().filter(event -> event.title().equals(detail.title())).findFirst().orElseThrow());
+            assertTrue(events.contains(unrelated));
+            assertFalse(events.contains(rewritten));
+            assertTrue(result.markdownBody().contains(detail.summaryKo()));
+            assertFalse(result.markdownBody().contains(rewritten.summaryKo()));
+            assertTrue(result.reflectedFindingIds().containsAll(List.of(4L, 7L)));
+        }
+    }
+
+    @Test
+    void regenerationWithoutNewPromotionKeepsTheAlreadyEditedBriefing() {
+        var edited = ReportMaintenanceContent.promote(saved(), view(saved()), selected.title(), 2);
+        var generated = document(content(List.of(tokenCost, second, first, fourth)),
+                List.of(3L, 2L, 1L, 4L), List.of(5L, 6L));
+
+        var result = ReportMaintenanceContent.retainAndPromote(generated, edited, view(edited), null, 0);
+
+        assertEquals(edited.importantEvents(), result.structuredContent().importantEvents());
+        assertEquals(List.of(first.title(), second.title(), selected.title()),
+                ReportBriefing.from(view(result.structuredContent())).items().stream().map(ReportBriefing.Item::title).toList());
+        assertEquals(List.of(first.summaryKo(), second.summaryKo(), selected.summaryKo()),
+                result.structuredContent().executiveSummary());
+    }
+
+    @Test
+    void regenerationPreservesDistinctSavedDetailsWithOverlappingOrIdenticalBriefingEvidence() {
+        var sharesFirst = event("첫 브리핑과 일부 근거를 공유하는 별도 사건", 1L, 4L);
+        var sharesSelected = event("선택 기사와 일부 근거를 공유하는 별도 사건", 4L, 5L);
+        var sameEvidence = event("동일 근거의 별도 저장 사건", 1L);
+        var original = content(List.of(first, second, tokenCost, sharesFirst, sharesSelected, sameEvidence, selected));
+        var rewritten = new ImportantEvent("모델이 바꾼 선택 기사", "새 본문", "", List.of(6L, 5L));
+        var newOverlap = event("일부 근거가 겹치는 신규 사건", 1L, 7L);
+        var unrelated = event("다른 근거의 신규 사건", 7L);
+        var generated = document(content(List.of(first, second, rewritten, newOverlap, unrelated)),
+                List.of(1L, 2L, 5L, 6L, 7L), List.of(3L, 4L));
+
+        var result = ReportMaintenanceContent.retainAndPromote(generated, original, view(original), selected.title(), 2);
+        var events = result.structuredContent().importantEvents();
+
+        assertEquals(List.of(first, second, selected), events.subList(0, 3));
+        assertTrue(events.containsAll(original.importantEvents()));
+        assertTrue(events.containsAll(List.of(newOverlap, unrelated)));
+        assertEquals(original.importantEvents().size() + 2, events.size());
+        assertFalse(events.contains(rewritten));
+        assertTrue(result.reflectedFindingIds().containsAll(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L)));
+        assertTrue(result.excludedFindingIds().isEmpty());
+    }
+
+    @Test
+    void regenerationWithoutPromotionOnlyRestoresSupportedVisibleBriefingEvents() {
+        var longDetail = new ImportantEvent("긴 상세 사건", "가".repeat(181), "", List.of(7L));
+        var hidden = event("읽기 화면에서 제외된 사건", 4L);
+        var original = content(List.of(longDetail, hidden, first, second, tokenCost, selected));
+        var visible = content(List.of(longDetail, first, second, tokenCost, selected));
+        var generated = document(content(List.of(selected, tokenCost)), List.of(3L, 5L, 6L), List.of(1L, 2L, 4L));
+
+        var result = ReportMaintenanceContent.retainAndPromote(generated, original, view(visible, Set.of(2L)), null, 0);
+        var events = result.structuredContent().importantEvents();
+
+        assertEquals(List.of(first, tokenCost, selected), events.subList(0, 3));
+        assertTrue(events.contains(longDetail));
+        assertFalse(events.contains(hidden));
+        assertFalse(events.contains(second));
+    }
+
+    @Test
     void regenerationRejectsUnknownAndFeedbackExcludedEvidence() {
         var unknown = document(content(List.of(event("없는 근거", 99L))), List.of(99L), List.of());
         assertThrows(IllegalStateException.class,

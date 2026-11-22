@@ -57,40 +57,30 @@ final class ReportMaintenanceContent {
                 || !allowed.containsAll(generated.reflectedFindingIds()))
             throw new IllegalStateException("생성 결과가 현재 허용된 보고서 근거를 벗어났습니다.");
         var events = new ArrayList<>(content.importantEvents());
+        var visible = originalView.readingContent().structuredContent();
         if (original != null) {
-            var visible = originalView.readingContent().structuredContent();
-            for (var saved : original.importantEvents()) {
-                if (visible == null || !visible.importantEvents().contains(saved)
-                        || !supported(saved.sourceFindingIds(), allowed)) continue;
-                boolean explicitlySelected = exactTitle != null && saved.title().equals(exactTitle);
-                if (explicitlySelected) {
-                    // Keep the specifically requested saved claim, even if the model rephrased its source.
-                    events.removeIf(event -> event.title().equals(exactTitle)
-                            || !Collections.disjoint(event.sourceFindingIds(), saved.sourceFindingIds()));
-                    events.add(saved);
-                } else if (events.stream().noneMatch(event -> Set.copyOf(event.sourceFindingIds())
-                        .equals(Set.copyOf(saved.sourceFindingIds())))) events.add(saved);
-            }
+            var savedEvents = original.importantEvents().stream()
+                    .filter(saved -> visible != null && visible.importantEvents().contains(saved)
+                            && supported(saved.sourceFindingIds(), allowed)).toList();
+            // Match replacements only among generated events. Distinct saved events may share evidence.
+            events.removeIf(event -> savedEvents.stream().anyMatch(saved ->
+                    Set.copyOf(event.sourceFindingIds()).equals(Set.copyOf(saved.sourceFindingIds()))));
+            events.addAll(savedEvents);
         }
         var watches = new ArrayList<>(content.watchItems());
         if (original != null) for (var saved : original.watchItems()) {
             if (supported(saved.sourceFindingIds(), allowed) && !watches.contains(saved)) watches.add(saved);
         }
+        var edited = exactTitle == null ? original : promote(original, originalView, exactTitle, briefingIndex);
+        if (edited != null && visible != null) {
+            // Preserve the saved briefing even when regeneration does not request another promotion.
+            var requestedBriefing = edited.importantEvents().stream().filter(visible.importantEvents()::contains)
+                    .filter(event -> supported(event.sourceFindingIds(), allowed) && fits(event)).limit(3).toList();
+            events.removeIf(requestedBriefing::contains);
+            events.addAll(0, requestedBriefing);
+        }
         var merged = rebuild(new ReportContent(content.executiveSummary(), content.importantEvents(), watches,
                 content.sourceNotes()), events);
-        if (exactTitle != null) {
-            // Regeneration must retain the user's entire edited briefing, not just the promoted
-            // slot: a model ranking could otherwise put the displaced story back in slots 1 or 2.
-            var edited = promote(original, originalView, exactTitle, briefingIndex);
-            var visible = originalView.readingContent().structuredContent().importantEvents();
-            var requestedBriefing = edited.importantEvents().stream().filter(visible::contains)
-                    .filter(event -> supported(event.sourceFindingIds(), allowed) && fits(event)).limit(3).toList();
-            events.removeIf(event -> requestedBriefing.stream().anyMatch(saved ->
-                    event.title().equals(saved.title())
-                            || !Collections.disjoint(event.sourceFindingIds(), saved.sourceFindingIds())));
-            events.addAll(0, requestedBriefing);
-            merged = rebuild(merged, events);
-        }
         var reflected = new java.util.LinkedHashSet<>(generated.reflectedFindingIds());
         merged.importantEvents().forEach(event -> reflected.addAll(event.sourceFindingIds()));
         merged.watchItems().forEach(item -> reflected.addAll(item.sourceFindingIds()));
