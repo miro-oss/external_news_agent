@@ -31,6 +31,7 @@ import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.AnalysisMetadata;
 import com.example.be.domain.analysis.service.AnalysisResult;
 import com.example.be.domain.analysis.service.AnalysisContext;
+import com.example.be.domain.analysis.service.AnalysisRecoveryKeys;
 import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
 import com.example.be.domain.analysis.service.FindingReuseCache;
 import com.example.be.domain.analysis.service.FindingWriter;
@@ -102,7 +103,11 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             return stubAnalyzer.analyze(article);
         }
 
-        ReservationSelection selection = reserve(runId, article.getId(), context.plan());
+        ReservationSelection selection = context.recovering()
+                ? new ReservationSelection(context.plan(), quotaService.reserve(runId,
+                    AnalysisRecoveryKeys.article(runId, article.getId(), context.recoveryId()),
+                    AgentTask.ANALYZE, context.plan()))
+                : reserve(runId, article.getId(), context.plan());
         if (selection == null) {
             return stubAnalyzer.analyze(article);
         }
@@ -118,7 +123,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             result = toAnalysisResult(response);
             memberStances = validateIssueComparison(context, response);
             result = verifyEvidence(
-                    runId, article.getId(), selection.plan(), result, false);
+                    runId, article.getId(), selection.plan(), result, false, context.recoveryId());
         } catch (RuntimeException exception) {
             AgentClientException clientException = exception instanceof AgentClientException value
                     ? value
@@ -148,6 +153,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
         recordSuccessSafely(runId, article.getId(), request, response, startedAt);
         completeSuccessSafely(selection.reservation(), response.meta().credits());
+        // Recovery is limited to its explicitly selected article. Do not expand work or change issue/watch state.
+        if (context.recovering()) return result;
         result = selfCritiqueSafely(context, selection.plan(), result, response.crossSource());
         if (applyIssueComparisonSafely(context, response, memberStances)) {
             promoteConflictCandidateSafely(context, response, memberStances);
@@ -928,6 +935,15 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                           AgentPlan plan,
                                           AnalysisResult result,
                                           boolean promotion) {
+        return verifyEvidence(runId, articleId, plan, result, promotion, null);
+    }
+
+    private AnalysisResult verifyEvidence(Long runId,
+                                          Long articleId,
+                                          AgentPlan plan,
+                                          AnalysisResult result,
+                                          boolean promotion,
+                                          String recoveryId) {
         if (result.analysisSource() != AnalysisSource.LLM) {
             return result;
         }
@@ -936,7 +952,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             return withVerifiedSections(result, unsupportedSections(result.analysisSections()));
         }
 
-        String idempotencyKey = "run:" + runId + ":article:" + articleId
+        String idempotencyKey = (recoveryId == null ? "run:" + runId + ":article:" + articleId
+                : AnalysisRecoveryKeys.article(runId, articleId, recoveryId))
                 + (promotion ? ":promotion" : "") + ":evidence";
         QuotaReservation evidenceReservation;
         try {

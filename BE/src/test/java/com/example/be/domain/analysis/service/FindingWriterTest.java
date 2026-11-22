@@ -29,6 +29,8 @@ import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
@@ -37,11 +39,15 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FindingWriterTest {
@@ -109,6 +115,77 @@ class FindingWriterTest {
         assertEquals(ChangeType.UPDATED, existing.getChangeType());
         assertEquals("b".repeat(64), existing.getAnalysisInputHash());
         verify(findingRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void recoveryUpgradesStubInPlaceWithoutIssueOrWatchSideEffects() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        Finding existing = Finding.builder().id(55L).run(run).article(article)
+                .analysisSource(AnalysisSource.STUB).summary("임시 요약")
+                .changeType(ChangeType.NEW).build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.of(existing));
+
+        assertTrue(writer.recover(42L, 10L, ChangeType.NEW, "b".repeat(64),
+                recoveryResult(AnalysisSource.LLM, "grounded")));
+
+        assertEquals(55L, existing.getId());
+        assertSame(run, existing.getRun());
+        assertSame(article, existing.getArticle());
+        assertEquals(AnalysisSource.LLM, existing.getAnalysisSource());
+        assertEquals("복구한 요약", existing.getSummary());
+        assertEquals(ChangeType.NEW, existing.getChangeType());
+        assertEquals("b".repeat(64), existing.getAnalysisInputHash());
+        verify(findingRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(issueArticleRepository, watchRepository, projectionService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = AnalysisSource.class, names = {"LLM", "REUSED"})
+    void recoveryDoesNotOverwriteAConcurrentSuccessfulFinding(AnalysisSource source) {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        var analyzedAt = java.time.LocalDateTime.of(2026, 11, 23, 8, 0);
+        Finding existing = Finding.builder().id(55L).run(run).article(article)
+                .analysisSource(source).summary("이미 성공한 요약")
+                .analysisInputHash("a".repeat(64)).analyzedAt(analyzedAt).build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.of(existing));
+
+        assertFalse(writer.recover(42L, 10L, ChangeType.UPDATED, "b".repeat(64),
+                recoveryResult(AnalysisSource.LLM, "grounded")));
+
+        assertEquals("이미 성공한 요약", existing.getSummary());
+        assertEquals(source, existing.getAnalysisSource());
+        assertEquals("a".repeat(64), existing.getAnalysisInputHash());
+        assertEquals(analyzedAt, existing.getAnalyzedAt());
+        InOrder order = inOrder(articleRepository, findingRepository);
+        order.verify(articleRepository).findByIdForUpdate(10L);
+        order.verify(findingRepository).findByRunIdAndArticleId(42L, 10L);
+        verify(findingRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(issueArticleRepository, watchRepository, projectionService);
+    }
+
+    @Test
+    void recoveryRejectsFallbackAndUnsupportedResultsBeforeWriting() {
+        assertThrows(IllegalArgumentException.class, () -> writer.recover(
+                42L, 10L, ChangeType.NEW, "b".repeat(64), recoveryResult(AnalysisSource.STUB, "grounded")));
+        assertThrows(IllegalArgumentException.class, () -> writer.recover(
+                42L, 10L, ChangeType.NEW, "b".repeat(64), recoveryResult(AnalysisSource.LLM, "ungrounded")));
+
+        verifyNoInteractions(runRepository, articleRepository, findingRepository,
+                issueArticleRepository, watchRepository, projectionService);
+    }
+
+    private static AnalysisResult recoveryResult(AnalysisSource source, String groundedness) {
+        return new AnalysisResult("복구한 요약", List.of(new FindingKeyPoint("확인한 주장", List.of(0), groundedness)),
+                null, Sentiment.NEUTRAL,
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH),
+                Relevance.IMPORTANT, "기술", List.of(), source, List.of(), FindingEntities.empty(),
+                List.of(), AnalysisMetadata.empty());
     }
 
     @Test

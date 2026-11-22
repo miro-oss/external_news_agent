@@ -214,6 +214,13 @@ public class NewsReport {
 
     public void recordStructuredContent(ReportContent content) { this.structuredContent = content; }
 
+    /** A manual reading-order edit does not change generation provenance or frozen evidence. */
+    public void reviseReadingContent(String markdownBody, ReportContent content) {
+        if (reportStatus == ReportStatus.PENDING) throw new IllegalStateException("생성 중인 보고서는 편집할 수 없습니다.");
+        this.markdownBody = markdownBody;
+        this.structuredContent = content;
+    }
+
     @Convert(converter = ReportIssueCompanySnapshotConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "report_issue_company_snapshot")

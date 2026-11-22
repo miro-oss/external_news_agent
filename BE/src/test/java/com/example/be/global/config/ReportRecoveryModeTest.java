@@ -66,4 +66,18 @@ class ReportRecoveryModeTest {
             assertEquals(1, context.getBeansOfType(CollectionRunReaper.class).size());
         });
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2310", "", "invalid"})
+    void repairConfigurationIsolatesBackgroundWorkEvenWhenInvalidOrMixed(String reportId) {
+        runner.withPropertyValues(ReportRecoveryMode.REPAIR_REPORT_ID_PROPERTY + "=" + reportId,
+                        ReportRecoveryMode.RUN_IDS_PROPERTY + "=99",
+                        ReportRecoveryMode.SNAPSHOT_REPORT_IDS_PROPERTY + "=17")
+                .run(context -> {
+                    assertTrue(context.getBeansOfType(ReportRecoveryRunner.class).isEmpty());
+                    assertTrue(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class).isEmpty());
+                    assertTrue(context.getBeansOfType(TaskScheduler.class).isEmpty());
+                    assertTrue(context.getBeansOfType(CollectionRunReaper.class).isEmpty());
+                });
+    }
 }
