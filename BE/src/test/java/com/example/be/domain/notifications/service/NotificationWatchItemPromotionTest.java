@@ -68,7 +68,7 @@ class NotificationWatchItemPromotionTest {
         var delivered = personalized.render(report, email, RECIPIENT);
         for (String html : List.of(preview, delivered.chunks().getFirst())) {
             assertEquals(List.of("기존 사건 1", "기존 사건 2", "올린 관찰 1"), cardTitles(html));
-            assertEquals(List.of("1. 기존 사건 1", "2. 기존 사건 2"), briefingTitles(html));
+            assertEquals(List.of("1. 기존 사건 1", "2. 기존 사건 2", "3. 기존 사건 3"), briefingTitles(html));
             assertTrue(html.contains("공식 발표가 나오면 공급 일정을 확인합니다."));
             assertTrue(html.contains("https://example.com/source-201"));
         }
@@ -86,7 +86,7 @@ class NotificationWatchItemPromotionTest {
         report.promoteWatchItem(1);
         String html = renderer.render(report, email).chunks().getFirst();
         assertEquals(List.of("기존 사건 1", "기존 사건 2", "올린 관찰 3", "올린 관찰 1", "올린 관찰 2"), cardTitles(html));
-        assertEquals(List.of("1. 기존 사건 1", "2. 기존 사건 2"), briefingTitles(html));
+        assertEquals(List.of("1. 기존 사건 1", "2. 기존 사건 2", "3. 기존 사건 3"), briefingTitles(html));
     }
 
     @Test void selectionAlreadyWithinDefaultTwoIsNotRepeated() {

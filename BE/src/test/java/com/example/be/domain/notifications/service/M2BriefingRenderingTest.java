@@ -108,7 +108,7 @@ class M2BriefingRenderingTest {
     }
 
     @Test
-    void emailKeepsOnlyTwoBriefingTitlesWhilePdfRetainsEventAndWatchDetails() throws Exception {
+    void emailKeepsThreeBriefingTitlesWhilePdfRetainsEventAndWatchDetails() throws Exception {
         var findings = java.util.stream.LongStream.rangeClosed(11, 15).mapToObj(this::finding).toList();
         var events = findings.stream().map(finding -> new ReportContent.ImportantEvent(
                 "핵심 사건 " + finding.getId(), "사건의 확인된 요약 " + finding.getId(),
@@ -122,7 +122,8 @@ class M2BriefingRenderingTest {
         assertTrue(text.contains("핵심 사건 11"));
         assertTrue(text.contains("핵심 사건 12"));
         assertFalse(text.contains("먼저 확인할 조건"));
-        assertFalse(text.contains("핵심 사건 13"));
+        assertTrue(text.contains("핵심 사건 13"));
+        assertFalse(text.contains("핵심 사건 14"));
         assertFalse(text.contains("추가로 확인할 조건"));
         assertFalse(text.contains("추가 의미"));
         assertFalse(text.contains("나머지 4개 항목은 첨부 PDF"));
@@ -133,6 +134,55 @@ class M2BriefingRenderingTest {
             assertTrue(full.contains("추가로 확인할 조건"));
             assertTrue(full.contains("추가 의미 15"));
         }
+    }
+
+    @Test
+    void savedThirdRiemannBriefingAppearsInEmailAndPdfBeforeTokenCostDetail() throws Exception {
+        var titles = List.of("피지컬AI 앞세워 자립 나선 NC AI",
+                "Formally verifying agent-written full-stack web apps with PDD Kit",
+                "수학의 종말…167년 난제 '리만가설' 푼 클로드", "토큰값 반값인데 AI 청구서는 더 커졌다");
+        var findings = java.util.stream.LongStream.rangeClosed(11, 14).mapToObj(this::finding).toList();
+        var events = java.util.stream.IntStream.range(0, titles.size()).mapToObj(index ->
+                new ReportContent.ImportantEvent(titles.get(index), "저장된 기사 요약 " + index, "", List.of(11L + index))).toList();
+        var content = new ReportContent(List.of(), events, List.of(), List.of());
+        var view = new ReportEventFeedbackProjection.View(findings, new ReportReadingContent("", content), false);
+        String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
+        var dom = Jsoup.parse(html);
+
+        assertEquals(List.of("1. " + titles.get(0), "2. " + titles.get(1), "3. " + titles.get(2)),
+                dom.select("td[bgcolor='#e8f3ff'] h3").eachText());
+        assertEquals(titles.subList(0, 2), dom.select("td[bgcolor='#f9fafb'] h2").eachText(),
+                "The email detail-card budget remains two");
+        try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
+            var firstPage = new PDFTextStripper();
+            firstPage.setEndPage(1);
+            String first = firstPage.getText(document).replaceAll("\\s", "");
+            var normalized = titles.stream().map(title -> title.replaceAll("\\s", "")).toList();
+            assertTrue(first.contains("1." + normalized.get(0)));
+            assertTrue(first.contains("2." + normalized.get(1)));
+            assertTrue(first.contains("3." + normalized.get(2)));
+            assertTrue(first.indexOf(normalized.get(0)) < first.indexOf(normalized.get(1)));
+            assertTrue(first.indexOf(normalized.get(1)) < first.indexOf(normalized.get(2)));
+            assertFalse(first.contains(normalized.get(3)));
+            var detail = new PDFTextStripper();
+            detail.setStartPage(2);
+            String detailText = detail.getText(document).replaceAll("\\s", "");
+            assertTrue(detailText.contains(normalized.get(2)));
+            assertTrue(detailText.contains(normalized.get(3)), "The displaced story remains in detailed events");
+        }
+        var excludedView = view.suppress(report, Set.of(13L));
+        assertEquals(List.of(titles.get(0), titles.get(1), titles.get(3)),
+                NotificationBriefingSection.reportTitles(excludedView), "Three slots must not restore excluded evidence");
+        assertSame(content, view.readingContent().structuredContent());
+    }
+
+    @Test
+    void legacyArticleTitleFallbackAlsoStopsAtThreeAndHonorsEvidenceExclusions() {
+        var findings = java.util.stream.LongStream.rangeClosed(11, 15).mapToObj(id -> finding(id, "기사 " + id)).toList();
+        var view = new ReportEventFeedbackProjection.View(findings, new ReportReadingContent("legacy", null),
+                true, Set.of(12L));
+        assertEquals(List.of(findings.get(0).getArticle().getTitle(), findings.get(2).getArticle().getTitle(),
+                findings.get(3).getArticle().getTitle()), NotificationBriefingSection.reportTitles(view));
     }
 
     @Test
@@ -198,7 +248,7 @@ class M2BriefingRenderingTest {
     }
 
     @Test
-    void deliveryNormalizesLegacyArticleFallbackAndWatchTitlesBeforeSelectingTwo() {
+    void deliveryNormalizesLegacyArticleFallbackAndWatchTitlesBeforeSelection() {
         String decoded = "\"".repeat(12) + " 연구 & 개발";
         String encoded = "&amp;quot;".repeat(12) + " 연구 &amp;amp; 개발";
         var legacyFindings = List.of(finding(11, encoded), finding(12, decoded), finding(13, "다음 제목"));
@@ -293,9 +343,9 @@ class M2BriefingRenderingTest {
         String html = email.render(report, channel(ChannelType.EMAIL, 3500), view, null).chunks().getFirst();
         var titleBox = Jsoup.parse(html).selectFirst("td[bgcolor='#e8f3ff']");
         assertNotNull(titleBox);
-        assertEquals(List.of("1. 후속 확인 · 첫 후속 시험 예정", "2. 후속 확인 · 두 번째 결과 확인"), titleBox.select("h3").eachText());
+        assertEquals(List.of("1. 후속 확인 · 첫 후속 시험 예정", "2. 후속 확인 · 두 번째 결과 확인", "3. 후속 확인 · 세 번째 관찰"), titleBox.select("h3").eachText());
         assertFalse(titleBox.text().contains("같은 근거 반복"));
-        assertFalse(titleBox.text().contains("세 번째 관찰"));
+        assertTrue(titleBox.text().contains("세 번째 관찰"));
         assertTrue(titleBox.select("p").isEmpty());
         try (var document = Loader.loadPDF(pdf.render(report, view, null))) {
             var stripper = new PDFTextStripper();
@@ -306,7 +356,7 @@ class M2BriefingRenderingTest {
             assertTrue(firstPage.contains("후속 확인 · 두 번째 결과 확인"));
             assertFalse(firstPage.contains("같은 근거 반복"));
             assertFalse(firstPage.contains("제외한 핵심 이슈"));
-            assertFalse(firstPage.contains("세 번째 관찰"));
+            assertTrue(firstPage.contains("세 번째 관찰"));
         }
         assertEquals(1, content.importantEvents().size());
         assertEquals(5, content.watchItems().size());
