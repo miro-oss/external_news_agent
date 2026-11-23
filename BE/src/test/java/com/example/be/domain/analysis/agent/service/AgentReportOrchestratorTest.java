@@ -91,6 +91,25 @@ class AgentReportOrchestratorTest {
                 .thenReturn(reservation);
     }
 
+    @Test
+    void explicitRecoveryUsesSeparateQuotaAndProviderIdempotencyNamespace() {
+        String key = "recovery:nov23-attempt1:run:42:report";
+        var recovery = new QuotaReservation(2L, 42L, key, AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
+        when(quotaService.reserve(42L, key, AgentTask.REPORT, AgentPlan.FREE)).thenReturn(recovery);
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        var result = orchestrator.generateRecovery(run(),
+                List.of(finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "복구된 분석")),
+                LocalDateTime.of(2026, 11, 23, 9, 0), "nov23-attempt1");
+
+        assertEquals(ReportStatus.GENERATED, result.status());
+        var request = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(request.capture());
+        assertEquals(key, request.getValue().idempotencyKey());
+        verify(quotaService).completeSuccess(recovery, BigDecimal.ZERO);
+        verify(quotaService, never()).reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE);
+    }
+
     @ParameterizedTest
     @CsvSource({"true,true", "false,true", "true,false", "false,false"})
     void fallbackUsesCapturedRunScopeForSummaryAndEventSelection(boolean disabled, boolean technical) {

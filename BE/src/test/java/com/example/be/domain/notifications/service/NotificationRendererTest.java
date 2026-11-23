@@ -493,10 +493,14 @@ class NotificationRendererTest {
             var headings = org.jsoup.Jsoup.parse(body).select(type == ChannelType.EMAIL ? "h2" : "b")
                     .eachText().stream().skip(1).toList();
             assertEquals(expectedHeadings, headings, type + " with " + eventCount + " valid events");
+            if (type == ChannelType.EMAIL) {
+                assertEquals(List.of("1. 사건 1", "2. 사건 2", "3. 사건 3"),
+                        org.jsoup.Jsoup.parse(body).select("td[bgcolor='#e8f3ff'] h3").eachText());
+            }
             assertFalse(body.contains("근거 없는 사건"));
             assertFalse(body.contains("표시하면 안 되는 내용"));
             for (int i = expectedCount + 1; i <= eventCount; i++) {
-                assertFalse(body.contains("사건 " + i));
+                if (i > 3) assertFalse(body.contains("사건 " + i));
                 assertFalse(body.contains("사건 내용 " + i));
             }
         }

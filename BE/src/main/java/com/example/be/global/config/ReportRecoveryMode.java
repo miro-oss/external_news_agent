@@ -9,6 +9,7 @@ public final class ReportRecoveryMode {
 
     public static final String RUN_IDS_PROPERTY = "news.reports.recovery.run-ids";
     public static final String SNAPSHOT_REPORT_IDS_PROPERTY = "news.reports.snapshot-recovery.report-ids";
+    public static final String REPAIR_REPORT_ID_PROPERTY = "news.reports.repair.report-id";
 
     private ReportRecoveryMode() {
     }
@@ -18,7 +19,8 @@ public final class ReportRecoveryMode {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
             return context.getEnvironment().containsProperty(RUN_IDS_PROPERTY)
-                    && !context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY);
+                    && !context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY)
+                    && !context.getEnvironment().containsProperty(REPAIR_REPORT_ID_PROPERTY);
         }
     }
 
@@ -27,14 +29,23 @@ public final class ReportRecoveryMode {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
             return !context.getEnvironment().containsProperty(RUN_IDS_PROPERTY)
-                    && !context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY);
+                    && !context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY)
+                    && !context.getEnvironment().containsProperty(REPAIR_REPORT_ID_PROPERTY);
         }
     }
 
     public static final class SnapshotEnabled implements Condition {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
-            return context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY);
+            return context.getEnvironment().containsProperty(SNAPSHOT_REPORT_IDS_PROPERTY)
+                    && !context.getEnvironment().containsProperty(REPAIR_REPORT_ID_PROPERTY);
+        }
+    }
+
+    public static final class RepairEnabled implements Condition {
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            return context.getEnvironment().containsProperty(REPAIR_REPORT_ID_PROPERTY);
         }
     }
 }

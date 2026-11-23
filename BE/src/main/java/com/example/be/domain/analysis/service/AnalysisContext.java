@@ -16,7 +16,8 @@ public record AnalysisContext(
         IssueAnalysisContext issue,
         boolean selfCritiqueEligible,
         Topic topicOverride,
-        List<AgentFeedbackExample> feedbackExamples
+        List<AgentFeedbackExample> feedbackExamples,
+        String recoveryId
 ) {
 
     public AnalysisContext {
@@ -25,7 +26,16 @@ public record AnalysisContext(
         Objects.requireNonNull(plan, "plan은 필수입니다.");
         issue = issue == null ? IssueAnalysisContext.empty() : issue;
         feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+        if (recoveryId != null) AnalysisRecoveryKeys.validate(recoveryId);
     }
+
+    public AnalysisContext(Long runId, Article article, AgentPlan plan, IssueAnalysisContext issue,
+                           boolean selfCritiqueEligible, Topic topicOverride,
+                           List<AgentFeedbackExample> feedbackExamples) {
+        this(runId, article, plan, issue, selfCritiqueEligible, topicOverride, feedbackExamples, null);
+    }
+
+    public boolean recovering() { return recoveryId != null; }
 
     public AnalysisContext(Long runId, Article article, AgentPlan plan, IssueAnalysisContext issue,
                            boolean selfCritiqueEligible, Topic topicOverride) {
@@ -54,6 +64,6 @@ public record AnalysisContext(
     }
 
     public AnalysisContext withArticle(Article target) {
-        return new AnalysisContext(runId, target, plan, issue, selfCritiqueEligible, topicOverride, feedbackExamples);
+        return new AnalysisContext(runId, target, plan, issue, selfCritiqueEligible, topicOverride, feedbackExamples, recoveryId);
     }
 }

@@ -63,8 +63,8 @@ final class NotificationBriefingSection {
                 .filter(finding -> finding.getArticle() != null)
                 .map(finding -> NotificationRenderer.prose(finding.getArticle().getTitle()))
                 .filter(NotificationBriefingSection::shortTitle)
-                .distinct().limit(2).toList();
-        return ReportBriefing.titles(view, 2, NotificationRenderer::prose);
+                .distinct().limit(3).toList();
+        return ReportBriefing.titles(view, 3, NotificationRenderer::prose);
     }
 
     static String emptyReportMessage(ReportEventFeedbackProjection.View view) {

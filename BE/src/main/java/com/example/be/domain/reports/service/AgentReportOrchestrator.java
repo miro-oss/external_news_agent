@@ -98,6 +98,16 @@ public class AgentReportOrchestrator {
                 sourceStats, generatedAt);
     }
 
+    /** Explicit maintenance attempts must not reuse an already settled normal REPORT reservation. */
+    public ReportDocument generateRecovery(CollectionRun run, List<Finding> findings,
+                                           LocalDateTime generatedAt, String recoveryId) {
+        if (recoveryId == null || !recoveryId.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}"))
+            throw new IllegalArgumentException("올바른 보고서 복구 ID가 필요합니다.");
+        List<Finding> representatives = representativeFindings(relevancePolicy.filterFindings(findings));
+        return generate(new GenerationContext(run, null, null, recoveryId), representatives,
+                sourceStats(run, representatives), generatedAt);
+    }
+
     private ReportDocument generate(GenerationContext context, List<Finding> representativeFindings,
                                     ReportSourceStats sourceStats, LocalDateTime generatedAt) {
         representativeFindings = representativeFindings.stream().filter(ReportFindings::hasFullText).toList();
@@ -227,12 +237,13 @@ public class AgentReportOrchestrator {
         AgentPlan requestedPlan = context.daily() ? planService.resolveRunPlan(null) : context.run().getLlmPlan();
         String idempotencyKey = context.daily() ? "daily-report:" + context.reportId()
                 : "run:" + context.runId() + ":report";
+        if (context.recoveryId() != null) idempotencyKey = "recovery:" + context.recoveryId() + ":" + idempotencyKey;
         try {
             return new ReservationSelection(
                     requestedPlan,
                     quotaService.reserve(context.runId(), idempotencyKey, AgentTask.REPORT, requestedPlan));
         } catch (QuotaExceededException exhausted) {
-            if (requestedPlan == AgentPlan.PAID
+            if (context.recoveryId() == null && requestedPlan == AgentPlan.PAID
                     && planService.paidExhaustedAction() == PaidExhaustedAction.FALLBACK_FREE) {
                 try {
                     QuotaReservation reservation = quotaService.reserve(
@@ -633,7 +644,10 @@ public class AgentReportOrchestrator {
         }
     }
 
-    private record GenerationContext(CollectionRun run, Long reportId, LocalDate date) {
+    private record GenerationContext(CollectionRun run, Long reportId, LocalDate date, String recoveryId) {
+        GenerationContext(CollectionRun run, Long reportId, LocalDate date) {
+            this(run, reportId, date, null);
+        }
         boolean daily() {
             return reportId != null;
         }

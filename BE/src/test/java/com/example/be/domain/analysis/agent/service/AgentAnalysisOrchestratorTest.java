@@ -13,6 +13,7 @@ import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
+import com.example.be.domain.analysis.agent.quota.DuplicateQuotaReservationException;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.entity.Relevance;
@@ -50,12 +51,14 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -111,6 +114,54 @@ class AgentAnalysisOrchestratorTest {
         assertEquals("HBM4", captor.getValue().topic().queryText());
         assertEquals(List.of("HBM4"), captor.getValue().topic().requiredKeywords());
         assertEquals(List.of("삼성전자"), captor.getValue().topic().optionalKeywords());
+    }
+
+    @Test
+    void recoveryUsesSeparateAnalysisAndEvidenceAttemptsWithoutExpandingIssueWork() {
+        String key = "recovery:nov23_1:run:42:article:10";
+        QuotaReservation recovery = new QuotaReservation(
+                31L, 42L, key, AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
+        QuotaReservation evidence = new QuotaReservation(
+                32L, 42L, key + ":evidence", AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
+        when(quotaService.reserve(42L, key, AgentTask.ANALYZE, AgentPlan.FREE)).thenReturn(recovery);
+        when(quotaService.reserve(42L, key + ":evidence", AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE))
+                .thenReturn(evidence);
+        when(client.analyze(any())).thenReturn(highSensitivityIssueResponse());
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(42L, representative, AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true, null, List.of(), "nov23_1");
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals(AnalysisSource.LLM, result.analysisSource());
+        assertEquals("grounded", result.keyPoints().getFirst().groundedness());
+        ArgumentCaptor<AgentAnalyzeRequest> analysis = ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        ArgumentCaptor<AgentEvidenceRequest> verification = ArgumentCaptor.forClass(AgentEvidenceRequest.class);
+        verify(client).analyze(analysis.capture());
+        verify(client).verifyEvidence(verification.capture());
+        assertEquals(key, analysis.getValue().idempotencyKey());
+        assertEquals(key + ":evidence", verification.getValue().idempotencyKey());
+        verify(quotaService, never()).reserve(42L, reservation.idempotencyKey(), AgentTask.ANALYZE, AgentPlan.FREE);
+        verify(quotaService, never()).reserve(42L, evidenceReservation.idempotencyKey(), AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE);
+        verify(client, never()).selfCritique(any());
+        verifyNoInteractions(crossSourceWriter, findingWriter);
+        verify(recorder).recordSuccess(eq(42L), eq(10L), eq(analysis.getValue()), any(), any(LocalDateTime.class));
+        verify(quotaService).completeSuccess(recovery, BigDecimal.ZERO, true);
+    }
+
+    @Test
+    void repeatedRecoveryIdNeverRepeatsAnAlreadyReservedProviderCall() {
+        String key = "recovery:nov23_1:run:42:article:10";
+        when(quotaService.reserve(42L, key, AgentTask.ANALYZE, AgentPlan.FREE))
+                .thenThrow(new DuplicateQuotaReservationException(key, "RELEASED"));
+        AnalysisContext context = new AnalysisContext(42L, article(), AgentPlan.FREE,
+                null, false, null, List.of(), "nov23_1");
+
+        assertThrows(DuplicateQuotaReservationException.class, () -> orchestrator.analyze(context));
+
+        verifyNoInteractions(client, recorder, stub, crossSourceWriter, findingWriter);
     }
 
     @Test

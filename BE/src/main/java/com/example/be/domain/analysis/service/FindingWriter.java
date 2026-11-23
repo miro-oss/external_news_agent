@@ -1,6 +1,8 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.cluster.BreakingNewsDetector;
 import com.example.be.domain.collection.entity.Article;
@@ -67,19 +69,39 @@ public class FindingWriter {
         write(runId, articleId, changeType, analysisInputHash, result, true);
     }
 
+    /** Replace only a failed result, keeping its identity and never producing issue/watch side effects. */
+    @Transactional
+    public boolean recover(Long runId, Long articleId, ChangeType changeType,
+                           String analysisInputHash, AnalysisResult result) {
+        if (!AnalysisSource.isLlmDerived(result.analysisSource())
+                || FindingKeyPoint.effectivePoints(result.keyPoints(), result.analysisSections()).stream()
+                    .noneMatch(FindingEvidencePolicy::isSupported))
+            throw new IllegalArgumentException("복구 결과에 검증된 LLM 근거가 없습니다.");
+        return write(runId, articleId, changeType, analysisInputHash, result, true, true);
+    }
+
     private void write(Long runId,
                        Long articleId,
                        ChangeType changeType,
                        String analysisInputHash,
                        AnalysisResult result,
                        boolean replaceExisting) {
+        write(runId, articleId, changeType, analysisInputHash, result, replaceExisting, false);
+    }
+
+    private boolean write(Long runId, Long articleId, ChangeType changeType,
+                          String analysisInputHash, AnalysisResult result,
+                          boolean replaceExisting, boolean recoveryOnly) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
         // 동일 기사 행을 잠근 뒤 존재 여부를 확인해 동시 호출도 하나의 finding만 남긴다.
         Article article = articleRepository.findByIdForUpdate(articleId).orElseThrow();
         Optional<Finding> existing = findingRepository.findByRunIdAndArticleId(runId, articleId);
         if (existing.isPresent() && !replaceExisting) {
-            return;
+            return false;
         }
+        // Recheck under the article lock: a concurrent successful analysis always wins.
+        if (recoveryOnly && existing.isPresent()
+                && existing.orElseThrow().getAnalysisSource() != AnalysisSource.STUB) return false;
 
         Finding analyzed = Finding.builder()
                 .run(run)
@@ -114,6 +136,7 @@ public class FindingWriter {
         } else {
             findingRepository.save(analyzed);
         }
+        if (recoveryOnly) return true;
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Set<Long> affectedIssueIds = new LinkedHashSet<>();
         issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).forEach(membership -> {
@@ -147,6 +170,7 @@ public class FindingWriter {
             }
         });
         affectedIssueIds.forEach(projectionService::recalculate);
+        return true;
     }
 
     @Transactional
